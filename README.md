@@ -48,4 +48,6 @@ Apos iniciar, acesse a interface web e configure:
 
 ## Licenca
 
-MIT
+GNU GPL v3 — Este software e livre. Voce pode usar, modificar e redistribuir,
+mas QUALQUER trabalho derivado DEVE ser distribuido sob a mesma licenca.
+Nada feito com este codigo pode ser fechado ou proprietario.
