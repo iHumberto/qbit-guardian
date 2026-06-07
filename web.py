@@ -59,6 +59,25 @@ def api_health():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/trigger", methods=["POST"])
+def api_trigger():
+    """Forca uma verificacao imediata (acionamento manual ou webhook)."""
+    import guardian
+    try:
+        guardian.load_config()
+        torrents = guardian.get_torrents()
+        current = {t["hash"] for t in torrents}
+        new = [t for t in torrents if t["hash"] not in guardian._processed]
+        count = len(new)
+        for t in new:
+            guardian.analyze_torrent(t)
+            guardian._processed.add(t["hash"])
+        guardian._processed.intersection_update(current)
+        return jsonify({"status": "ok", "checked": len(torrents), "new": count})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 # ── Entrypoint ─────────────────────────────────────────────────────────
 
 def start_web(host="0.0.0.0", port=5000):

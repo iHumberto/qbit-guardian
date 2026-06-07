@@ -317,17 +317,20 @@ def analyze_torrent(torrent):
 
     # Otimizar prioridades
     optimized = False
+    prio_media = g.get("priority_media", 7)
+    prio_norm  = g.get("priority_normal", 1)
+    prio_skip  = g.get("priority_skip", 0)
     for f in files:
-        ext = os.path.splitext(f["name"])[1].lower()
-        file_id = f.get("index", f.get("id"))
-        if ext in valid_ext:
-            set_file_priority(hash_, file_id, 7)
-            optimized = True
-        elif ext in {".nfo", ".jpg", ".png", ".txt", ".srt", ".sub", ".idx"}:
-            set_file_priority(hash_, file_id, 1)
-        else:
-            set_file_priority(hash_, file_id, 0)
-
+            ext = os.path.splitext(f["name"])[1].lower()
+            file_id = f.get("index", f.get("id"))
+            if ext in valid_ext:
+                set_file_priority(hash_, file_id, prio_media)
+                optimized = True
+            elif ext in {".nfo", ".jpg", ".png", ".txt", ".srt", ".sub", ".idx"}:
+                set_file_priority(hash_, file_id, prio_norm)
+            else:
+                set_file_priority(hash_, file_id, prio_skip)
+                log.info(f"[{name}] Desativado → {f['name']}")
     if optimized:
         send_notification("⚡ Torrent Otimizado",
                           f"Nome: {name}\nArquivos de midia priorizados.")

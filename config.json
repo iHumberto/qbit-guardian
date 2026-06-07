@@ -23,7 +23,10 @@
     "stalled_unit": "hours",
     "remove_no_seeds": false,
     "no_seeds_time": 0,
-    "no_seeds_unit": "hours"
+    "no_seeds_unit": "hours",
+    "priority_media": 7,
+    "priority_normal": 1,
+    "priority_skip": 0
   },
   "notifications": {
     "apprise_url": ""

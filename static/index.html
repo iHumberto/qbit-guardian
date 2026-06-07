@@ -86,6 +86,22 @@
 
     <hr>
 
+    <div class="field" style="margin-bottom:12px">
+      <label>Prioridade para arquivos de midia (0-7)</label>
+      <input id="priority_media" type="number" min="0" max="7" placeholder="7">
+      <span style="font-size:0.75rem;color:#888">7 = maxima, 0 = nao baixar</span>
+    </div>
+    <div class="field" style="margin-bottom:12px">
+      <label>Prioridade para arquivos auxiliares (.nfo, .srt, .jpg)</label>
+      <input id="priority_normal" type="number" min="0" max="7" placeholder="1">
+    </div>
+    <div class="field" style="margin-bottom:12px">
+      <label>Prioridade para outros arquivos</label>
+      <input id="priority_skip" type="number" min="0" max="7" placeholder="0">
+    </div>
+
+    <hr>
+
     <div class="checkbox-row">
       <input type="checkbox" id="remove_stalled">
       <label for="remove_stalled">Remover torrents parados (stalled) ha mais de</label>
@@ -153,6 +169,9 @@ async function loadConfig() {
     setVal('remove_no_seeds', c.guardian.remove_no_seeds);
     setVal('no_seeds_time', c.guardian.no_seeds_time);
     setVal('no_seeds_unit', c.guardian.no_seeds_unit);
+    setVal('priority_media', c.guardian.priority_media ?? 7);
+    setVal('priority_normal', c.guardian.priority_normal ?? 1);
+    setVal('priority_skip', c.guardian.priority_skip ?? 0);
     setVal('apprise_url', c.notifications.apprise_url);
   } catch(e) {
     toast('Erro ao carregar config: ' + e.message, 'err');
@@ -185,7 +204,10 @@ async function saveConfig() {
       stalled_unit: getVal('stalled_unit'),
       remove_no_seeds: getCheck('remove_no_seeds'),
       no_seeds_time: parseInt(getVal('no_seeds_time')) || 0,
-      no_seeds_unit: getVal('no_seeds_unit')
+      no_seeds_unit: getVal('no_seeds_unit'),
+      priority_media: parseInt(getVal('priority_media')) || 7,
+      priority_normal: parseInt(getVal('priority_normal')) || 1,
+      priority_skip: parseInt(getVal('priority_skip')) || 0
     },
     notifications: {
       apprise_url: getVal('apprise_url')
