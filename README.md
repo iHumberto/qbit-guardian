@@ -1,0 +1,51 @@
+# 🛡️ qbit-guardian
+
+Protege seu qBittorrent contra torrents maliciosos.
+
+Monitora torrents ativos e remove automaticamente arquivos com extensoes perigosas (.exe, .scr, .bat, etc), torrents sem seeds ou parados ha muito tempo. Integra com Sonarr e Radarr para bloquear e disparar nova busca automaticamente.
+
+## Features
+
+- 🔍 Detecta e remove torrents com arquivos perigosos
+- 🎬 Integracao com Radarr (blocklist + re-search)
+- 📺 Integracao com Sonarr (blocklist + re-search com validacao de data de lancamento)
+- 🗑️ Remove torrents stalled ou sem seeds
+- 🔔 Notificacoes via Apprise (Telegram, Discord, etc)
+- ⚡ Otimizacao automatica de prioridades de arquivos
+- 🖥️ Web UI para configuracao
+
+## Quick Start (Docker)
+
+```yaml
+services:
+  qbit-guardian:
+    image: ghcr.io/ihumberto/qbit-guardian:latest
+    container_name: qbit-guardian
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./config.json:/app/config.json
+    restart: unless-stopped
+```
+
+Acesse `http://seu-host:5000` para configurar.
+
+## Configuracao via Web UI
+
+Apos iniciar, acesse a interface web e configure:
+
+- **qBittorrent**: host, porta, API key
+- **Sonarr/Radarr**: hosts, portas, API keys
+- **Extensoes**: validas e perigosas (customizaveis)
+- **Stalled/No-seeds**: tempo limite para remocao
+- **Notificacoes**: Apprise URL
+
+## Variaveis de Ambiente
+
+| Variavel | Padrao | Descricao |
+|----------|--------|-----------|
+| `CONFIG_PATH` | `./config.json` | Caminho do arquivo de config |
+
+## Licenca
+
+MIT

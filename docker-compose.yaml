@@ -1,0 +1,9 @@
+services:
+  qbit-guardian:
+    image: ghcr.io/ihumberto/qbit-guardian:latest
+    container_name: qbit-guardian
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./config.json:/app/config.json
+    restart: unless-stopped

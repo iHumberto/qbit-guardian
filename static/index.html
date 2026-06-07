@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>qbit-guardian</title>
+<style>
+  :root { --bg: #1a1a2e; --card: #16213e; --accent: #e94560; --text: #eee; --input: #0f3460; --border: #533483; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,sans-serif; padding:20px; }
+  .container { max-width:720px; margin:0 auto; }
+  h1 { color:var(--accent); margin-bottom:8px; font-size:1.6rem; }
+  .subtitle { color:#888; margin-bottom:24px; font-size:0.9rem; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:20px; margin-bottom:16px; }
+  .card h2 { font-size:1.1rem; margin-bottom:12px; color:var(--accent); }
+  .row { display:flex; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+  .field { flex:1; min-width:180px; }
+  .field label { display:block; font-size:0.82rem; color:#aaa; margin-bottom:4px; }
+  .field input, .field select, .field textarea { width:100%; padding:8px 10px; background:var(--input); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.9rem; }
+  .field textarea { resize:vertical; min-height:80px; font-family:monospace; }
+  .field input:focus, .field select:focus, .field textarea:focus { outline:none; border-color:var(--accent); }
+  .checkbox-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .checkbox-row input[type=checkbox] { width:auto; accent-color:var(--accent); }
+  .inline { display:flex; gap:8px; align-items:center; }
+  .inline input { width:80px; }
+  .inline select { width:110px; }
+  .btn-row { display:flex; gap:12px; margin-top:20px; }
+  .btn { padding:10px 24px; border:none; border-radius:4px; cursor:pointer; font-size:0.95rem; font-weight:600; }
+  .btn-save { background:var(--accent); color:#fff; }
+  .btn-save:hover { opacity:0.85; }
+  .toast { position:fixed; bottom:20px; right:20px; padding:12px 20px; border-radius:4px; color:#fff; font-size:0.9rem; z-index:99; opacity:0; transition:opacity 0.3s; }
+  .toast.show { opacity:1; }
+  .toast.ok { background:#2ecc71; }
+  .toast.err { background:#e74c3c; }
+  hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🛡️ qbit-guardian</h1>
+  <p class="subtitle">Protege seu qBittorrent contra torrents maliciosos</p>
+
+  <div class="card">
+    <h2>🔗 qBittorrent</h2>
+    <div class="row">
+      <div class="field"><label>Host</label><input id="qbit_host" placeholder="localhost"></div>
+      <div class="field"><label>Porta</label><input id="qbit_port" type="number" placeholder="8080"></div>
+    </div>
+    <div class="field"><label>API Key</label><input id="qbit_api_key" type="password" placeholder="Cole sua QBittorrent API Key aqui"></div>
+  </div>
+
+  <div class="card">
+    <h2>🎬 Radarr</h2>
+    <div class="row">
+      <div class="field"><label>Host</label><input id="radarr_host" placeholder="radarr"></div>
+      <div class="field"><label>Porta</label><input id="radarr_port" type="number" placeholder="7878"></div>
+    </div>
+    <div class="field"><label>API Key</label><input id="radarr_api_key" type="password" placeholder="API Key do Radarr"></div>
+  </div>
+
+  <div class="card">
+    <h2>📺 Sonarr</h2>
+    <div class="row">
+      <div class="field"><label>Host</label><input id="sonarr_host" placeholder="sonarr"></div>
+      <div class="field"><label>Porta</label><input id="sonarr_port" type="number" placeholder="8989"></div>
+    </div>
+    <div class="field"><label>API Key</label><input id="sonarr_api_key" type="password" placeholder="API Key do Sonarr"></div>
+  </div>
+
+  <div class="card">
+    <h2>🛡️ Guardian</h2>
+    <div class="field" style="margin-bottom:12px">
+      <label>Intervalo de verificacao (segundos)</label>
+      <input id="check_interval" type="number" min="10" placeholder="300">
+    </div>
+
+    <div class="field" style="margin-bottom:12px">
+      <label>Extensoes de midia validas (uma por linha)</label>
+      <textarea id="valid_extensions" placeholder=".mkv&#10;.mp4&#10;.avi"></textarea>
+    </div>
+
+    <div class="field" style="margin-bottom:12px">
+      <label>Extensoes perigosas (uma por linha)</label>
+      <textarea id="dangerous_extensions" placeholder=".exe&#10;.scr&#10;.bat&#10;.sh"></textarea>
+    </div>
+
+    <hr>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="remove_stalled">
+      <label for="remove_stalled">Remover torrents parados (stalled) ha mais de</label>
+      <div class="inline">
+        <input type="number" id="stalled_time" min="0" max="999" value="0" placeholder="0">
+        <select id="stalled_unit">
+          <option value="seconds">segundos</option>
+          <option value="minutes">minutos</option>
+          <option value="hours" selected>horas</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="remove_no_seeds">
+      <label for="remove_no_seeds">Remover torrents sem seeds ha mais de</label>
+      <div class="inline">
+        <input type="number" id="no_seeds_time" min="0" max="999" value="0" placeholder="0">
+        <select id="no_seeds_unit">
+          <option value="seconds">segundos</option>
+          <option value="minutes">minutos</option>
+          <option value="hours" selected>horas</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🔔 Notificacoes</h2>
+    <div class="field">
+      <label>Apprise URL (Telegram, Discord, etc)</label>
+      <input id="apprise_url" placeholder="tgram://BOT_TOKEN/CHAT_ID">
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-save" onclick="saveConfig()">💾 Salvar Configuracoes</button>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const API = '/api/config';
+
+async function loadConfig() {
+  try {
+    const r = await fetch(API);
+    const c = await r.json();
+    setVal('qbit_host', c.qbit.host);
+    setVal('qbit_port', c.qbit.port);
+    setVal('qbit_api_key', c.qbit.api_key);
+    setVal('radarr_host', c.radarr.host);
+    setVal('radarr_port', c.radarr.port);
+    setVal('radarr_api_key', c.radarr.api_key);
+    setVal('sonarr_host', c.sonarr.host);
+    setVal('sonarr_port', c.sonarr.port);
+    setVal('sonarr_api_key', c.sonarr.api_key);
+    setVal('check_interval', c.guardian.check_interval_seconds);
+    setVal('valid_extensions', (c.guardian.valid_media_extensions||[]).join('\n'));
+    setVal('dangerous_extensions', (c.guardian.dangerous_extensions||[]).join('\n'));
+    setVal('remove_stalled', c.guardian.remove_stalled);
+    setVal('stalled_time', c.guardian.stalled_time);
+    setVal('stalled_unit', c.guardian.stalled_unit);
+    setVal('remove_no_seeds', c.guardian.remove_no_seeds);
+    setVal('no_seeds_time', c.guardian.no_seeds_time);
+    setVal('no_seeds_unit', c.guardian.no_seeds_unit);
+    setVal('apprise_url', c.notifications.apprise_url);
+  } catch(e) {
+    toast('Erro ao carregar config: ' + e.message, 'err');
+  }
+}
+
+async function saveConfig() {
+  const data = {
+    qbit: {
+      host: getVal('qbit_host'),
+      port: parseInt(getVal('qbit_port')) || 8080,
+      api_key: getVal('qbit_api_key')
+    },
+    sonarr: {
+      host: getVal('sonarr_host'),
+      port: parseInt(getVal('sonarr_port')) || 8989,
+      api_key: getVal('sonarr_api_key')
+    },
+    radarr: {
+      host: getVal('radarr_host'),
+      port: parseInt(getVal('radarr_port')) || 7878,
+      api_key: getVal('radarr_api_key')
+    },
+    guardian: {
+      check_interval_seconds: parseInt(getVal('check_interval')) || 300,
+      valid_media_extensions: getVal('valid_extensions').split('\n').map(s=>s.trim()).filter(s=>s),
+      dangerous_extensions: getVal('dangerous_extensions').split('\n').map(s=>s.trim()).filter(s=>s),
+      remove_stalled: getCheck('remove_stalled'),
+      stalled_time: parseInt(getVal('stalled_time')) || 0,
+      stalled_unit: getVal('stalled_unit'),
+      remove_no_seeds: getCheck('remove_no_seeds'),
+      no_seeds_time: parseInt(getVal('no_seeds_time')) || 0,
+      no_seeds_unit: getVal('no_seeds_unit')
+    },
+    notifications: {
+      apprise_url: getVal('apprise_url')
+    }
+  };
+
+  try {
+    const r = await fetch(API, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+    if (r.ok) toast('Configuracoes salvas!', 'ok');
+    else { const e = await r.json(); toast('Erro: ' + e.error, 'err'); }
+  } catch(e) {
+    toast('Erro: ' + e.message, 'err');
+  }
+}
+
+function getVal(id) { const el = document.getElementById(id); return el.type==='checkbox' ? el.checked : el.value; }
+function setVal(id, val) { const el = document.getElementById(id); if (el.type==='checkbox') el.checked = !!val; else el.value = val ?? ''; }
+function getCheck(id) { return document.getElementById(id).checked; }
+
+function toast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast ' + type + ' show';
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+loadConfig();
+</script>
+</body>
+</html>

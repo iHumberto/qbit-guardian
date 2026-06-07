@@ -1,0 +1,31 @@
+{
+  "qbit": {
+    "host": "localhost",
+    "port": 8080,
+    "api_key": ""
+  },
+  "sonarr": {
+    "host": "",
+    "port": 8989,
+    "api_key": ""
+  },
+  "radarr": {
+    "host": "",
+    "port": 7878,
+    "api_key": ""
+  },
+  "guardian": {
+    "check_interval_seconds": 300,
+    "valid_media_extensions": [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".webm"],
+    "dangerous_extensions": [".exe", ".scr", ".bat", ".cmd", ".vbs", ".js", ".com", ".pif", ".msi", ".dll", ".ps1", ".sh", ".bin"],
+    "remove_stalled": false,
+    "stalled_time": 0,
+    "stalled_unit": "hours",
+    "remove_no_seeds": false,
+    "no_seeds_time": 0,
+    "no_seeds_unit": "hours"
+  },
+  "notifications": {
+    "apprise_url": ""
+  }
+}
