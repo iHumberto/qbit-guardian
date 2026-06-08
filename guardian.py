@@ -351,6 +351,11 @@ def guardian_loop():
 
     cfg = get_config()
     interval = cfg["guardian"].get("check_interval_seconds", 300)
+
+    if interval == 0:
+        log.info("Guardian iniciado em modo webhook (intervalo=0). Aguardando chamadas /api/trigger.")
+        return  # sem loop — so responde a /api/trigger
+
     log.info(f"Guardian iniciado. Intervalo: {interval}s")
 
     while True:

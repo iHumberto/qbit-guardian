@@ -39,6 +39,29 @@ Apos iniciar, acesse a interface web e configure:
 - **Extensoes**: validas e perigosas (customizaveis)
 - **Stalled/No-seeds**: tempo limite para remocao
 - **Notificacoes**: Apprise URL
+- **Prioridades**: Configuravel (0-7, igual escala do qBit)
+- **Modo webhook**: Intervalo = 0 desativa polling, use com script no qBit
+
+## Modos de operacao
+
+### Polling (padrao)
+
+O guardian verifica os torrents a cada N segundos. Configure `check_interval_seconds` na Web UI.
+
+### Webhook (tempo real)
+
+Configure `check_interval_seconds = 0` e adicione o script de webhook no qBittorrent:
+
+**1. No qBittorrent:** Settings > Downloads > Run external program on torrent added
+```
+/scripts/qbit-guardian-hook.sh
+```
+
+**2. Monte o script no container qBit:**
+```yaml
+volumes:
+  - ./scripts/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh
+```
 
 ## Variaveis de Ambiente
 

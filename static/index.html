@@ -70,8 +70,9 @@
   <div class="card">
     <h2>🛡️ Guardian</h2>
     <div class="field" style="margin-bottom:12px">
-      <label>Intervalo de verificacao (segundos)</label>
-      <input id="check_interval" type="number" min="10" placeholder="300">
+      <label>Intervalo de verificacao (segundos, 0 = modo webhook)</label>
+      <input id="check_interval" type="number" min="0" placeholder="300">
+      <span style="font-size:0.75rem;color:#888">0 desativa o polling — use com o script de webhook no qBit</span>
     </div>
 
     <div class="field" style="margin-bottom:12px">
