@@ -60,7 +60,7 @@ Configure `check_interval_seconds = 0` e adicione o script de webhook no qBittor
 **2. Monte o script no container qBit:**
 ```yaml
 volumes:
-  - ./scripts/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh
+  - ./caminho/para/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh
 ```
 
 ## Variaveis de Ambiente
