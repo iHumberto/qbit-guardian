@@ -53,7 +53,7 @@ O guardian verifica os torrents a cada N segundos. Configure `check_interval_sec
 Configure `check_interval_seconds = 0` e adicione o script de webhook no qBittorrent:
 
 **1. No qBittorrent:** Settings > Downloads > Run external program on torrent added
-```bash
+```
 /scripts/qbit-guardian-hook.sh
 ```
 
