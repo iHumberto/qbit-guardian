@@ -1,7 +1,7 @@
 """
 qbit-guardian — Security tests.
 
-Vetores primários: CSRF, XSS, API key exposure, path traversal.
+Vetores primários: CSRF, XSS, API key exposure, path traversal, auth bypass.
 Vetores secundários: race condition, JSON injection.
 Vetores de borda: Unicode, config corrompido.
 
@@ -11,6 +11,7 @@ Run: .venv/bin/python -m pytest test/test_security.py -v
 import json
 import os
 import tempfile
+import base64
 import pytest
 from web import app
 
@@ -42,7 +43,8 @@ def tmp_config():
                 "remove_no_seeds": False, "no_seeds_time": 0, "no_seeds_unit": "hours",
                 "priority_media": 7, "priority_normal": 1, "priority_skip": 0
             },
-            "notifications": {"apprise_url": ""}
+            "notifications": {"apprise_url": ""},
+            "webui": {"user": "", "password": ""}
         }, f)
         tmp_path = f.name
 
@@ -56,6 +58,66 @@ def tmp_config():
     g.CONFIG_PATH = old_gpath
     g._config = None
     os.unlink(tmp_path)
+
+
+# ── Auth ───────────────────────────────────────────────────────────────
+
+class TestAuth:
+    """HTTP Basic Auth na Web UI."""
+
+    AUTH = "Basic " + base64.b64encode(b"admin:secret").decode()
+
+    def _enable_auth(self, tmp_config):
+        with open(tmp_config, "r") as f:
+            cfg = json.load(f)
+        cfg["webui"] = {"user": "admin", "password": "secret"}
+        with open(tmp_config, "w") as f:
+            json.dump(cfg, f)
+
+    def test_auth_disabled_by_default_allows_access(self, client, tmp_config):
+        """Sem user/password configurados, endpoints sao públicos."""
+        r = client.get("/api/config")
+        assert r.status_code == 200
+
+    def test_auth_enabled_blocks_unauthorized(self, client, tmp_config):
+        """Com auth configurada, sem header -> 401."""
+        self._enable_auth(tmp_config)
+        r = client.get("/api/config")
+        assert r.status_code == 401
+        assert "WWW-Authenticate" in r.headers
+
+    def test_auth_wrong_password_returns_401(self, client, tmp_config):
+        """Credenciais erradas -> 401."""
+        self._enable_auth(tmp_config)
+        wrong = "Basic " + base64.b64encode(b"admin:wrong").decode()
+        r = client.get("/api/config", headers={"Authorization": wrong})
+        assert r.status_code == 401
+
+    def test_auth_correct_credentials_returns_200(self, client, tmp_config):
+        """Credenciais corretas -> 200."""
+        self._enable_auth(tmp_config)
+        r = client.get("/api/config", headers={"Authorization": self.AUTH})
+        assert r.status_code == 200
+
+    def test_auth_enabled_blocks_post(self, client, tmp_config):
+        """POST sem auth -> 401."""
+        self._enable_auth(tmp_config)
+        r = client.post("/api/config", json={"qbit": {}})
+        assert r.status_code == 401
+
+    def test_auth_enabled_allows_post_with_credentials(self, client, tmp_config):
+        """POST com auth correta -> 200."""
+        self._enable_auth(tmp_config)
+        r = client.post("/api/config", json={"qbit": {"host": "test", "port": 1, "api_key": "k"}},
+                        headers={"Authorization": self.AUTH})
+        assert r.status_code == 200
+
+    def test_health_is_always_public(self, client, tmp_config):
+        """/api/health nunca requer auth."""
+        self._enable_auth(tmp_config)
+        r = client.get("/api/health")
+        assert r.status_code == 200
+        assert r.json == {"status": "ok"}
 
 
 # ── Vetores primários ──────────────────────────────────────────────────
@@ -83,7 +145,6 @@ class TestXSS:
         assert r.status_code == 200
 
         # Verifica que o script foi salvo literalmente (nao sanitizado pelo server)
-        # O frontend deve escapar na renderizacao — testamos que o server nao rejeita
         with open(tmp_config) as f:
             saved = json.load(f)
         assert "<script>" in saved["guardian"]["dangerous_extensions"][0]
@@ -93,7 +154,6 @@ class TestXSS:
         r = client.get("/")
         assert r.status_code == 200
         html = r.data.decode()
-        # Nao deve ter script inline com dados (alem do codigo legítimo)
         assert "alert(1)" not in html.lower()
 
 
@@ -101,7 +161,7 @@ class TestCSRF:
     """CSRF: falta de token anti-CSRF no POST /api/config."""
 
     def test_post_config_without_csrf_still_works(self, client, tmp_config):
-        """POST sem token CSRF — aceito (API local, sem auth por enquanto)."""
+        """POST sem token CSRF — aceito (API local, auth desabilitada)."""
         r = client.post("/api/config", json={
             "qbit": {"host": "test", "port": 8080, "api_key": "k"},
             "sonarr": {"host": "", "port": 8989, "api_key": ""},
@@ -116,8 +176,7 @@ class TestCSRF:
             },
             "notifications": {"apprise_url": ""}
         })
-        # Currently accepted — this test DOCUMENTS the gap
-        # When CSRF protection is added, this test should be updated to EXPECT rejection
+        # Auth desabilitada -> aceito
         assert r.status_code == 200
 
     def test_invalid_json_rejected(self, client):
@@ -127,28 +186,13 @@ class TestCSRF:
 
 
 class TestConfigIntegrity:
-    """Verifica que config.json mantem integridade."""
+    """Verifica que config.json mantem integridade com deep merge."""
 
-    def test_missing_fields_preserved(self, client, tmp_config):
-        """Campos nao enviados no POST nao devem ser perdidos."""
+    def test_missing_fields_preserved_with_deep_merge(self, client, tmp_config):
+        """Campos nao enviados no POST sao preservados (deep merge)."""
         # Salva config inicial com um valor conhecido
-        with open(tmp_config, "w") as f:
-            json.dump({"qbit": {"host": "keep-me", "port": 8080, "api_key": "k"},
-                       "sonarr": {"host": "", "port": 8989, "api_key": ""},
-                       "radarr": {"host": "", "port": 7878, "api_key": ""},
-                       "guardian": {
-                           "check_interval_seconds": 300,
-                           "valid_media_extensions": [".mkv"],
-                           "dangerous_extensions": [],
-                           "remove_stalled": False, "stalled_time": 0, "stalled_unit": "hours",
-                           "remove_no_seeds": False, "no_seeds_time": 0, "no_seeds_unit": "hours",
-                           "priority_media": 7, "priority_normal": 1, "priority_skip": 0
-                       },
-                       "notifications": {"apprise_url": ""}}, f)
-
-        # POST sem o campo qbit.host
-        r = client.post("/api/config", json={
-            "qbit": {"port": 9090, "api_key": "new-key"},
+        initial = {
+            "qbit": {"host": "keep-me", "port": 8080, "api_key": "k"},
             "sonarr": {"host": "", "port": 8989, "api_key": ""},
             "radarr": {"host": "", "port": 7878, "api_key": ""},
             "guardian": {
@@ -159,16 +203,58 @@ class TestConfigIntegrity:
                 "remove_no_seeds": False, "no_seeds_time": 0, "no_seeds_unit": "hours",
                 "priority_media": 7, "priority_normal": 1, "priority_skip": 0
             },
-            "notifications": {"apprise_url": ""}
+            "notifications": {"apprise_url": ""},
+            "webui": {"user": "", "password": ""}
+        }
+        with open(tmp_config, "w") as f:
+            json.dump(initial, f)
+
+        # POST sem o campo qbit.host
+        r = client.post("/api/config", json={
+            "qbit": {"port": 9090, "api_key": "new-key"}
         })
         assert r.status_code == 200
 
-        # Verifica que qbit.host FOI SOBRESCRITO (comportamento atual: replace total)
-        # Isso e um GAP — o POST substitui o objeto inteiro, nao faz merge
+        # Deep merge: qbit.host deve ser preservado, port e api_key atualizados
         with open(tmp_config) as f:
             saved = json.load(f)
-        # O POST atual substitui o objeto qbit inteiro — host foi perdido
-        assert "host" not in saved["qbit"]
+        assert saved["qbit"]["host"] == "keep-me"
+        assert saved["qbit"]["port"] == 9090
+        assert saved["qbit"]["api_key"] == "new-key"
+        # Outras secoes intactas
+        assert saved["guardian"]["check_interval_seconds"] == 300
+
+    def test_deep_merge_preserves_nested_fields(self, client, tmp_config):
+        """Merge preserva subsections inteiras quando nao enviadas."""
+        initial = {
+            "qbit": {"host": "x", "port": 8080, "api_key": "k"},
+            "sonarr": {"host": "sonarr.local", "port": 8989, "api_key": "sk"},
+            "radarr": {"host": "", "port": 7878, "api_key": ""},
+            "guardian": {
+                "check_interval_seconds": 300,
+                "valid_media_extensions": [".mkv"],
+                "dangerous_extensions": [],
+                "remove_stalled": False, "stalled_time": 0, "stalled_unit": "hours",
+                "remove_no_seeds": False, "no_seeds_time": 0, "no_seeds_unit": "hours",
+                "priority_media": 7, "priority_normal": 1, "priority_skip": 0
+            },
+            "notifications": {"apprise_url": ""},
+            "webui": {"user": "", "password": ""}
+        }
+        with open(tmp_config, "w") as f:
+            json.dump(initial, f)
+
+        # Envia apenas guardian.check_interval_seconds
+        r = client.post("/api/config", json={
+            "guardian": {"check_interval_seconds": 60}
+        })
+        assert r.status_code == 200
+
+        with open(tmp_config) as f:
+            saved = json.load(f)
+        assert saved["guardian"]["check_interval_seconds"] == 60
+        assert saved["guardian"]["valid_media_extensions"] == [".mkv"]
+        assert saved["sonarr"]["host"] == "sonarr.local"
 
 
 # ── Vetores secundários ────────────────────────────────────────────────
@@ -180,7 +266,6 @@ class TestRaceCondition:
         """Multiplas leituras simultaneas nao corrompem o arquivo."""
         import guardian as g
 
-        # Escreve config valido
         valid = {"qbit": {"host": "x", "port": 1, "api_key": "k"},
                  "sonarr": {"host": "", "port": 8989, "api_key": ""},
                  "radarr": {"host": "", "port": 7878, "api_key": ""},
@@ -191,7 +276,8 @@ class TestRaceCondition:
                      "remove_no_seeds": False, "no_seeds_time": 0, "no_seeds_unit": "hours",
                      "priority_media": 7, "priority_normal": 1, "priority_skip": 0
                  },
-                 "notifications": {"apprise_url": ""}}
+                 "notifications": {"apprise_url": ""},
+                 "webui": {"user": "", "password": ""}}
         import threading
 
         errors = []
@@ -221,7 +307,6 @@ class TestRaceCondition:
 
         assert len(errors) == 0, f"Race condition errors: {errors}"
 
-        # Config final deve ser JSON valido
         with open(tmp_config) as f:
             json.load(f)
 
@@ -232,7 +317,7 @@ class TestJSONInjection:
     def test_nested_json_injection_in_api_key(self, client, tmp_config):
         """Injetar JSON malicioso via campo api_key."""
         payload = {
-            "qbit": {"host": "x", "port": 8080, "api_key": '"; alert(1); "'},
+            "qbit": {"host": "x", "port": 8080, "api_key": '\"; alert(1); \"'},
             "sonarr": {"host": "", "port": 8989, "api_key": ""},
             "radarr": {"host": "", "port": 7878, "api_key": ""},
             "guardian": {
@@ -250,8 +335,7 @@ class TestJSONInjection:
 
         with open(tmp_config) as f:
             saved = json.load(f)
-        # API key com caracteres especiais deve ser salva como string literal
-        assert saved["qbit"]["api_key"] == '"; alert(1); "'
+        assert saved["qbit"]["api_key"] == '\"; alert(1); \"'
 
     def test_priority_out_of_range(self, client, tmp_config):
         """Prioridade >7 ou <0 deve ser aceita mas cabe ao guardian validar."""
@@ -271,7 +355,6 @@ class TestJSONInjection:
         }
         r = client.post("/api/config", json=payload)
         assert r.status_code == 200
-        # Server aceita qualquer numero — validacao fica pro guardian loop
 
 
 # ── Vetores de borda ───────────────────────────────────────────────────
@@ -337,7 +420,7 @@ class TestEdgeCases:
             g.load_config()
 
     def test_config_with_extra_unknown_fields(self, client, tmp_config):
-        """Campos desconhecidos sao preservados silenciosamente."""
+        """Campos desconhecidos sao preservados silenciosamente (deep merge)."""
         payload = {
             "qbit": {"host": "x", "port": 8080, "api_key": "k"},
             "sonarr": {"host": "", "port": 8989, "api_key": ""},

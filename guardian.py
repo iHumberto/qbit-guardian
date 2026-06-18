@@ -23,6 +23,8 @@ log = logging.getLogger("qbit-guardian")
 CONFIG_PATH = os.environ.get("CONFIG_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"))
 
+MAX_PROCESSED_SIZE = 10_000
+
 # ── Config loader ──────────────────────────────────────────────────────
 _config = None
 _config_lock = threading.Lock()
@@ -125,81 +127,87 @@ def send_notification(title, message):
 
 # ── Bloqueio e re-busca ────────────────────────────────────────────────
 
-def block_and_search(torrent_hash, torrent_name):
+def _arr_match_by_name(items, torrent_name, title_field="title"):
+    """Busca item na lista por match parcial de nome."""
+    for item in items:
+        if item.get(title_field, "").lower() in torrent_name.lower():
+            return item["id"]
+    return None
+
+
+def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
+    """Handler generico para Sonarr ou Radarr.
+
+    Fluxo:
+    1. Busca torrent na queue → blocklist + extrai ID
+    2. Fallback: busca por nome se nao encontrou na queue
+    3. Dispara comando de re-search
+    4. (Sonarr apenas) Valida data de lancamento dos episodios
+    """
     cfg = get_config()
+    section = cfg[config_key]
 
-    # Radarr
-    if cfg["radarr"]["host"] and cfg["radarr"]["api_key"]:
-        try:
-            rh = cfg["radarr"]["host"]
-            rp = cfg["radarr"]["port"]
-            rk = cfg["radarr"]["api_key"]
-            base = f"http://{rh}:{rp}/api/v3"
-            hdrs = {"X-Api-Key": rk}
+    if not section["host"] or not section["api_key"]:
+        return
 
-            rq = requests.get(f"{base}/queue", headers=hdrs, timeout=10)
-            movie_id = None
-            for item in rq.json().get("records", []):
-                if item.get("downloadId", "").lower() == torrent_hash.lower():
-                    requests.delete(f"{base}/queue/{item['id']}", headers=hdrs,
-                                    params={"blocklist": "true", "removeFromClient": "false"}, timeout=10)
-                    movie_id = item.get("movieId")
-                    log.info(f"Radarr: '{torrent_name}' → BLOCKLIST")
-                    break
+    try:
+        host = section["host"]
+        port = section["port"]
+        key  = section["api_key"]
+        base = f"http://{host}:{port}/api/v3"
+        hdrs = {"X-Api-Key": key}
 
-            if not movie_id:
-                rm = requests.get(f"{base}/movie", headers=hdrs, timeout=10)
-                for m in rm.json():
-                    if m.get("title", "").lower() in torrent_name.lower():
-                        movie_id = m["id"]
-                        break
+        # 1. Buscar na queue
+        rq = requests.get(f"{base}/queue", headers=hdrs, timeout=10)
+        item_id = None
+        extra_ids = []  # Sonarr: episode_ids
 
-            if movie_id:
-                requests.post(f"{base}/command", headers=hdrs,
-                              json={"name": "MoviesSearch", "movieIds": [movie_id]}, timeout=10)
-                log.info("Radarr: busca disparada")
-        except Exception as e:
-            log.error(f"Radarr: {e}")
+        for item in rq.json().get("records", []):
+            if item.get("downloadId", "").lower() == torrent_hash.lower():
+                # Blocklist
+                requests.delete(f"{base}/queue/{item['id']}", headers=hdrs,
+                                params={"blocklist": "true", "removeFromClient": "false"},
+                                timeout=10)
+                log.info(f"{arr_type}: '{torrent_name}' -> BLOCKLIST")
 
-    # Sonarr
-    if cfg["sonarr"]["host"] and cfg["sonarr"]["api_key"]:
-        try:
-            sh = cfg["sonarr"]["host"]
-            sp = cfg["sonarr"]["port"]
-            sk = cfg["sonarr"]["api_key"]
-            base = f"http://{sh}:{sp}/api/v3"
-            hdrs = {"X-Api-Key": sk}
-
-            rq = requests.get(f"{base}/queue", headers=hdrs, timeout=10)
-            series_id = None
-            episode_ids = []
-
-            for item in rq.json().get("records", []):
-                if item.get("downloadId", "").lower() == torrent_hash.lower():
-                    series_id = item.get("seriesId")
+                if arr_type == "Radarr":
+                    item_id = item.get("movieId")
+                elif arr_type == "Sonarr":
+                    item_id = item.get("seriesId")
                     if "episodeId" in item:
-                        episode_ids.append(item["episodeId"])
+                        extra_ids.append(item["episodeId"])
                     elif "episodes" in item:
-                        episode_ids.extend([ep["id"] for ep in item["episodes"]])
+                        extra_ids.extend([ep["id"] for ep in item["episodes"]])
+                break
 
-                    requests.delete(f"{base}/queue/{item['id']}", headers=hdrs,
-                                    params={"blocklist": "true", "removeFromClient": "false"}, timeout=10)
-                    log.info(f"Sonarr: '{torrent_name}' → BLOCKLIST")
-                    break
-
-            if not series_id:
+        # 2. Fallback: busca por nome
+        if not item_id:
+            if arr_type == "Radarr":
+                rm = requests.get(f"{base}/movie", headers=hdrs, timeout=10)
+                item_id = _arr_match_by_name(rm.json(), torrent_name)
+            elif arr_type == "Sonarr":
                 rs = requests.get(f"{base}/series", headers=hdrs, timeout=10)
-                for s in rs.json():
-                    if s.get("title", "").lower() in torrent_name.lower():
-                        series_id = s["id"]
-                        break
+                item_id = _arr_match_by_name(rs.json(), torrent_name)
 
-            if episode_ids:
+        if not item_id:
+            return
+
+        # 3. Disparar re-search
+        if arr_type == "Radarr":
+            requests.post(f"{base}/command", headers=hdrs,
+                          json={"name": "MoviesSearch", "movieIds": [item_id]},
+                          timeout=10)
+            log.info("Radarr: busca disparada")
+
+        elif arr_type == "Sonarr":
+            if extra_ids:
+                # Validar data de lancamento dos episodios
                 now = datetime.now(timezone.utc)
                 released = []
-                for eid in episode_ids:
+                for eid in extra_ids:
                     try:
-                        re = requests.get(f"{base}/episode/{eid}", headers=hdrs, timeout=10)
+                        re = requests.get(f"{base}/episode/{eid}", headers=hdrs,
+                                         timeout=10)
                         ad = re.json().get("airDateUtc")
                         if ad:
                             adt = datetime.fromisoformat(ad.replace("Z", "+00:00"))
@@ -215,17 +223,27 @@ def block_and_search(torrent_hash, torrent_name):
 
                 if released:
                     requests.post(f"{base}/command", headers=hdrs,
-                                  json={"name": "EpisodeSearch", "episodeIds": released}, timeout=10)
+                                  json={"name": "EpisodeSearch",
+                                        "episodeIds": released},
+                                  timeout=10)
                     log.info(f"Sonarr: busca para {released}")
                 else:
                     log.warning(f"Sonarr: '{torrent_name}' episodios nao lancados")
-
-            elif series_id:
+            else:
                 requests.post(f"{base}/command", headers=hdrs,
-                              json={"name": "SeriesSearch", "seriesId": series_id}, timeout=10)
+                              json={"name": "SeriesSearch",
+                                    "seriesId": item_id},
+                              timeout=10)
                 log.info("Sonarr: busca da serie disparada")
-        except Exception as e:
-            log.error(f"Sonarr: {e}")
+
+    except Exception as e:
+        log.error(f"{arr_type}: {e}")
+
+
+def block_and_search(torrent_hash, torrent_name):
+    """Bloqueia nos Arrs e dispara re-search."""
+    _handle_arr("Radarr", "radarr", torrent_hash, torrent_name)
+    _handle_arr("Sonarr", "sonarr", torrent_hash, torrent_name)
 
 
 # ── Analise de torrent ─────────────────────────────────────────────────
@@ -341,6 +359,17 @@ def analyze_torrent(torrent):
 _processed = set()
 
 
+def _prune_processed(current_hashes):
+    """Limpa _processed: remove hashes ausentes e aplica hard cap."""
+    _processed.intersection_update(current_hashes)
+    if len(_processed) > MAX_PROCESSED_SIZE:
+        excess = len(_processed) - MAX_PROCESSED_SIZE
+        remove = set(list(_processed)[:excess])
+        _processed.difference_update(remove)
+        log.warning(f"_processed atingiu {MAX_PROCESSED_SIZE}, "
+                    f"removidos {excess} hashes antigos")
+
+
 def guardian_loop():
     load_config()
     try:
@@ -371,9 +400,8 @@ def guardian_loop():
             else:
                 log.debug("Nenhum torrent novo")
 
-            # Limpar processed periodicamente (evita memory leak)
             current_hashes = {t["hash"] for t in torrents}
-            _processed.intersection_update(current_hashes)
+            _prune_processed(current_hashes)
 
         except requests.exceptions.ConnectionError:
             log.warning("qBittorrent inacessivel, reconectando...")

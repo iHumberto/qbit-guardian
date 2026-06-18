@@ -1,8 +1,9 @@
 """
 qbit-guardian — Functional tests.
 
-Testa o motor guardian (analyze_torrent, is_stalled, block_and_search)
-e os endpoints Flask (/api/health, /api/trigger, /api/config).
+Testa o motor guardian (analyze_torrent, is_stalled, block_and_search),
+endpoints Flask (/api/health, /api/trigger, /api/config),
+HTTP Basic Auth e deep merge de config.
 
 Run: .venv/bin/python -m pytest test/test_guardian.py -v
 """
@@ -11,6 +12,7 @@ import json
 import os
 import tempfile
 import time
+import base64
 from unittest import mock
 
 import pytest
@@ -42,7 +44,8 @@ def tmp_config():
                 "remove_no_seeds": True, "no_seeds_time": 48, "no_seeds_unit": "hours",
                 "priority_media": 7, "priority_normal": 1, "priority_skip": 0
             },
-            "notifications": {"apprise_url": "http://apprise:8000/notify"}
+            "notifications": {"apprise_url": "http://apprise:8000/notify"},
+            "webui": {"user": "", "password": ""}
         }, f)
         tmp_path = f.name
 
@@ -103,76 +106,63 @@ class TestIsStalled:
         }
 
     def test_not_stalled_when_disabled(self, tmp_config):
-        """remove_stalled=False → nunca stalled."""
         cfg = g.load_config()
         cfg["guardian"]["remove_stalled"] = False
         g.save_config(cfg)
-
         t = self.make_torrent("stalledDL", time.time() - 100_000)
         stalled, reason = g.is_stalled(t, cfg)
         assert not stalled
 
     def test_stalled_over_limit(self, tmp_config):
-        """Torrent stalled ha mais tempo que o limite."""
         cfg = g.load_config()
         cfg["guardian"]["stalled_time"] = 1
         cfg["guardian"]["stalled_unit"] = "hours"
         g.save_config(cfg)
-
-        t = self.make_torrent("stalledDL", time.time() - 7200)  # 2 horas
+        t = self.make_torrent("stalledDL", time.time() - 7200)
         stalled, reason = g.is_stalled(t, cfg)
         assert stalled
         assert "1h" in reason
 
     def test_stalled_under_limit(self, tmp_config):
-        """Torrent stalled ha menos tempo que o limite."""
         cfg = g.load_config()
-        t = self.make_torrent("stalledDL", time.time() - 60)  # 1 minuto
+        t = self.make_torrent("stalledDL", time.time() - 60)
         stalled, reason = g.is_stalled(t, cfg)
         assert not stalled
 
     def test_stalled_only_for_stalled_states(self, tmp_config):
-        """Apenas estados stalled* acionam remocao por stalled."""
         cfg = g.load_config()
         cfg["guardian"]["stalled_time"] = 1
         cfg["guardian"]["stalled_unit"] = "minutes"
         g.save_config(cfg)
-
-        past = time.time() - 120  # 2 min atras
+        past = time.time() - 120
         assert g.is_stalled(self.make_torrent("stalledDL", past), cfg)[0]
         assert g.is_stalled(self.make_torrent("stalledUP", past), cfg)[0]
         assert not g.is_stalled(self.make_torrent("downloading", past), cfg)[0]
         assert not g.is_stalled(self.make_torrent("uploading", past), cfg)[0]
 
     def test_no_seeds_removal(self, tmp_config):
-        """Torrent com 0 seeds ha mais tempo que o limite."""
         cfg = g.load_config()
         cfg["guardian"]["no_seeds_time"] = 1
         cfg["guardian"]["no_seeds_unit"] = "hours"
         g.save_config(cfg)
-
         t = self.make_torrent("downloading", time.time() - 7200, num_complete=0)
         stalled, reason = g.is_stalled(t, cfg)
         assert stalled
         assert "0 seeds" in reason
 
     def test_no_seeds_with_seeds_present(self, tmp_config):
-        """Torrent com seeds ≥1 NAO deve ser removido."""
         cfg = g.load_config()
         cfg["guardian"]["no_seeds_time"] = 1
         cfg["guardian"]["no_seeds_unit"] = "hours"
         g.save_config(cfg)
-
         t = self.make_torrent("downloading", time.time() - 7200, num_complete=5)
         stalled, reason = g.is_stalled(t, cfg)
         assert not stalled
 
     def test_zero_time_limit_disables(self, tmp_config):
-        """Tempo 0 desativa a feature."""
         cfg = g.load_config()
         cfg["guardian"]["stalled_time"] = 0
         g.save_config(cfg)
-
         t = self.make_torrent("stalledDL", time.time() - 100_000)
         stalled, reason = g.is_stalled(t, cfg)
         assert not stalled
@@ -193,17 +183,14 @@ class TestAnalyzeTorrent:
         }
 
     def test_skip_completed_uploading_states(self, tmp_config):
-        """Torrents completos/uploading sao ignorados."""
         g.load_config()
         for state in ("uploading", "stalledUP", "pausedUP", "checkingUP", "queuedUP"):
             t = self.make_torrent(state)
-            # Nao deve chamar get_files, remove_torrent, etc.
             with mock.patch.object(g, "get_files") as m_get_files:
                 g.analyze_torrent(t)
                 m_get_files.assert_not_called()
 
     def test_dangerous_extension_triggers_removal(self, tmp_config):
-        """Arquivo .exe → remove + blocklist."""
         g.load_config()
         t = self.make_torrent("downloading")
 
@@ -225,7 +212,6 @@ class TestAnalyzeTorrent:
             assert "Arquivos perigosos" in m_notify.call_args[0][1]
 
     def test_no_valid_media_extension_triggers_removal(self, tmp_config):
-        """Nenhum arquivo .mkv/.mp4 → remove."""
         g.load_config()
         t = self.make_torrent("downloading")
 
@@ -247,7 +233,6 @@ class TestAnalyzeTorrent:
             assert "Nenhum arquivo" in m_notify.call_args[0][1]
 
     def test_valid_media_no_removal_optimizes_priority(self, tmp_config):
-        """Arquivo .mkv → otimiza prioridades, nao remove."""
         g.load_config()
         t = self.make_torrent("downloading")
 
@@ -266,15 +251,12 @@ class TestAnalyzeTorrent:
 
             m_remove.assert_not_called()
             m_block.assert_not_called()
-            # 3 arquivos → 3 chamadas de prioridade
             assert m_prio.call_count == 3
-            # mkv com prioridade 7
             assert m_prio.call_args_list[0][0][2] == 7
 
     def test_stalled_torrent_removed_without_file_check(self, tmp_config):
-        """Torrent stalled → remove direto, sem verificar arquivos."""
         g.load_config()
-        past = time.time() - 100_000  # bem antigo
+        past = time.time() - 100_000
         t = {
             "hash": "stalledhash",
             "name": "Old.Stalled.Torrent",
@@ -289,13 +271,12 @@ class TestAnalyzeTorrent:
 
             g.analyze_torrent(t)
 
-            m_files.assert_not_called()  # nao chega a verificar arquivos
+            m_files.assert_not_called()
             m_remove.assert_called_once_with("stalledhash")
             m_notify.assert_called_once()
             assert "stalled" in m_notify.call_args[0][0].lower()
 
     def test_empty_files_list_skips(self, tmp_config):
-        """Torrent sem arquivos (resposta vazia) → ignorado."""
         g.load_config()
         t = self.make_torrent("downloading")
 
@@ -311,7 +292,6 @@ class TestAnalyzeTorrent:
             m_block.assert_not_called()
 
     def test_notification_silent_when_no_url(self, tmp_config):
-        """Sem Apprise URL → notificacao nao dispara."""
         cfg = g.load_config()
         cfg["notifications"]["apprise_url"] = ""
         g.save_config(cfg)
@@ -328,11 +308,44 @@ class TestAnalyzeTorrent:
             g.analyze_torrent(t)
 
             m_remove.assert_called_once()
-            # requests.post so deve ser chamado pelas APIs qBit/Radarr/Sonarr
-            # nao pelo Apprise
             apprise_calls = [c for c in m_post.call_args_list
                              if "apprise" in str(c.args[0])]
             assert len(apprise_calls) == 0
+
+
+# ── _prune_processed ───────────────────────────────────────────────────
+
+class TestPruneProcessed:
+    """Limpeza e limite do set _processed."""
+
+    def test_prune_removes_absent_hashes(self):
+        g._processed = {"h1", "h2", "h3"}
+        current = {"h2", "h3", "h4"}
+        g._prune_processed(current)
+        assert g._processed == {"h2", "h3"}
+
+    def test_prune_enforces_hard_cap(self):
+        """Quando _processed excede MAX_PROCESSED_SIZE, trunca."""
+        g._processed = set(f"hash_{i}" for i in range(15_000))
+        assert len(g._processed) == 15_000
+
+        current = set(f"hash_{i}" for i in range(15_000))
+        g._prune_processed(current)
+
+        assert len(g._processed) == g.MAX_PROCESSED_SIZE
+
+    def test_prune_noop_when_under_limit(self):
+        g._processed = {"h1", "h2", "h3"}
+        current = {"h1", "h2", "h3"}
+        g._prune_processed(current)
+        assert g._processed == {"h1", "h2", "h3"}
+
+    def test_prune_intersection_before_cap(self):
+        """Primeiro remove ausentes, depois aplica cap."""
+        g._processed = set(f"hash_{i}" for i in range(12_000))
+        current = set(f"hash_{i}" for i in range(0, 12_000, 2))  # metade
+        g._prune_processed(current)
+        assert len(g._processed) == 6_000  # metade de 12000, abaixo do cap
 
 
 # ── Flask endpoints ────────────────────────────────────────────────────
@@ -341,13 +354,11 @@ class TestFlaskEndpoints:
     """Testes para os endpoints REST."""
 
     def test_health_returns_ok(self, client):
-        """GET /api/health → {"status": "ok"}."""
         r = client.get("/api/health")
         assert r.status_code == 200
         assert r.json == {"status": "ok"}
 
     def test_get_config_returns_valid_json(self, client, tmp_config):
-        """GET /api/config retorna JSON com todas as secoes."""
         r = client.get("/api/config")
         assert r.status_code == 200
         data = r.json
@@ -356,35 +367,27 @@ class TestFlaskEndpoints:
         assert "radarr" in data
         assert "guardian" in data
         assert "notifications" in data
-        assert data["qbit"]["host"] == "localhost"
+        assert "webui" in data
 
-    def test_post_config_persists(self, client, tmp_config):
-        """POST /api/config salva e pode ser lido de volta."""
+    def test_post_config_persists_with_deep_merge(self, client, tmp_config):
+        """POST faz deep merge — campos ausentes preservados."""
         payload = {
-            "qbit": {"host": "10.0.0.1", "port": 9090, "api_key": "new-key"},
-            "sonarr": {"host": "", "port": 8989, "api_key": ""},
-            "radarr": {"host": "", "port": 7878, "api_key": ""},
-            "guardian": {
-                "check_interval_seconds": 60,
-                "valid_media_extensions": [".mkv"],
-                "dangerous_extensions": [".exe"],
-                "remove_stalled": True, "stalled_time": 1, "stalled_unit": "hours",
-                "remove_no_seeds": False, "no_seeds_time": 0, "no_seeds_unit": "hours",
-                "priority_media": 7, "priority_normal": 1, "priority_skip": 0
-            },
-            "notifications": {"apprise_url": ""}
+            "qbit": {"host": "10.0.0.1", "port": 9090}
         }
         r = client.post("/api/config", json=payload)
         assert r.status_code == 200
-        assert r.json == {"status": "ok"}
 
-        # Verifica persistencia
         r2 = client.get("/api/config")
-        assert r2.json["qbit"]["host"] == "10.0.0.1"
-        assert r2.json["guardian"]["check_interval_seconds"] == 60
+        saved = r2.json
+        # Campos enviados: atualizados
+        assert saved["qbit"]["host"] == "10.0.0.1"
+        assert saved["qbit"]["port"] == 9090
+        # Campo nao enviado: preservado
+        assert saved["qbit"]["api_key"] == "test-key"
+        # Outras secoes: intactas
+        assert saved["guardian"]["check_interval_seconds"] == 300
 
     def test_trigger_endpoint_with_mock(self, client, tmp_config):
-        """POST /api/trigger processa torrents pendentes."""
         g.load_config()
         g._processed.clear()
 
@@ -405,7 +408,6 @@ class TestFlaskEndpoints:
             m_analyze.assert_called_once()
 
     def test_trigger_skips_already_processed(self, client, tmp_config):
-        """POST /api/trigger ignora torrents ja processados."""
         g.load_config()
         g._processed.clear()
         g._processed.add("h1")
@@ -422,7 +424,6 @@ class TestFlaskEndpoints:
             m_analyze.assert_not_called()
 
     def test_trigger_propagates_error(self, client, tmp_config):
-        """POST /api/trigger quando qBit esta offline."""
         g.load_config()
 
         with mock.patch.object(g, "get_torrents", side_effect=Exception("qBit offline")):
@@ -430,3 +431,90 @@ class TestFlaskEndpoints:
             assert r.status_code == 500
             assert r.json["status"] == "error"
             assert "qBit offline" in r.json["message"]
+
+
+# ── HTTP Basic Auth ────────────────────────────────────────────────────
+
+class TestHttpAuth:
+    """Autenticacao HTTP Basic na Web UI."""
+
+    AUTH = "Basic " + base64.b64encode(b"admin:secret").decode()
+
+    def _enable_auth(self, tmp_config):
+        with open(tmp_config) as f:
+            cfg = json.load(f)
+        cfg["webui"] = {"user": "admin", "password": "secret"}
+        with open(tmp_config, "w") as f:
+            json.dump(cfg, f)
+
+    def test_auth_required_when_configured(self, client, tmp_config):
+        """Com auth habilitada, endpoints protegidos exigem credenciais."""
+        self._enable_auth(tmp_config)
+        r = client.get("/")
+        assert r.status_code == 401
+
+    def test_auth_bypass_with_correct_credentials(self, client, tmp_config):
+        """Credenciais corretas acessam endpoints protegidos."""
+        self._enable_auth(tmp_config)
+        r = client.get("/", headers={"Authorization": self.AUTH})
+        assert r.status_code == 200
+
+    def test_auth_blocks_post_config(self, client, tmp_config):
+        self._enable_auth(tmp_config)
+        r = client.post("/api/config", json={})
+        assert r.status_code == 401
+
+    def test_auth_allows_post_config_with_credentials(self, client, tmp_config):
+        self._enable_auth(tmp_config)
+        r = client.post("/api/config", json={"qbit": {"host": "test", "port": 1, "api_key": "k"}},
+                        headers={"Authorization": self.AUTH})
+        assert r.status_code == 200
+
+    def test_auth_blocks_trigger(self, client, tmp_config):
+        self._enable_auth(tmp_config)
+        r = client.post("/api/trigger")
+        assert r.status_code == 401
+
+    def test_health_always_public_without_auth(self, client, tmp_config):
+        self._enable_auth(tmp_config)
+        r = client.get("/api/health")
+        assert r.status_code == 200
+
+
+# ── Deep merge ─────────────────────────────────────────────────────────
+
+class TestDeepMerge:
+    """Deep merge de config no POST /api/config."""
+
+    def test_merge_preserves_nested_dicts(self, client, tmp_config):
+        """Subobjetos nao enviados permanecem intactos."""
+        r = client.post("/api/config", json={
+            "guardian": {"check_interval_seconds": 999}
+        })
+        assert r.status_code == 200
+        saved = client.get("/api/config").json
+        assert saved["guardian"]["check_interval_seconds"] == 999
+        assert saved["guardian"]["valid_media_extensions"] == [".mkv", ".mp4", ".avi"]
+        assert saved["qbit"]["host"] == "localhost"
+        assert saved["sonarr"]["api_key"] == "skey"
+
+    def test_merge_adds_new_top_level_keys(self, client, tmp_config):
+        """Nova chave top-level e adicionada."""
+        r = client.post("/api/config", json={
+            "future_section": {"enabled": True}
+        })
+        assert r.status_code == 200
+        saved = client.get("/api/config").json
+        assert saved["future_section"] == {"enabled": True}
+        assert "qbit" in saved  # intacto
+
+    def test_merge_overwrites_scalar_values(self, client, tmp_config):
+        """Valores escalares sao sobrescritos."""
+        r = client.post("/api/config", json={
+            "qbit": {"host": "new-host", "port": 9090, "api_key": "new-key",
+                     "extra_field": "bonus"}
+        })
+        assert r.status_code == 200
+        saved = client.get("/api/config").json
+        assert saved["qbit"]["host"] == "new-host"
+        assert saved["qbit"]["extra_field"] == "bonus"
