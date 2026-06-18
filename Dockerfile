@@ -10,4 +10,7 @@ COPY static/ static/
 
 EXPOSE 5000
 
+HEALTHCHECK --interval=60s --timeout=5s --start-period=10s --retries=3 \
+    CMD cat /tmp/heartbeat || exit 1
+
 CMD ["python", "-u", "app.py"]

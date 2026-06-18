@@ -13,6 +13,7 @@ Monitora torrents ativos e remove automaticamente arquivos com extensoes perigos
 - 🔔 Notificacoes via Apprise (Telegram, Discord, etc)
 - ⚡ Otimizacao automatica de prioridades de arquivos
 - 🖥️ Web UI para configuracao
+- 🪝 Modo webhook (tempo real) alem do polling tradicional
 
 ## Quick Start (Docker)
 
@@ -29,6 +30,18 @@ services:
 ```
 
 Acesse `http://seu-host:5000` para configurar.
+
+## Instalacao Manual (sem Docker)
+
+```bash
+git clone https://forgejo.home.arpa/Humberto/qbit-guardian.git
+cd qbit-guardian
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp config.json.example config.json  # edite com suas credenciais
+python app.py
+```
 
 ## Configuracao via Web UI
 
@@ -63,11 +76,52 @@ volumes:
   - ./caminho/para/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh
 ```
 
+Quando um torrent e adicionado, o qBit chama o script que faz `POST /api/trigger` no guardian, processando o torrent em tempo real.
+
+## API REST
+
+A Web UI expoe os seguintes endpoints:
+
+| Metodo | Endpoint | Descricao |
+|--------|----------|-----------|
+| `GET` | `/api/health` | Healthcheck — retorna `{"status": "ok"}` |
+| `GET` | `/api/config` | Le a configuracao atual (JSON completo) |
+| `POST` | `/api/config` | Salva a configuracao (JSON no body) |
+| `POST` | `/api/trigger` | Forca verificacao imediata (usado pelo webhook) |
+
+### Healthcheck Docker
+
+O guardian escreve um heartbeat em `/tmp/heartbeat`. Use no `docker-compose.yml`:
+
+```yaml
+healthcheck:
+  test: ["CMD", "cat", "/tmp/heartbeat"]
+  interval: 60s
+  timeout: 5s
+  retries: 3
+```
+
 ## Variaveis de Ambiente
 
 | Variavel | Padrao | Descricao |
 |----------|--------|-----------|
 | `CONFIG_PATH` | `./config.json` | Caminho do arquivo de config |
+
+## Desenvolvimento
+
+```bash
+# Instalar dependencias (inclui pytest)
+pip install -r requirements.txt
+
+# Rodar todos os testes (37: 25 funcionais + 12 seguranca)
+python -m pytest test/ -v
+
+# Apenas testes funcionais
+python -m pytest test/test_guardian.py -v
+
+# Apenas testes de seguranca
+python -m pytest test/test_security.py -v
+```
 
 ## Licenca
 
