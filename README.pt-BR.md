@@ -1,23 +1,43 @@
 # 🛡️ qbit-guardian
 
-Protege seu qBittorrent contra torrents maliciosos.
+> Proteção em tempo real para o seu qBittorrent — detecta e remove torrents maliciosos antes que causem estragos.
 
-> 📖 **Read in English:** [README.md](README.md)
+🇺🇸 **Read in English:** [README.md](README.md)
 
-Monitora torrents ativos e remove automaticamente arquivos com extensoes perigosas (.exe, .scr, .bat, etc), torrents sem seeds ou parados ha muito tempo. Integra com Sonarr e Radarr para bloquear e disparar nova busca automaticamente.
+---
 
-## Features
+## O que é o qbit-guardian?
 
-- 🔍 Detecta e remove torrents com arquivos perigosos
-- 🎬 Integracao com Radarr (blocklist + re-search)
-- 📺 Integracao com Sonarr (blocklist + re-search com validacao de data de lancamento)
-- 🗑️ Remove torrents stalled ou sem seeds
-- 🔔 Notificacoes via Apprise (Telegram, Discord, etc)
-- ⚡ Otimizacao automatica de prioridades de arquivos
-- 🖥️ Web UI para configuracao
-- 🪝 Modo webhook (tempo real) alem do polling tradicional
+O qbit-guardian monitora os torrents ativos do seu qBittorrent e remove automaticamente aqueles que contêm arquivos perigosos (`.exe`, `.scr`, `.bat`, `.ps1`, `.vbs` e outros), estão parados há muito tempo ou não têm seeds. Quando integrado ao Sonarr/Radarr, ele também bloqueia o lançamento ruim e dispara uma nova busca automática — assim sua biblioteca continua crescendo sem intervenção manual.
+
+Ele roda como um container Docker leve (ou como um processo Python) com uma interface Web integrada para configuração, notificações via Apprise e um modo webhook opcional para processamento em tempo real.
+
+## Stack
+
+| Componente    | Tecnologia                          |
+|---------------|-------------------------------------|
+| Runtime       | Python 3.12                         |
+| Interface Web | Flask 3.x                           |
+| Cliente HTTP  | requests 2.x                        |
+| Notificações  | Apprise (Telegram, Discord, Slack e mais de 100 serviços) |
+| Testes        | pytest 8.x (58 testes)              |
+| Licença       | GNU GPL v3                          |
+
+## Funcionalidades
+
+- 🔍 **Detecção de arquivos maliciosos** — remove torrents com executáveis, scripts e outras extensões perigosas
+- 🎬 **Integração com Radarr** — blocklist + busca automática para filmes
+- 📺 **Integração com Sonarr** — blocklist + busca automática com validação de data de lançamento dos episódios
+- 🗑️ **Remoção de stalled e sem seeds** — limpa torrents mortos após um tempo configurável
+- ⚡ **Otimização de prioridades** — prioriza automaticamente arquivos de mídia, reduz ou pula arquivos inúteis
+- 🔔 **Notificações via Apprise** — alertas por Telegram, Discord, Slack, Pushover e mais de 100 outros serviços
+- 🖥️ **Web UI** — painel de configuração com tema escuro e suporte a HTTP Basic Auth
+- 🪝 **Modo webhook** — processamento em tempo real quando um torrent é adicionado (sem delay de polling)
+- 🐳 **Docker-first** — imagem pronta no `ghcr.io`, healthcheck incluso
 
 ## Quick Start (Docker)
+
+Adicione ao seu `docker-compose.yml` junto com o qBittorrent:
 
 ```yaml
 services:
@@ -27,106 +47,221 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./config.json:/app/config.json
+      - ./qbit-guardian/config.json:/app/config.json
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "cat", "/tmp/heartbeat"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
 ```
 
-Acesse `http://seu-host:5000` para configurar.
+Crie um `config.json` mínimo na mesma pasta do compose:
 
-## Instalacao Manual (sem Docker)
+```json
+{
+  "qbit": {
+    "host": "ip-ou-nome-do-seu-qbit",
+    "port": 8080,
+    "api_key": "SUA_API_KEY_DO_QBITTORRENT"
+  }
+}
+```
+
+Depois inicie:
+
+```bash
+docker compose up -d qbit-guardian
+```
+
+Acesse `http://seu-host:5000` para configurar o restante (Sonarr, Radarr, notificações, etc.).
+
+> 💡 **O que é uma API Key?** É uma senha longa e aleatória que o qBittorrent gera para que outros programas (como o qbit-guardian) conversem com ele de forma segura. Encontre a sua no qBittorrent em **Ferramentas → Opções → Web UI → Chave da API**.
+
+## Instalação Manual (sem Docker)
 
 ```bash
 git clone https://forgejo.home.arpa/Humberto/qbit-guardian.git
 cd qbit-guardian
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp config.json.example config.json  # edite com suas credenciais
-python app.py
+cp config.json.example config.json   # edite com suas credenciais
+python app/app.py
 ```
 
-## Configuracao via Web UI
+O processo roda em primeiro plano. Pressione `Ctrl+C` para parar.
 
-Apos iniciar, acesse a interface web e configure:
+## Configuração
 
-- **qBittorrent**: host, porta, API key
-- **Sonarr/Radarr**: hosts, portas, API keys
-- **Extensoes**: validas e perigosas (customizaveis)
-- **Stalled/No-seeds**: tempo limite para remocao
-- **Notificacoes**: Apprise URL
-- **Prioridades**: Configuravel (0-7, igual escala do qBit)
-- **Modo webhook**: Intervalo = 0 desativa polling, use com script no qBit
+Todas as opções ficam no arquivo `config.json` e podem ser editadas pela Web UI ou diretamente. Estrutura completa:
 
-## Modos de operacao
+```json
+{
+  "qbit": {
+    "host": "localhost",
+    "port": 8080,
+    "api_key": ""
+  },
+  "sonarr": {
+    "host": "",
+    "port": 8989,
+    "api_key": ""
+  },
+  "radarr": {
+    "host": "",
+    "port": 7878,
+    "api_key": ""
+  },
+  "guardian": {
+    "check_interval_seconds": 300,
+    "valid_media_extensions": [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".webm"],
+    "dangerous_extensions": [".exe", ".scr", ".bat", ".cmd", ".vbs", ".js", ".com", ".pif", ".msi", ".dll", ".ps1", ".sh", ".bin"],
+    "remove_stalled": false,
+    "stalled_time": 0,
+    "stalled_unit": "hours",
+    "remove_no_seeds": false,
+    "no_seeds_time": 0,
+    "no_seeds_unit": "hours",
+    "priority_media": 7,
+    "priority_normal": 1,
+    "priority_skip": 0
+  },
+  "notifications": {
+    "apprise_url": ""
+  },
+  "webui": {
+    "user": "",
+    "password": ""
+  }
+}
+```
 
-### Polling (padrao)
+| Seção            | Campos principais                                                                                     |
+|------------------|-------------------------------------------------------------------------------------------------------|
+| **qbit**         | `host`, `port`, `api_key` — conexão com sua instância do qBittorrent                                 |
+| **sonarr**       | `host`, `port`, `api_key` — opcional, deixe em branco para desativar                                 |
+| **radarr**       | `host`, `port`, `api_key` — opcional, deixe em branco para desativar                                 |
+| **guardian**     | `check_interval_seconds` (0 = modo webhook), listas de extensões, regras de stalled/sem seeds, prioridades |
+| **notifications** | `apprise_url` — URL compatível com Apprise (veja [documentação do Apprise](https://github.com/caronc/apprise)) |
+| **webui**        | `user`, `password` — credenciais HTTP Basic Auth. Deixe ambos vazios para acesso público             |
 
-O guardian verifica os torrents a cada N segundos. Configure `check_interval_seconds` na Web UI.
+### Autenticação da Web UI
+
+Para proteger o painel com senha, preencha `webui.user` e `webui.password`. O navegador passará a pedir usuário e senha em todo acesso. Deixe ambos vazios para manter a página pública.
+
+> ⚠️ Se esquecer a senha, edite o `config.json` diretamente e limpe os dois campos.
+
+## Modos de Operação
+
+### Polling (padrão)
+
+O guardian verifica os torrents a cada N segundos. Defina `guardian.check_interval_seconds` com qualquer valor acima de 0. Padrão: 300 segundos (5 minutos).
 
 ### Webhook (tempo real)
 
-Configure `check_interval_seconds = 0` e adicione o script de webhook no qBittorrent:
+Defina `check_interval_seconds` como `0` e configure o qBittorrent para chamar o guardian a cada novo torrent:
 
-**1. No qBittorrent:** Settings > Downloads > Run external program on torrent added
+**1.** No qBittorrent: **Configurações → Downloads → Executar programa externo ao adicionar torrent**:
+
 ```
 /scripts/qbit-guardian-hook.sh
 ```
 
-**2. Monte o script no container qBit:**
+**2.** Monte o script de webhook no container do qBittorrent:
+
 ```yaml
+# No serviço do qBittorrent no docker-compose:
 volumes:
   - ./caminho/para/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh
 ```
 
-Quando um torrent e adicionado, o qBit chama o script que faz `POST /api/trigger` no guardian, processando o torrent em tempo real.
+Quando um torrent é adicionado, o qBittorrent chama o script, que envia `POST /api/trigger` para o guardian — processando o torrent instantaneamente.
 
 ## API REST
 
-A Web UI expoe os seguintes endpoints:
+A Web UI expõe estes endpoints:
 
-| Metodo | Endpoint | Descricao |
-|--------|----------|-----------|
-| `GET` | `/api/health` | Healthcheck — retorna `{"status": "ok"}` |
-| `GET` | `/api/config` | Le a configuracao atual (JSON completo) |
-| `POST` | `/api/config` | Salva a configuracao (JSON no body) |
-| `POST` | `/api/trigger` | Forca verificacao imediata (usado pelo webhook) |
+| Método   | Endpoint        | Auth      | Descrição                                           |
+|----------|-----------------|-----------|-----------------------------------------------------|
+| `GET`    | `/api/health`   | Público   | Healthcheck — retorna `{"status": "ok"}`            |
+| `GET`    | `/api/config`   | Obrigatória | Lê a configuração atual (JSON completo)           |
+| `POST`   | `/api/config`   | Obrigatória | Salva configuração (JSON no body, deep merge)     |
+| `POST`   | `/api/trigger`  | Obrigatória | Força verificação imediata (manual ou webhook)     |
 
-### Healthcheck Docker
+### Exemplo: disparar verificação
 
-O guardian escreve um heartbeat em `/tmp/heartbeat`. Use no `docker-compose.yml`:
-
-```yaml
-healthcheck:
-  test: ["CMD", "cat", "/tmp/heartbeat"]
-  interval: 60s
-  timeout: 5s
-  retries: 3
+```bash
+curl -X POST http://seu-host:5000/api/trigger \
+  -u admin:sua-senha
 ```
 
-## Variaveis de Ambiente
+### Exemplo: alterar configuração pela API
 
-| Variavel | Padrao | Descricao |
-|----------|--------|-----------|
-| `CONFIG_PATH` | `./config.json` | Caminho do arquivo de config |
+```bash
+curl -X POST http://seu-host:5000/api/config \
+  -u admin:sua-senha \
+  -H "Content-Type: application/json" \
+  -d '{"guardian": {"check_interval_seconds": 120}}'
+```
+
+## Variáveis de Ambiente
+
+| Variável       | Padrão          | Descrição                          |
+|----------------|-----------------|------------------------------------|
+| `CONFIG_PATH`  | `./config.json` | Caminho para o arquivo de configuração |
+
+## Problemas Comuns
+
+### "Connection refused" ou "Falha ao conectar no qBit"
+
+- Verifique se o qBittorrent está rodando e com a Web UI ativada.
+- Confira se `qbit.host` e `qbit.port` estão corretos no `config.json`.
+- **Usuários Docker:** `localhost` dentro do container aponta para o próprio container, não para a máquina host. Use `host.docker.internal` (Windows/Mac) ou o IP real da máquina (Linux, ex: `172.17.0.1`).
+
+### "HTTP 403" / "Unauthorized"
+
+A API Key está errada ou vazia.
+- No qBittorrent: **Ferramentas → Opções → Web UI**.
+- Confirme que a autenticação está ativada (usuário `admin` + uma senha).
+- Copie a Chave da API exatamente como aparece — sem espaços ou quebras de linha extras.
+
+### A página não abre na porta 5000
+
+- Veja se o container está rodando: `docker ps | grep qbit-guardian`
+- Na instalação manual, procure por `Web UI em http://0.0.0.0:5000` no terminal.
+- Confira se o firewall da máquina libera a porta 5000.
+- Tente acessar de outra máquina na mesma rede.
+
+### Não uso Sonarr nem Radarr
+
+Deixe os campos `sonarr.host` e `radarr.host` em branco. O guardian funciona perfeitamente sem eles — você ainda terá remoção de arquivos perigosos, limpeza de stalled/sem seeds e otimização de prioridades. Apenas o bloqueio e a re-busca automática são ignorados.
 
 ## Desenvolvimento
 
 ```bash
-# Instalar dependencias (inclui pytest)
+# Instalar dependências (inclui pytest)
 pip install -r requirements.txt
 
-# Rodar todos os testes (37: 25 funcionais + 12 seguranca)
+# Rodar todos os testes (58: 38 funcionais + 20 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais
 python -m pytest test/test_guardian.py -v
 
-# Apenas testes de seguranca
+# Apenas testes de segurança
 python -m pytest test/test_security.py -v
 ```
 
-## Licenca
+CI roda a cada push e pull request via GitHub Actions (`.github/workflows/test.yml`).
 
-GNU GPL v3 — Este software e livre. Voce pode usar, modificar e redistribuir,
-mas QUALQUER trabalho derivado DEVE ser distribuido sob a mesma licenca.
-Nada feito com este codigo pode ser fechado ou proprietario.
+## Documentação
+
+- 📖 [Documentação em português](docs/pt-BR/) — guias detalhados e referência
+- 📖 [English docs](docs/en-US/) — detailed guides and reference
+
+## Licença
+
+**GNU General Public License v3.0** — veja [LICENSE](LICENSE).
+
+Este software é livre: você pode usar, estudar, modificar e redistribuir sob os termos da GPLv3. Qualquer trabalho derivado **deve** ser distribuído sob a mesma licença. Derivados de código fechado ou proprietários não são permitidos.
