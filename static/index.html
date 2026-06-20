@@ -15,6 +15,7 @@
   .col:first-child { display:flex; flex-direction:column; gap:16px; }
   .col + .col { display:flex; flex-direction:column; }
   .col + .col > .card { flex:1; }
+  .col + .col > .card > .checkbox-row { align-items:flex-start; }
   @media (max-width:768px) { .two-col { flex-direction:column; } }
   h1 { color:var(--accent); margin-bottom:8px; font-size:1.6rem; }
   .subtitle { color:#888; margin-bottom:24px; font-size:0.9rem; }
@@ -26,8 +27,8 @@
   .field input, .field select, .field textarea { width:100%; padding:8px 10px; background:var(--input); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.9rem; }
   .field textarea { resize:vertical; min-height:80px; font-family:monospace; }
   .field input:focus, .field select:focus, .field textarea:focus { outline:none; border-color:var(--accent); }
-  .checkbox-row { display:flex; align-items:flex-start; gap:8px; margin-bottom:0; }
-  .checkbox-row input[type=checkbox] { width:auto; accent-color:var(--accent); margin-top:2px; }
+  .checkbox-row { display:flex; align-items:center; gap:8px; }
+  .checkbox-row input[type=checkbox] { width:auto; accent-color:var(--accent); }
   .inline { display:flex; gap:8px; align-items:center; }
   .inline input { width:80px; }
   .inline select { width:110px; }
