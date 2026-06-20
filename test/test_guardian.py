@@ -648,3 +648,58 @@ class TestSendNotification:
             # mas se ocorrer por algum motivo, deve ser logado
             m_log.assert_called_once()
             assert "Apprise" in m_log.call_args[0][0]
+
+
+# ── qBit session ────────────────────────────────────────────────────────
+
+class TestQbitSession:
+    """get_qbit_session() com verify=False (homelab, SSL auto-assinado)."""
+
+    def test_session_has_verify_false(self, tmp_config):
+        """Sessao do qBittorrent SEMPRE usa verify=False."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["qbit"]["url"] = "https://torrent.home.arpa/"
+        g.save_config(cfg)
+
+        # Forcar reset da sessao
+        g._qbit_session = None
+        g._qbit_base = None
+
+        sess, base = g.get_qbit_session()
+        assert sess.verify is False
+        assert base == "https://torrent.home.arpa"
+
+    def test_session_reused_when_base_unchanged(self, tmp_config):
+        """Sessao e reutilizada quando a URL base nao muda."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["qbit"]["url"] = "https://torrent.home.arpa/"
+        g.save_config(cfg)
+
+        g._qbit_session = None
+        g._qbit_base = None
+
+        sess1, _ = g.get_qbit_session()
+        sess2, _ = g.get_qbit_session()
+        assert sess1 is sess2
+
+    def test_session_recreated_when_base_changes(self, tmp_config):
+        """Sessao e recriada quando a URL base muda."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["qbit"]["url"] = "https://torrent.home.arpa/"
+        g.save_config(cfg)
+
+        g._qbit_session = None
+        g._qbit_base = None
+
+        sess1, _ = g.get_qbit_session()
+
+        # Mudar URL
+        cfg["qbit"]["url"] = "http://192.168.1.10:8080/"
+        g.save_config(cfg)
+
+        sess2, _ = g.get_qbit_session()
+        assert sess1 is not sess2
+        assert sess2.verify is False  # Nova sessao tambem verify=False

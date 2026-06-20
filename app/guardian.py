@@ -74,6 +74,7 @@ def get_qbit_session():
     base = url
     if _qbit_session is None or _qbit_base != base:
         _qbit_session = requests.Session()
+        _qbit_session.verify = False  # Homelab: certificados auto-assinados
         _qbit_session.headers.update({"Authorization": f"Bearer {key}"})
         _qbit_base = base
     return _qbit_session, _qbit_base
