@@ -1,19 +1,21 @@
 # 🛡️ qbit-guardian
 
-Protege seu qBittorrent contra torrents maliciosos.
+Protect your qBittorrent from malicious torrents.
 
-Monitora torrents ativos e remove automaticamente arquivos com extensoes perigosas (.exe, .scr, .bat, etc), torrents sem seeds ou parados ha muito tempo. Integra com Sonarr e Radarr para bloquear e disparar nova busca automaticamente.
+Monitors active torrents and automatically removes files with dangerous extensions (.exe, .scr, .bat, etc.), seedless torrents, or those stalled for too long. Integrates with Sonarr and Radarr for blocklisting and automatic re-search.
+
+> 📖 **Leia em português:** [README.pt-BR.md](README.pt-BR.md)
 
 ## Features
 
-- 🔍 Detecta e remove torrents com arquivos perigosos
-- 🎬 Integracao com Radarr (blocklist + re-search)
-- 📺 Integracao com Sonarr (blocklist + re-search com validacao de data de lancamento)
-- 🗑️ Remove torrents stalled ou sem seeds
-- 🔔 Notificacoes via Apprise (Telegram, Discord, etc)
-- ⚡ Otimizacao automatica de prioridades de arquivos
-- 🖥️ Web UI para configuracao
-- 🪝 Modo webhook (tempo real) alem do polling tradicional
+- 🔍 Detects and removes torrents with dangerous files
+- 🎬 Radarr integration (blocklist + re-search)
+- 📺 Sonarr integration (blocklist + re-search with airdate validation)
+- 🗑️ Removes stalled or seedless torrents
+- 🔔 Notifications via Apprise (Telegram, Discord, etc.)
+- ⚡ Automatic file priority optimization
+- 🖥️ Web UI for configuration
+- 🪝 Webhook mode (real-time) in addition to traditional polling
 
 ## Quick Start (Docker)
 
@@ -29,9 +31,9 @@ services:
     restart: unless-stopped
 ```
 
-Acesse `http://seu-host:5000` para configurar.
+Access `http://your-host:5000` to configure.
 
-## Instalacao Manual (sem Docker)
+## Manual Installation (without Docker)
 
 ```bash
 git clone https://forgejo.home.arpa/Humberto/qbit-guardian.git
@@ -39,59 +41,59 @@ cd qbit-guardian
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp config.json.example config.json  # edite com suas credenciais
-python app.py
+cp config.json.example config.json  # edit with your credentials
+python app/app.py
 ```
 
-## Configuracao via Web UI
+## Configuration via Web UI
 
-Apos iniciar, acesse a interface web e configure:
+After starting, access the web interface and configure:
 
-- **qBittorrent**: host, porta, API key
-- **Sonarr/Radarr**: hosts, portas, API keys
-- **Extensoes**: validas e perigosas (customizaveis)
-- **Stalled/No-seeds**: tempo limite para remocao
-- **Notificacoes**: Apprise URL
-- **Prioridades**: Configuravel (0-7, igual escala do qBit)
-- **Modo webhook**: Intervalo = 0 desativa polling, use com script no qBit
+- **qBittorrent**: host, port, API key
+- **Sonarr/Radarr**: hosts, ports, API keys
+- **Extensions**: valid and dangerous (customizable)
+- **Stalled/No-seeds**: time limit for removal
+- **Notifications**: Apprise URL
+- **Priorities**: Configurable (0-7, same scale as qBit)
+- **Webhook mode**: Interval = 0 disables polling, use with the webhook script in qBit
 
-## Modos de operacao
+## Operating Modes
 
-### Polling (padrao)
+### Polling (default)
 
-O guardian verifica os torrents a cada N segundos. Configure `check_interval_seconds` na Web UI.
+The guardian checks torrents every N seconds. Set `check_interval_seconds` in the Web UI.
 
-### Webhook (tempo real)
+### Webhook (real-time)
 
-Configure `check_interval_seconds = 0` e adicione o script de webhook no qBittorrent:
+Set `check_interval_seconds = 0` and add the webhook script to qBittorrent:
 
-**1. No qBittorrent:** Settings > Downloads > Run external program on torrent added
+**1. In qBittorrent:** Settings > Downloads > Run external program on torrent added
 ```
 /scripts/qbit-guardian-hook.sh
 ```
 
-**2. Monte o script no container qBit:**
+**2. Mount the script in your qBit container:**
 ```yaml
 volumes:
-  - ./caminho/para/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh
+  - ./path/to/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh
 ```
 
-Quando um torrent e adicionado, o qBit chama o script que faz `POST /api/trigger` no guardian, processando o torrent em tempo real.
+When a torrent is added, qBit calls the script which sends `POST /api/trigger` to the guardian, processing the torrent in real time.
 
-## API REST
+## REST API
 
-A Web UI expoe os seguintes endpoints:
+The Web UI exposes the following endpoints:
 
-| Metodo | Endpoint | Descricao |
-|--------|----------|-----------|
-| `GET` | `/api/health` | Healthcheck — retorna `{"status": "ok"}` |
-| `GET` | `/api/config` | Le a configuracao atual (JSON completo) |
-| `POST` | `/api/config` | Salva a configuracao (JSON no body) |
-| `POST` | `/api/trigger` | Forca verificacao imediata (usado pelo webhook) |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/health` | Healthcheck — returns `{"status": "ok"}` |
+| `GET` | `/api/config` | Read current configuration (full JSON) |
+| `POST` | `/api/config` | Save configuration (JSON body, deep merge) |
+| `POST` | `/api/trigger` | Force immediate check (used by webhook) |
 
-### Healthcheck Docker
+### Docker Healthcheck
 
-O guardian escreve um heartbeat em `/tmp/heartbeat`. Use no `docker-compose.yml`:
+The guardian writes a heartbeat to `/tmp/heartbeat`. Use in `docker-compose.yml`:
 
 ```yaml
 healthcheck:
@@ -101,30 +103,30 @@ healthcheck:
   retries: 3
 ```
 
-## Variaveis de Ambiente
+## Environment Variables
 
-| Variavel | Padrao | Descricao |
-|----------|--------|-----------|
-| `CONFIG_PATH` | `./config.json` | Caminho do arquivo de config |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONFIG_PATH` | `./config.json` | Path to config file |
 
-## Desenvolvimento
+## Development
 
 ```bash
-# Instalar dependencias (inclui pytest)
+# Install dependencies (includes pytest)
 pip install -r requirements.txt
 
-# Rodar todos os testes (37: 25 funcionais + 12 seguranca)
+# Run all tests (58: 42 functional + 16 security)
 python -m pytest test/ -v
 
-# Apenas testes funcionais
+# Functional tests only
 python -m pytest test/test_guardian.py -v
 
-# Apenas testes de seguranca
+# Security tests only
 python -m pytest test/test_security.py -v
 ```
 
-## Licenca
+## License
 
-GNU GPL v3 — Este software e livre. Voce pode usar, modificar e redistribuir,
-mas QUALQUER trabalho derivado DEVE ser distribuido sob a mesma licenca.
-Nada feito com este codigo pode ser fechado ou proprietario.
+GNU GPL v3 — This software is free. You may use, modify, and redistribute it,
+but ANY derivative work MUST be distributed under the same license.
+Nothing made with this code may be closed-source or proprietary.
