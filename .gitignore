@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .env/
 *.code-workspace
+
+# Desenvolvimento local
+dev-config.json
+docker-compose.dev.yaml
