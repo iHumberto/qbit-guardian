@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Shield body with gradient -->
+  <defs>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#e94560;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#c0392b;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="innerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#16213e;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#0f0f1a;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Shield outline -->
+  <path d="M32 4 L58 14 L58 32 C58 46 44 58 32 62 C20 58 6 46 6 32 L6 14 Z"
+        fill="url(#shieldGrad)" stroke="#e94560" stroke-width="2"/>
+
+  <!-- Inner shield -->
+  <path d="M32 10 L52 18 L52 32 C52 43 40 53 32 56 C24 53 12 43 12 32 L12 18 Z"
+        fill="url(#innerGrad)" stroke="none"/>
+
+  <!-- Checkmark -->
+  <polyline points="22,34 29,41 43,25"
+            fill="none" stroke="#e94560" stroke-width="4"
+            stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
