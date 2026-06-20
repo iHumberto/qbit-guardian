@@ -703,3 +703,60 @@ class TestQbitSession:
         sess2, _ = g.get_qbit_session()
         assert sess1 is not sess2
         assert sess2.verify is False  # Nova sessao tambem verify=False
+
+
+# ── Sonarr/Radarr SSL ─────────────────────────────────────────────────────
+
+class TestArrSession:
+    """_handle_arr() usa Session com verify=False (homelab, SSL auto-assinado)."""
+
+    def test_sonarr_session_has_verify_false(self, tmp_config):
+        """Sonarr: sessao criada com verify=False."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["sonarr"]["url"] = "https://sonarr.home.arpa/"
+        cfg["sonarr"]["api_key"] = "skey"
+        g.save_config(cfg)
+
+        mock_session = mock.MagicMock()
+        mock_session.get.return_value.json.return_value = {"records": []}
+
+        with mock.patch("app.guardian.requests.Session", return_value=mock_session) as m_session:
+            g._handle_arr("Sonarr", "sonarr", "hash123", "Test.Show")
+
+        m_session.assert_called_once()
+        # A sessao deve ter verify=False
+        assert mock_session.verify is False
+
+    def test_radarr_session_has_verify_false(self, tmp_config):
+        """Radarr: sessao criada com verify=False."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["radarr"]["url"] = "https://radarr.home.arpa/"
+        cfg["radarr"]["api_key"] = "rkey"
+        g.save_config(cfg)
+
+        mock_session = mock.MagicMock()
+        mock_session.get.return_value.json.return_value = {"records": []}
+
+        with mock.patch("app.guardian.requests.Session", return_value=mock_session) as m_session:
+            g._handle_arr("Radarr", "radarr", "hash456", "Test.Movie")
+
+        m_session.assert_called_once()
+        assert mock_session.verify is False
+
+    def test_arr_session_headers_set(self, tmp_config):
+        """Headers X-Api-Key sao injetados na sessao."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["sonarr"]["url"] = "https://sonarr.home.arpa/"
+        cfg["sonarr"]["api_key"] = "my-secret-key"
+        g.save_config(cfg)
+
+        mock_session = mock.MagicMock()
+        mock_session.get.return_value.json.return_value = {"records": []}
+
+        with mock.patch("app.guardian.requests.Session", return_value=mock_session):
+            g._handle_arr("Sonarr", "sonarr", "hash123", "Test.Show")
+
+        mock_session.headers.update.assert_called_once_with({"X-Api-Key": "my-secret-key"})

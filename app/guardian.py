@@ -161,15 +161,19 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
         base = f"{url}/api/v3"
         hdrs = {"X-Api-Key": key}
 
+        sess = requests.Session()
+        sess.verify = False  # Homelab: certificados auto-assinados
+        sess.headers.update(hdrs)
+
         # 1. Buscar na queue
-        rq = requests.get(f"{base}/queue", headers=hdrs, timeout=10)
+        rq = sess.get(f"{base}/queue", timeout=10)
         item_id = None
         extra_ids = []  # Sonarr: episode_ids
 
         for item in rq.json().get("records", []):
             if item.get("downloadId", "").lower() == torrent_hash.lower():
                 # Blocklist
-                requests.delete(f"{base}/queue/{item['id']}", headers=hdrs,
+                sess.delete(f"{base}/queue/{item['id']}",
                                 params={"blocklist": "true", "removeFromClient": "false"},
                                 timeout=10)
                 log.info(f"{arr_type}: '{torrent_name}' -> BLOCKLIST")
@@ -187,10 +191,10 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
         # 2. Fallback: busca por nome
         if not item_id:
             if arr_type == "Radarr":
-                rm = requests.get(f"{base}/movie", headers=hdrs, timeout=10)
+                rm = sess.get(f"{base}/movie", timeout=10)
                 item_id = _arr_match_by_name(rm.json(), torrent_name)
             elif arr_type == "Sonarr":
-                rs = requests.get(f"{base}/series", headers=hdrs, timeout=10)
+                rs = sess.get(f"{base}/series", timeout=10)
                 item_id = _arr_match_by_name(rs.json(), torrent_name)
 
         if not item_id:
@@ -198,7 +202,7 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
 
         # 3. Disparar re-search
         if arr_type == "Radarr":
-            requests.post(f"{base}/command", headers=hdrs,
+            sess.post(f"{base}/command",
                           json={"name": "MoviesSearch", "movieIds": [item_id]},
                           timeout=10)
             log.info("Radarr: busca disparada")
@@ -210,7 +214,7 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
                 released = []
                 for eid in extra_ids:
                     try:
-                        re = requests.get(f"{base}/episode/{eid}", headers=hdrs,
+                        re = sess.get(f"{base}/episode/{eid}",
                                          timeout=10)
                         ad = re.json().get("airDateUtc")
                         if ad:
@@ -226,7 +230,7 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
                         released.append(eid)
 
                 if released:
-                    requests.post(f"{base}/command", headers=hdrs,
+                    sess.post(f"{base}/command",
                                   json={"name": "EpisodeSearch",
                                         "episodeIds": released},
                                   timeout=10)
@@ -234,7 +238,7 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
                 else:
                     log.warning(f"Sonarr: '{torrent_name}' episodios nao lancados")
             else:
-                requests.post(f"{base}/command", headers=hdrs,
+                sess.post(f"{base}/command",
                               json={"name": "SeriesSearch",
                                     "seriesId": item_id},
                               timeout=10)
