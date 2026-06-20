@@ -33,9 +33,9 @@ def tmp_config():
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump({
-            "qbit": {"host": "localhost", "port": 8080, "api_key": "test-key"},
-            "sonarr": {"host": "sonarr", "port": 8989, "api_key": "skey"},
-            "radarr": {"host": "radarr", "port": 7878, "api_key": "rkey"},
+            "qbit": {"url": "http://localhost:8080", "api_key": "test-key"},
+            "sonarr": {"url": "http://sonarr:8989", "api_key": "skey"},
+            "radarr": {"url": "http://radarr:7878", "api_key": "rkey"},
             "guardian": {
                 "check_interval_seconds": 300,
                 "valid_media_extensions": [".mkv", ".mp4", ".avi"],
@@ -372,7 +372,7 @@ class TestFlaskEndpoints:
     def test_post_config_persists_with_deep_merge(self, client, tmp_config):
         """POST faz deep merge — campos ausentes preservados."""
         payload = {
-            "qbit": {"host": "10.0.0.1", "port": 9090}
+            "qbit": {"url": "http://10.0.0.1:9090"}
         }
         r = client.post("/api/config", json=payload)
         assert r.status_code == 200
@@ -380,8 +380,7 @@ class TestFlaskEndpoints:
         r2 = client.get("/api/config")
         saved = r2.json
         # Campos enviados: atualizados
-        assert saved["qbit"]["host"] == "10.0.0.1"
-        assert saved["qbit"]["port"] == 9090
+        assert saved["qbit"]["url"] == "http://10.0.0.1:9090"
         # Campo nao enviado: preservado
         assert saved["qbit"]["api_key"] == "test-key"
         # Outras secoes: intactas
@@ -466,7 +465,7 @@ class TestHttpAuth:
 
     def test_auth_allows_post_config_with_credentials(self, client, tmp_config):
         self._enable_auth(tmp_config)
-        r = client.post("/api/config", json={"qbit": {"host": "test", "port": 1, "api_key": "k"}},
+        r = client.post("/api/config", json={"qbit": {"url": "http://test:1", "api_key": "k"}},
                         headers={"Authorization": self.AUTH})
         assert r.status_code == 200
 
@@ -495,7 +494,7 @@ class TestDeepMerge:
         saved = client.get("/api/config").json
         assert saved["guardian"]["check_interval_seconds"] == 999
         assert saved["guardian"]["valid_media_extensions"] == [".mkv", ".mp4", ".avi"]
-        assert saved["qbit"]["host"] == "localhost"
+        assert saved["qbit"]["url"] == "http://localhost:8080"
         assert saved["sonarr"]["api_key"] == "skey"
 
     def test_merge_adds_new_top_level_keys(self, client, tmp_config):
@@ -511,12 +510,12 @@ class TestDeepMerge:
     def test_merge_overwrites_scalar_values(self, client, tmp_config):
         """Valores escalares sao sobrescritos."""
         r = client.post("/api/config", json={
-            "qbit": {"host": "new-host", "port": 9090, "api_key": "new-key",
+            "qbit": {"url": "http://new-host:9090", "api_key": "new-key",
                      "extra_field": "bonus"}
         })
         assert r.status_code == 200
         saved = client.get("/api/config").json
-        assert saved["qbit"]["host"] == "new-host"
+        assert saved["qbit"]["url"] == "http://new-host:9090"
         assert saved["qbit"]["extra_field"] == "bonus"
 
 

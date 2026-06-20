@@ -1,17 +1,14 @@
 {
   "qbit": {
-    "host": "localhost",
-    "port": 8080,
+    "url": "http://localhost:8080",
     "api_key": ""
   },
   "sonarr": {
-    "host": "",
-    "port": 8989,
+    "url": "",
     "api_key": ""
   },
   "radarr": {
-    "host": "",
-    "port": 7878,
+    "url": "",
     "api_key": ""
   },
   "guardian": {

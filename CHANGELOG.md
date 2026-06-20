@@ -10,6 +10,7 @@ e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Adicionado
 - Web UI em Flask (`web.py`) para configuracao visual — acesse `http://host:5000`
 - Frontend single-page (`static/index.html`) com fetch API, sem frameworks JS
+- Favicon shield (escudo) em `static/favicon.svg` — icone da aba do navegador, tema dark
 - Persistencia de configuracao em `config.json` (substitui env vars)
 - Thread-safety com `threading.Lock` no acesso ao arquivo de config
 - Modo webhook: `check_interval_seconds = 0` + script `qbit-guardian-hook.sh`

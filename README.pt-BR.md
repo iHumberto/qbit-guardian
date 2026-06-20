@@ -35,7 +35,7 @@ Ele roda como um container Docker leve (ou como um processo Python) com uma inte
 - 🗑️ **Remoção de stalled e sem seeds** — limpa torrents mortos após um tempo configurável
 - ⚡ **Otimização de prioridades** — prioriza automaticamente arquivos de mídia, reduz ou pula arquivos inúteis
 - 🔔 **Notificações via Apprise** — alertas por Telegram, Discord, Slack, Pushover e mais de 100 outros serviços
-- 🖥️ **Web UI** — painel de configuração com tema escuro e suporte a HTTP Basic Auth
+- 🖥️ **Web UI** — duas colunas com tema escuro: serviços externos (qBittorrent, Sonarr, Radarr, notificações) à esquerda, configurações do Guardian à direita. Suporte a HTTP Basic Auth
 - 🪝 **Modo webhook** — processamento em tempo real quando um torrent é adicionado (sem delay de polling)
 - 🐳 **Docker-first** — imagem pronta no `ghcr.io`, healthcheck incluso
 
@@ -81,6 +81,15 @@ docker compose up -d qbit-guardian
 Acesse `http://seu-host:5000` para configurar o restante (Sonarr, Radarr, notificações, etc.).
 
 > 💡 **O que é uma API Key?** É uma senha longa e aleatória que o qBittorrent gera para que outros programas (como o qbit-guardian) conversem com ele de forma segura. Encontre a sua no qBittorrent em **Ferramentas → Opções → Web UI → Chave da API**.
+
+### Layout da Web UI
+
+A página de configuração é dividida em duas colunas:
+
+- **Coluna esquerda**: conexões com seus serviços externos — qBittorrent, Sonarr, Radarr e notificações via Apprise.
+- **Coluna direita**: todas as configurações do Guardian — intervalo de verificação, extensões de arquivo, prioridades e regras de remoção de stalled/sem seeds.
+
+Em celulares e tablets (telas com menos de 768 px de largura), as colunas se empilham na vertical para manter tudo fácil de usar.
 
 ## Instalação Manual (sem Docker)
 

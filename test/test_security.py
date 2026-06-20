@@ -32,9 +32,9 @@ def tmp_config():
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump({
-            "qbit": {"host": "localhost", "port": 8080, "api_key": "test-key"},
-            "sonarr": {"host": "", "port": 8989, "api_key": ""},
-            "radarr": {"host": "", "port": 7878, "api_key": ""},
+            "qbit": {"url": "http://localhost:8080", "api_key": "test-key"},
+            "sonarr": {"url": "", "api_key": ""},
+            "radarr": {"url": "", "api_key": ""},
             "guardian": {
                 "check_interval_seconds": 300,
                 "valid_media_extensions": [".mkv", ".mp4"],
@@ -108,7 +108,7 @@ class TestAuth:
     def test_auth_enabled_allows_post_with_credentials(self, client, tmp_config):
         """POST com auth correta -> 200."""
         self._enable_auth(tmp_config)
-        r = client.post("/api/config", json={"qbit": {"host": "test", "port": 1, "api_key": "k"}},
+        r = client.post("/api/config", json={"qbit": {"url": "http://test:1", "api_key": "k"}},
                         headers={"Authorization": self.AUTH})
         assert r.status_code == 200
 
@@ -128,9 +128,9 @@ class TestXSS:
     def test_xss_in_extensions_sanitized(self, client, tmp_config):
         """Injetar <script> no campo de extensoes nao deve executar."""
         payload = {
-            "qbit": {"host": "localhost", "port": 8080, "api_key": "x"},
-            "sonarr": {"host": "", "port": 8989, "api_key": ""},
-            "radarr": {"host": "", "port": 7878, "api_key": ""},
+            "qbit": {"url": "http://localhost:8080", "api_key": "x"},
+            "sonarr": {"url": "", "api_key": ""},
+            "radarr": {"url": "", "api_key": ""},
             "guardian": {
                 "check_interval_seconds": 300,
                 "valid_media_extensions": [".mkv"],
@@ -163,9 +163,9 @@ class TestCSRF:
     def test_post_config_without_csrf_still_works(self, client, tmp_config):
         """POST sem token CSRF — aceito (API local, auth desabilitada)."""
         r = client.post("/api/config", json={
-            "qbit": {"host": "test", "port": 8080, "api_key": "k"},
-            "sonarr": {"host": "", "port": 8989, "api_key": ""},
-            "radarr": {"host": "", "port": 7878, "api_key": ""},
+            "qbit": {"url": "http://test:8080", "api_key": "k"},
+            "sonarr": {"url": "", "api_key": ""},
+            "radarr": {"url": "", "api_key": ""},
             "guardian": {
                 "check_interval_seconds": 300,
                 "valid_media_extensions": [".mkv"],
@@ -192,9 +192,9 @@ class TestConfigIntegrity:
         """Campos nao enviados no POST sao preservados (deep merge)."""
         # Salva config inicial com um valor conhecido
         initial = {
-            "qbit": {"host": "keep-me", "port": 8080, "api_key": "k"},
-            "sonarr": {"host": "", "port": 8989, "api_key": ""},
-            "radarr": {"host": "", "port": 7878, "api_key": ""},
+            "qbit": {"url": "http://keep-me:8080", "api_key": "k"},
+            "sonarr": {"url": "", "api_key": ""},
+            "radarr": {"url": "", "api_key": ""},
             "guardian": {
                 "check_interval_seconds": 300,
                 "valid_media_extensions": [".mkv"],
@@ -209,17 +209,16 @@ class TestConfigIntegrity:
         with open(tmp_config, "w") as f:
             json.dump(initial, f)
 
-        # POST sem o campo qbit.host
+        # POST apenas com api_key nova — url deve ser preservada
         r = client.post("/api/config", json={
-            "qbit": {"port": 9090, "api_key": "new-key"}
+            "qbit": {"api_key": "new-key"}
         })
         assert r.status_code == 200
 
-        # Deep merge: qbit.host deve ser preservado, port e api_key atualizados
+        # Deep merge: url preservada, api_key atualizada
         with open(tmp_config) as f:
             saved = json.load(f)
-        assert saved["qbit"]["host"] == "keep-me"
-        assert saved["qbit"]["port"] == 9090
+        assert saved["qbit"]["url"] == "http://keep-me:8080"
         assert saved["qbit"]["api_key"] == "new-key"
         # Outras secoes intactas
         assert saved["guardian"]["check_interval_seconds"] == 300
@@ -227,9 +226,9 @@ class TestConfigIntegrity:
     def test_deep_merge_preserves_nested_fields(self, client, tmp_config):
         """Merge preserva subsections inteiras quando nao enviadas."""
         initial = {
-            "qbit": {"host": "x", "port": 8080, "api_key": "k"},
-            "sonarr": {"host": "sonarr.local", "port": 8989, "api_key": "sk"},
-            "radarr": {"host": "", "port": 7878, "api_key": ""},
+            "qbit": {"url": "http://x:8080", "api_key": "k"},
+            "sonarr": {"url": "http://sonarr.local:8989", "api_key": "sk"},
+            "radarr": {"url": "", "api_key": ""},
             "guardian": {
                 "check_interval_seconds": 300,
                 "valid_media_extensions": [".mkv"],
@@ -254,7 +253,7 @@ class TestConfigIntegrity:
             saved = json.load(f)
         assert saved["guardian"]["check_interval_seconds"] == 60
         assert saved["guardian"]["valid_media_extensions"] == [".mkv"]
-        assert saved["sonarr"]["host"] == "sonarr.local"
+        assert saved["sonarr"]["url"] == "http://sonarr.local:8989"
 
 
 # ── Vetores secundários ────────────────────────────────────────────────
@@ -266,9 +265,9 @@ class TestRaceCondition:
         """Multiplas leituras simultaneas nao corrompem o arquivo."""
         import app.guardian as g
 
-        valid = {"qbit": {"host": "x", "port": 1, "api_key": "k"},
-                 "sonarr": {"host": "", "port": 8989, "api_key": ""},
-                 "radarr": {"host": "", "port": 7878, "api_key": ""},
+        valid = {"qbit": {"url": "http://x:1", "api_key": "k"},
+                 "sonarr": {"url": "", "api_key": ""},
+                 "radarr": {"url": "", "api_key": ""},
                  "guardian": {
                      "check_interval_seconds": 300,
                      "valid_media_extensions": [], "dangerous_extensions": [],
@@ -317,9 +316,9 @@ class TestJSONInjection:
     def test_nested_json_injection_in_api_key(self, client, tmp_config):
         """Injetar JSON malicioso via campo api_key."""
         payload = {
-            "qbit": {"host": "x", "port": 8080, "api_key": '\"; alert(1); \"'},
-            "sonarr": {"host": "", "port": 8989, "api_key": ""},
-            "radarr": {"host": "", "port": 7878, "api_key": ""},
+            "qbit": {"url": "http://x:8080", "api_key": '\"; alert(1); \"'},
+            "sonarr": {"url": "", "api_key": ""},
+            "radarr": {"url": "", "api_key": ""},
             "guardian": {
                 "check_interval_seconds": 300,
                 "valid_media_extensions": [".mkv"],
@@ -340,9 +339,9 @@ class TestJSONInjection:
     def test_priority_out_of_range(self, client, tmp_config):
         """Prioridade >7 ou <0 deve ser aceita mas cabe ao guardian validar."""
         payload = {
-            "qbit": {"host": "x", "port": 8080, "api_key": "k"},
-            "sonarr": {"host": "", "port": 8989, "api_key": ""},
-            "radarr": {"host": "", "port": 7878, "api_key": ""},
+            "qbit": {"url": "http://x:8080", "api_key": "k"},
+            "sonarr": {"url": "", "api_key": ""},
+            "radarr": {"url": "", "api_key": ""},
             "guardian": {
                 "check_interval_seconds": 300,
                 "valid_media_extensions": [".mkv"],
@@ -365,9 +364,9 @@ class TestEdgeCases:
     def test_unicode_in_extensions(self, client, tmp_config):
         """Extensoes com caracteres Unicode devem ser preservadas."""
         payload = {
-            "qbit": {"host": "x", "port": 8080, "api_key": "k"},
-            "sonarr": {"host": "", "port": 8989, "api_key": ""},
-            "radarr": {"host": "", "port": 7878, "api_key": ""},
+            "qbit": {"url": "http://x:8080", "api_key": "k"},
+            "sonarr": {"url": "", "api_key": ""},
+            "radarr": {"url": "", "api_key": ""},
             "guardian": {
                 "check_interval_seconds": 300,
                 "valid_media_extensions": [".mkv"],
@@ -389,9 +388,9 @@ class TestEdgeCases:
     def test_empty_extensions_list(self, client, tmp_config):
         """Lista vazia de extensoes perigosas — nada e removido."""
         payload = {
-            "qbit": {"host": "x", "port": 8080, "api_key": "k"},
-            "sonarr": {"host": "", "port": 8989, "api_key": ""},
-            "radarr": {"host": "", "port": 7878, "api_key": ""},
+            "qbit": {"url": "http://x:8080", "api_key": "k"},
+            "sonarr": {"url": "", "api_key": ""},
+            "radarr": {"url": "", "api_key": ""},
             "guardian": {
                 "check_interval_seconds": 300,
                 "valid_media_extensions": [".mkv"],
@@ -422,9 +421,9 @@ class TestEdgeCases:
     def test_config_with_extra_unknown_fields(self, client, tmp_config):
         """Campos desconhecidos sao preservados silenciosamente (deep merge)."""
         payload = {
-            "qbit": {"host": "x", "port": 8080, "api_key": "k"},
-            "sonarr": {"host": "", "port": 8989, "api_key": ""},
-            "radarr": {"host": "", "port": 7878, "api_key": ""},
+            "qbit": {"url": "http://x:8080", "api_key": "k"},
+            "sonarr": {"url": "", "api_key": ""},
+            "radarr": {"url": "", "api_key": ""},
             "guardian": {
                 "check_interval_seconds": 300,
                 "valid_media_extensions": [".mkv"],

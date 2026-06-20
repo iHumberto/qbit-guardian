@@ -52,28 +52,19 @@
     <div class="col">
       <div class="card">
         <h2>🔗 qBittorrent</h2>
-        <div class="row">
-          <div class="field"><label>Host</label><input id="qbit_host" placeholder="localhost"></div>
-          <div class="field"><label>Porta</label><input id="qbit_port" type="number" placeholder="8080"></div>
-        </div>
+        <div class="field"><label>URL</label><input id="qbit_url" placeholder="http://192.168.15.3:8080"></div>
         <div class="field"><label>API Key</label><input id="qbit_api_key" type="password" placeholder="Cole sua QBittorrent API Key aqui"></div>
       </div>
 
       <div class="card">
         <h2>📺 Sonarr</h2>
-        <div class="row">
-          <div class="field"><label>Host</label><input id="sonarr_host" placeholder="sonarr"></div>
-          <div class="field"><label>Porta</label><input id="sonarr_port" type="number" placeholder="8989"></div>
-        </div>
+        <div class="field"><label>URL</label><input id="sonarr_url" placeholder="http://192.168.15.3:8989"></div>
         <div class="field"><label>API Key</label><input id="sonarr_api_key" type="password" placeholder="API Key do Sonarr"></div>
       </div>
 
       <div class="card">
         <h2>🎬 Radarr</h2>
-        <div class="row">
-          <div class="field"><label>Host</label><input id="radarr_host" placeholder="radarr"></div>
-          <div class="field"><label>Porta</label><input id="radarr_port" type="number" placeholder="7878"></div>
-        </div>
+        <div class="field"><label>URL</label><input id="radarr_url" placeholder="http://192.168.15.3:7878"></div>
         <div class="field"><label>API Key</label><input id="radarr_api_key" type="password" placeholder="API Key do Radarr"></div>
       </div>
 
@@ -166,14 +157,11 @@ async function loadConfig() {
   try {
     const r = await fetch(API);
     const c = await r.json();
-    setVal('qbit_host', c.qbit.host);
-    setVal('qbit_port', c.qbit.port);
+    setVal('qbit_url', c.qbit.url);
     setVal('qbit_api_key', c.qbit.api_key);
-    setVal('radarr_host', c.radarr.host);
-    setVal('radarr_port', c.radarr.port);
+    setVal('radarr_url', c.radarr.url);
     setVal('radarr_api_key', c.radarr.api_key);
-    setVal('sonarr_host', c.sonarr.host);
-    setVal('sonarr_port', c.sonarr.port);
+    setVal('sonarr_url', c.sonarr.url);
     setVal('sonarr_api_key', c.sonarr.api_key);
     setVal('check_interval', c.guardian.check_interval_seconds);
     setVal('valid_extensions', (c.guardian.valid_media_extensions||[]).join('\n'));
@@ -196,18 +184,15 @@ async function loadConfig() {
 async function saveConfig() {
   const data = {
     qbit: {
-      host: getVal('qbit_host'),
-      port: parseInt(getVal('qbit_port')) || 8080,
+      url: getVal('qbit_url'),
       api_key: getVal('qbit_api_key')
     },
     sonarr: {
-      host: getVal('sonarr_host'),
-      port: parseInt(getVal('sonarr_port')) || 8989,
+      url: getVal('sonarr_url'),
       api_key: getVal('sonarr_api_key')
     },
     radarr: {
-      host: getVal('radarr_host'),
-      port: parseInt(getVal('radarr_port')) || 7878,
+      url: getVal('radarr_url'),
       api_key: getVal('radarr_api_key')
     },
     guardian: {

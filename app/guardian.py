@@ -64,11 +64,10 @@ _qbit_base = None
 def get_qbit_session():
     global _qbit_session, _qbit_base
     cfg = get_config()
-    host = cfg["qbit"]["host"]
-    port = cfg["qbit"]["port"]
-    key  = cfg["qbit"]["api_key"]
+    url = cfg["qbit"]["url"].rstrip("/")
+    key = cfg["qbit"]["api_key"]
 
-    base = f"http://{host}:{port}"
+    base = url
     if _qbit_session is None or _qbit_base != base:
         _qbit_session = requests.Session()
         _qbit_session.headers.update({"Authorization": f"Bearer {key}"})
@@ -147,14 +146,13 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
     cfg = get_config()
     section = cfg[config_key]
 
-    if not section["host"] or not section["api_key"]:
+    if not section["url"] or not section["api_key"]:
         return
 
     try:
-        host = section["host"]
-        port = section["port"]
-        key  = section["api_key"]
-        base = f"http://{host}:{port}/api/v3"
+        url = section["url"].rstrip("/")
+        key = section["api_key"]
+        base = f"{url}/api/v3"
         hdrs = {"X-Api-Key": key}
 
         # 1. Buscar na queue
