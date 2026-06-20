@@ -10,8 +10,10 @@
   * { box-sizing:border-box; margin:0; padding:0; }
   body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,sans-serif; padding:20px; }
   .container { max-width:1100px; margin:0 auto; }
-  .two-col { display:flex; gap:20px; align-items:flex-start; }
+  .two-col { display:flex; gap:30px; align-items:stretch; }
   .col { flex:1; min-width:0; }
+  .col + .col { display:flex; flex-direction:column; }
+  .col + .col > .card { flex:1; }
   @media (max-width:768px) { .two-col { flex-direction:column; } }
   h1 { color:var(--accent); margin-bottom:8px; font-size:1.6rem; }
   .subtitle { color:#888; margin-bottom:24px; font-size:0.9rem; }
@@ -28,7 +30,7 @@
   .inline { display:flex; gap:8px; align-items:center; }
   .inline input { width:80px; }
   .inline select { width:110px; }
-  .btn-row { display:flex; gap:12px; margin-top:20px; }
+  .btn-row { display:flex; gap:12px; margin-top:20px; justify-content:flex-end; }
   .btn { padding:10px 24px; border:none; border-radius:4px; cursor:pointer; font-size:0.95rem; font-weight:600; }
   .btn-save { background:var(--accent); color:#fff; }
   .btn-save:hover { opacity:0.85; }
