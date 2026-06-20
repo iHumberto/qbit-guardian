@@ -17,8 +17,8 @@ from unittest import mock
 
 import pytest
 
-import guardian as g
-from web import app
+import app.guardian as g
+from app.web import app
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ from web import app
 @pytest.fixture
 def tmp_config():
     """Config.json temporario isolado por teste."""
-    import web as w
+    import app.web as w
 
     old_path = w.CONFIG_PATH
     old_gpath = g.CONFIG_PATH
@@ -301,7 +301,7 @@ class TestAnalyzeTorrent:
         with mock.patch.object(g, "get_files") as m_files, \
              mock.patch.object(g, "remove_torrent") as m_remove, \
              mock.patch.object(g, "block_and_search"), \
-             mock.patch("guardian.requests.post") as m_post:
+             mock.patch("app.guardian.requests.post") as m_post:
 
             m_files.return_value = [{"index": 0, "name": "virus.exe"}]
 

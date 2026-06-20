@@ -14,8 +14,8 @@ from flask import Flask, request, jsonify, send_from_directory, Response
 log = logging.getLogger("qbit-guardian.web")
 
 CONFIG_PATH = os.environ.get("CONFIG_PATH",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"))
-STATIC_DIR  = os.path.join(os.path.dirname(__file__), "static")
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json"))
+STATIC_DIR  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 
@@ -122,7 +122,7 @@ def api_health():
 @requires_auth
 def api_trigger():
     """Forca uma verificacao imediata (acionamento manual ou webhook)."""
-    import guardian
+    import app.guardian as guardian
     try:
         guardian.load_config()
         torrents = guardian.get_torrents()

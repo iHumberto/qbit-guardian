@@ -5,8 +5,8 @@ Inicia o loop guardian em background thread e o servidor web Flask.
 """
 import threading
 import logging
-from guardian import start_guardian
-from web import start_web
+from app.guardian import start_guardian
+from app.web import start_web
 
 logging.basicConfig(
     level=logging.INFO,

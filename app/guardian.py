@@ -21,7 +21,7 @@ logging.basicConfig(
 log = logging.getLogger("qbit-guardian")
 
 CONFIG_PATH = os.environ.get("CONFIG_PATH",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"))
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json"))
 
 MAX_PROCESSED_SIZE = 10_000
 

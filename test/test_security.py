@@ -13,7 +13,7 @@ import os
 import tempfile
 import base64
 import pytest
-from web import app
+from app.web import app
 
 
 @pytest.fixture
@@ -25,8 +25,8 @@ def client():
 @pytest.fixture
 def tmp_config():
     """Cria config.json temporário e restaura depois."""
-    import web as w
-    import guardian as g
+    import app.web as w
+    import app.guardian as g
     old_path = w.CONFIG_PATH
     old_gpath = g.CONFIG_PATH
 
@@ -264,7 +264,7 @@ class TestRaceCondition:
 
     def test_concurrent_read_write_config(self, tmp_config):
         """Multiplas leituras simultaneas nao corrompem o arquivo."""
-        import guardian as g
+        import app.guardian as g
 
         valid = {"qbit": {"host": "x", "port": 1, "api_key": "k"},
                  "sonarr": {"host": "", "port": 8989, "api_key": ""},
@@ -410,7 +410,7 @@ class TestEdgeCases:
 
     def test_corrupted_config_fallback(self, tmp_config):
         """Config JSON corrompido — load_config deve lancar erro."""
-        import guardian as g
+        import app.guardian as g
         g._config = None
 
         with open(tmp_config, "w") as f:
