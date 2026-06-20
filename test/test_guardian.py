@@ -13,6 +13,7 @@ import os
 import tempfile
 import time
 import base64
+import requests
 from unittest import mock
 
 import pytest
@@ -587,3 +588,77 @@ class TestConfigCacheSync:
             # sleep nao deve ser chamado com intervalo > 0 apos a troca
             # O importante: a funcao retornou (nao entrou em loop infinito)
             assert call_count[0] >= 2, "get_config deveria ter sido chamada ao menos 2x"
+
+
+# ── Notificacoes com SSL auto-assinado ──────────────────────────────────
+
+class TestSendNotificationSSL:
+    """send_notification com suporte a certificados auto-assinados (verify_ssl)."""
+
+    def test_verify_ssl_true_passes_verify_true(self, tmp_config):
+        """verify_ssl: true → verify=True no requests.post."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"]["apprise_url"] = "https://apprise.home.arpa/notify"
+        cfg["notifications"]["verify_ssl"] = True
+        g.save_config(cfg)
+
+        with mock.patch("app.guardian.requests.post") as m_post:
+            g.send_notification("Test", "Body")
+            m_post.assert_called_once()
+            _, kwargs = m_post.call_args
+            assert kwargs["verify"] is True
+
+    def test_verify_ssl_false_passes_verify_false(self, tmp_config):
+        """verify_ssl: false → verify=False no requests.post (homelab com self-signed cert)."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"]["apprise_url"] = "https://apprise.home.arpa/notify/guardian"
+        cfg["notifications"]["verify_ssl"] = False
+        g.save_config(cfg)
+
+        with mock.patch("app.guardian.requests.post") as m_post:
+            g.send_notification("Test", "Body")
+            m_post.assert_called_once()
+            _, kwargs = m_post.call_args
+            assert kwargs["verify"] is False
+
+    def test_verify_ssl_defaults_to_true(self, tmp_config):
+        """Sem campo verify_ssl → verify=True (comportamento seguro por default)."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"]["apprise_url"] = "https://apprise.home.arpa/notify"
+        if "verify_ssl" in cfg["notifications"]:
+            del cfg["notifications"]["verify_ssl"]
+        g.save_config(cfg)
+
+        with mock.patch("app.guardian.requests.post") as m_post:
+            g.send_notification("Test", "Body")
+            m_post.assert_called_once()
+            _, kwargs = m_post.call_args
+            assert kwargs["verify"] is True, "default deve ser True (seguro)"
+
+    def test_no_notification_when_url_empty(self, tmp_config):
+        """URL vazia → requests.post NUNCA chamado."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"]["apprise_url"] = ""
+        g.save_config(cfg)
+
+        with mock.patch("app.guardian.requests.post") as m_post:
+            g.send_notification("Test", "Body")
+            m_post.assert_not_called()
+
+    def test_notification_failure_is_logged_not_raised(self, tmp_config):
+        """Falha no Apprise loga erro, nao interrompe o guardian."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"]["apprise_url"] = "https://apprise.home.arpa/notify"
+        g.save_config(cfg)
+
+        with mock.patch("app.guardian.requests.post",
+                       side_effect=requests.exceptions.SSLError("cert verify failed")), \
+             mock.patch("app.guardian.log.error") as m_log:
+            g.send_notification("Test", "Body")
+            m_log.assert_called_once()
+            assert "Apprise" in m_log.call_args[0][0]

@@ -12,7 +12,11 @@ import time
 import logging
 import threading
 import requests
+import urllib3
 from datetime import datetime, timezone
+
+# Suprimir warnings de SSL inseguro (homelab com certificados auto-assinados)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -119,7 +123,9 @@ def send_notification(title, message):
     if not url:
         return
     try:
-        requests.post(url, data={"title": title, "body": message}, timeout=10)
+        verify_ssl = cfg["notifications"].get("verify_ssl", True)
+        requests.post(url, data={"title": title, "body": message},
+                     timeout=10, verify=verify_ssl)
     except Exception as e:
         log.error(f"Apprise: {e}")
 

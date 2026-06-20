@@ -26,7 +26,8 @@
     "priority_skip": 0
   },
   "notifications": {
-    "apprise_url": ""
+    "apprise_url": "",
+    "verify_ssl": true
   },
   "webui": {
     "user": "",
