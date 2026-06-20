@@ -230,6 +230,67 @@ Want to be absolutely sure? Add a harmless test torrent that contains a `.txt` f
 
 ---
 
+## Setting Up Webhook Mode (real-time)
+
+The webhook lets qBittorrent notify the guardian the instant a torrent is added — no waiting for the next check cycle. It's the fastest and most secure option.
+
+> ⚠️ The webhook script is **non-blocking**: it won't freeze qBittorrent. The main script returns in under 4 milliseconds — qBittorrent keeps running while the guardian checks the torrent in the background.
+
+### Step 1: Mount the script in the qBittorrent container
+
+The `qbit-guardian-hook.sh` script lives in the `scripts/` folder of the qbit-guardian repository. Add this volume to your `qbittorrent` service in `docker-compose.yml`:
+
+```yaml
+services:
+  qbittorrent:
+    # ... your current settings ...
+    volumes:
+      - ./qbit-guardian/scripts/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh:ro
+```
+
+> 💡 The `:ro` at the end means "read-only" — the container can run the script but cannot change it.
+
+### Step 2: Configure qBittorrent
+
+1. In qBittorrent, go to **Tools → Options → Downloads**.
+2. Under **Run external program on torrent added**, paste:
+
+```
+/scripts/qbit-guardian-hook.sh
+```
+
+3. Click **Save**.
+
+### Step 3: Set the environment variable (if needed)
+
+The script uses the `QBIT_GUARDIAN_URL` variable to know where the guardian is. The default value is `http://qbit-guardian:5000`, which works when both containers are on the same Docker network.
+
+If you need a different address (e.g., your server's IP), add the variable to the qBittorrent service:
+
+```yaml
+services:
+  qbittorrent:
+    environment:
+      - QBIT_GUARDIAN_URL=http://192.168.1.100:5000
+```
+
+### Step 4: Set the interval to zero
+
+In the qbit-guardian Web UI, set **Check Interval** to `0`. This disables polling mode and enables webhook mode.
+
+That's it. From now on, every new torrent is checked instantly.
+
+### How the script prevents freezes
+
+The script is designed to be safe in every scenario:
+
+- **10-second sleep:** prevents the guardian from checking a torrent before qBittorrent has finished registering it (race condition).
+- **Curl timeouts:** connection timeout is 5 seconds, total operation timeout is 10 seconds. If the guardian doesn't respond, the script won't hang.
+- **Background execution:** the main script finishes in ~4 ms. qBittorrent doesn't wait for the check to complete — everything happens in a separate process.
+- **Automatic retry:** if the first call fails, the script tries again after 5 seconds.
+
+---
+
 ## Updating
 
 ### Docker

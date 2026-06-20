@@ -207,6 +207,67 @@ Se a resposta for `{"status": "ok", "checked": ..., "new": ...}`, está tudo fun
 
 ---
 
+## Configurando o Webhook (tempo real)
+
+O webhook permite que o qBittorrent avise o guardião no exato momento em que um torrent é adicionado — sem esperar o próximo ciclo de verificação. É a opção mais rápida e segura.
+
+> ⚠️ O script de webhook é **não-bloqueante**: ele não trava o qBittorrent. O script principal retorna em menos de 4 milissegundos — o qBittorrent continua funcionando normalmente enquanto a verificação acontece em segundo plano.
+
+### Passo 1: Monte o script no container do qBittorrent
+
+O script `qbit-guardian-hook.sh` está na pasta `scripts/` do repositório do qbit-guardian. Adicione este volume ao serviço `qbittorrent` no seu `docker-compose.yml`:
+
+```yaml
+services:
+  qbittorrent:
+    # ... suas configurações atuais ...
+    volumes:
+      - ./qbit-guardian/scripts/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh:ro
+```
+
+> 💡 O `:ro` no final significa "read-only" (somente leitura) — o container pode executar o script, mas não pode modificá-lo.
+
+### Passo 2: Configure o qBittorrent
+
+1. No qBittorrent, vá em **Ferramentas → Opções → Downloads**.
+2. Em **Executar programa externo ao adicionar torrent**, cole:
+
+```
+/scripts/qbit-guardian-hook.sh
+```
+
+3. Clique em **Salvar**.
+
+### Passo 3: Configure a variável de ambiente (se necessário)
+
+O script usa a variável `QBIT_GUARDIAN_URL` para saber onde o guardião está. O valor padrão é `http://qbit-guardian:5000`, que funciona se os dois containers estão na mesma rede Docker.
+
+Se precisar de um endereço diferente (ex: IP do servidor), adicione a variável no serviço do qBittorrent:
+
+```yaml
+services:
+  qbittorrent:
+    environment:
+      - QBIT_GUARDIAN_URL=http://192.168.1.100:5000
+```
+
+### Passo 4: Ajuste o intervalo para zero
+
+Na página de controle do qbit-guardian, defina o **Intervalo de verificação** como `0`. Isso desativa o modo polling e ativa o modo webhook.
+
+Pronto. A partir de agora, todo torrent adicionado será verificado instantaneamente.
+
+### Como o script evita travamentos
+
+O script foi projetado para ser seguro em todos os cenários:
+
+- **Sleep de 10 segundos:** evita que o guardião tente verificar o torrent antes de ele estar registrado no qBittorrent (race condition).
+- **Timeouts no curl:** conexão tem limite de 5 segundos, operação completa de 10 segundos. Se o guardião não responder, o script não trava.
+- **Execução em segundo plano:** o script principal termina em ~4 ms. O qBittorrent não espera a verificação terminar — tudo acontece em um processo separado.
+- **Tentativa extra:** se a primeira chamada falhar, o script tenta de novo após 5 segundos.
+
+---
+
 ## Próximos passos
 
 Depois de instalado e funcionando:

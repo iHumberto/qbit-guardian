@@ -82,7 +82,9 @@ São duas formas de o guardião saber que um torrent novo chegou:
 - Se você não quer complicar, use polling com intervalo de 300 segundos (padrão). Funciona bem.
 - Se quer que um `.exe` seja removido no mesmo segundo em que o torrent é adicionado, use webhook.
 
-Para configurar o webhook, veja a seção [Modo Webhook](USAGE.md#modo-webhook-tempo-real) do Guia de Uso.
+Para configurar o webhook, veja o passo a passo no [Guia de Instalação](INSTALL.md#configurando-o-webhook-tempo-real) ou a seção [Modo Webhook](USAGE.md#modo-webhook-tempo-real) do Guia de Uso.
+
+> 💡 O script de webhook foi atualizado e agora é **não-bloqueante**: ele não trava o qBittorrent. O script executa em segundo plano com timeouts, sleep de segurança e retry automático — seguro e confiável.
 
 ---
 

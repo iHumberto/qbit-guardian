@@ -518,3 +518,42 @@ class TestDeepMerge:
         saved = client.get("/api/config").json
         assert saved["qbit"]["host"] == "new-host"
         assert saved["qbit"]["extra_field"] == "bonus"
+
+
+# ── Config cache sync (web.py ↔ guardian.py) ────────────────────────────
+
+class TestConfigCacheSync:
+    """Sincronizacao do cache _config entre web.py e guardian.py."""
+
+    def test_post_config_updates_guardian_cache(self, client, tmp_config):
+        """POST /api/config deve atualizar o cache _config do guardian."""
+        g.load_config()  # popula o cache
+        assert g.get_config()["guardian"]["check_interval_seconds"] == 300
+
+        r = client.post("/api/config", json={
+            "guardian": {"check_interval_seconds": 0}
+        })
+        assert r.status_code == 200
+
+        # Verifica que get_config() (cache) reflete a alteracao
+        cached = g.get_config()
+        assert cached["guardian"]["check_interval_seconds"] == 0, \
+            f"Cache stale: esperado 0, obtido {cached['guardian']['check_interval_seconds']}"
+
+    def test_post_config_persists_disk_and_cache(self, client, tmp_config):
+        """POST deve persistir no disco E no cache simultaneamente."""
+        g.load_config()
+        old_interval = g.get_config()["guardian"]["check_interval_seconds"]
+
+        r = client.post("/api/config", json={
+            "guardian": {"check_interval_seconds": 60}
+        })
+        assert r.status_code == 200
+
+        # Cache atualizado
+        assert g.get_config()["guardian"]["check_interval_seconds"] == 60
+
+        # Disco atualizado (via load_config que rele do disco)
+        g._config = None  # invalida cache para forcar releitura do disco
+        disk = g.load_config()
+        assert disk["guardian"]["check_interval_seconds"] == 60

@@ -98,7 +98,9 @@ These are executable files and scripts — programs that can run on your compute
 To switch to webhook mode:
 1. Set **Check Interval** to `0` in the Web UI.
 2. Configure qBittorrent to run the hook script: **Settings → Downloads → Run external program on torrent added** → `/scripts/qbit-guardian-hook.sh`.
-3. Mount the script into your qBittorrent container (see the [Usage Guide](USAGE.md#webhook-mode-real-time)).
+3. Mount the script into your qBittorrent container and set the `QBIT_GUARDIAN_URL` environment variable if needed. See the step-by-step guide in the [Installation Guide](INSTALL.md#setting-up-webhook-mode-real-time).
+
+> 💡 The hook script is now **non-blocking**: it won't freeze qBittorrent. The script runs in the background with built-in timeouts, a safety sleep, and automatic retry — safe and reliable.
 
 ---
 
