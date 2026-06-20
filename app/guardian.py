@@ -124,8 +124,19 @@ def send_notification(title, message):
         return
     try:
         verify_ssl = cfg["notifications"].get("verify_ssl", True)
-        requests.post(url, data={"title": title, "body": message},
-                     timeout=10, verify=verify_ssl)
+        if not verify_ssl:
+            # Explicitamente desabilitado — usar verify=False direto
+            requests.post(url, data={"title": title, "body": message},
+                         timeout=10, verify=False)
+        else:
+            try:
+                requests.post(url, data={"title": title, "body": message},
+                             timeout=10, verify=True)
+            except requests.exceptions.SSLError:
+                log.warning("Apprise: certificado SSL invalido, "
+                           "usando fallback sem verificacao")
+                requests.post(url, data={"title": title, "body": message},
+                             timeout=10, verify=False)
     except Exception as e:
         log.error(f"Apprise: {e}")
 

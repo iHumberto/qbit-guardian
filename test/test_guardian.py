@@ -593,10 +593,10 @@ class TestConfigCacheSync:
 # ── Notificacoes com SSL auto-assinado ──────────────────────────────────
 
 class TestSendNotificationSSL:
-    """send_notification com suporte a certificados auto-assinados (verify_ssl)."""
+    """send_notification com fallback SSL automatico + verify_ssl config."""
 
     def test_verify_ssl_true_passes_verify_true(self, tmp_config):
-        """verify_ssl: true → verify=True no requests.post."""
+        """verify_ssl: true → verify=True (sem erro SSL)."""
         g.load_config()
         cfg = g.get_config()
         cfg["notifications"]["apprise_url"] = "https://apprise.home.arpa/notify"
@@ -610,7 +610,7 @@ class TestSendNotificationSSL:
             assert kwargs["verify"] is True
 
     def test_verify_ssl_false_passes_verify_false(self, tmp_config):
-        """verify_ssl: false → verify=False no requests.post (homelab com self-signed cert)."""
+        """verify_ssl: false → verify=False direto (sem tentar verify=True)."""
         g.load_config()
         cfg = g.get_config()
         cfg["notifications"]["apprise_url"] = "https://apprise.home.arpa/notify/guardian"
@@ -649,15 +649,58 @@ class TestSendNotificationSSL:
             g.send_notification("Test", "Body")
             m_post.assert_not_called()
 
-    def test_notification_failure_is_logged_not_raised(self, tmp_config):
-        """Falha no Apprise loga erro, nao interrompe o guardian."""
+    def test_ssl_error_fallback_to_verify_false(self, tmp_config):
+        """verify_ssl: true + SSLError → fallback automatico verify=False."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"]["apprise_url"] = "https://apprise.home.arpa/notify"
+        cfg["notifications"]["verify_ssl"] = True
+        g.save_config(cfg)
+
+        # Primeiro post falha com SSL, segundo (fallback) OK
+        m_post = mock.MagicMock()
+        m_post.side_effect = [
+            requests.exceptions.SSLError("cert verify failed"),
+            mock.DEFAULT,  # segundo post: comportamento normal
+        ]
+
+        with mock.patch("app.guardian.requests.post", m_post), \
+             mock.patch("app.guardian.log.warning") as m_warn:
+            g.send_notification("Test", "Body")
+            # 2 chamadas: verify=True (falha) + verify=False (fallback)
+            assert m_post.call_count == 2
+            assert m_post.call_args_list[0][1]["verify"] is True
+            assert m_post.call_args_list[1][1]["verify"] is False
+            m_warn.assert_called_once()
+            assert "certificado" in m_warn.call_args[0][0].lower()
+
+    def test_double_ssl_error_logs_error(self, tmp_config):
+        """Ambos verify=True e fallback verify=False falham → log.error."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"]["apprise_url"] = "https://apprise.home.arpa/notify"
+        cfg["notifications"]["verify_ssl"] = True
+        g.save_config(cfg)
+
+        with mock.patch("app.guardian.requests.post",
+                       side_effect=requests.exceptions.SSLError("cert verify failed")) as m_post, \
+             mock.patch("app.guardian.log.warning") as m_warn, \
+             mock.patch("app.guardian.log.error") as m_err:
+            g.send_notification("Test", "Body")
+            assert m_post.call_count == 2  # fallback foi tentado
+            m_warn.assert_called_once()
+            m_err.assert_called_once()
+            assert "Apprise" in m_err.call_args[0][0]
+
+    def test_connection_error_is_logged_not_raised(self, tmp_config):
+        """Erro nao-SSL (ConnectionError) loga erro sem tentar fallback."""
         g.load_config()
         cfg = g.get_config()
         cfg["notifications"]["apprise_url"] = "https://apprise.home.arpa/notify"
         g.save_config(cfg)
 
         with mock.patch("app.guardian.requests.post",
-                       side_effect=requests.exceptions.SSLError("cert verify failed")), \
+                       side_effect=requests.exceptions.ConnectionError("refused")), \
              mock.patch("app.guardian.log.error") as m_log:
             g.send_notification("Test", "Body")
             m_log.assert_called_once()
