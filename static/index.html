@@ -4,11 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>qbit-guardian</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
   :root { --bg: #1a1a2e; --card: #16213e; --accent: #e94560; --text: #eee; --input: #0f3460; --border: #533483; }
   * { box-sizing:border-box; margin:0; padding:0; }
   body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,sans-serif; padding:20px; }
-  .container { max-width:720px; margin:0 auto; }
+  .container { max-width:1100px; margin:0 auto; }
+  .two-col { display:flex; gap:20px; align-items:flex-start; }
+  .col { flex:1; min-width:0; }
+  @media (max-width:768px) { .two-col { flex-direction:column; } }
   h1 { color:var(--accent); margin-bottom:8px; font-size:1.6rem; }
   .subtitle { color:#888; margin-bottom:24px; font-size:0.9rem; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:20px; margin-bottom:16px; }
@@ -40,101 +44,107 @@
   <h1>🛡️ qbit-guardian</h1>
   <p class="subtitle">Protege seu qBittorrent contra torrents maliciosos</p>
 
-  <div class="card">
-    <h2>🔗 qBittorrent</h2>
-    <div class="row">
-      <div class="field"><label>Host</label><input id="qbit_host" placeholder="localhost"></div>
-      <div class="field"><label>Porta</label><input id="qbit_port" type="number" placeholder="8080"></div>
-    </div>
-    <div class="field"><label>API Key</label><input id="qbit_api_key" type="password" placeholder="Cole sua QBittorrent API Key aqui"></div>
-  </div>
+  <div class="two-col">
+    <div class="col">
+      <div class="card">
+        <h2>🔗 qBittorrent</h2>
+        <div class="row">
+          <div class="field"><label>Host</label><input id="qbit_host" placeholder="localhost"></div>
+          <div class="field"><label>Porta</label><input id="qbit_port" type="number" placeholder="8080"></div>
+        </div>
+        <div class="field"><label>API Key</label><input id="qbit_api_key" type="password" placeholder="Cole sua QBittorrent API Key aqui"></div>
+      </div>
 
-  <div class="card">
-    <h2>🎬 Radarr</h2>
-    <div class="row">
-      <div class="field"><label>Host</label><input id="radarr_host" placeholder="radarr"></div>
-      <div class="field"><label>Porta</label><input id="radarr_port" type="number" placeholder="7878"></div>
-    </div>
-    <div class="field"><label>API Key</label><input id="radarr_api_key" type="password" placeholder="API Key do Radarr"></div>
-  </div>
+      <div class="card">
+        <h2>📺 Sonarr</h2>
+        <div class="row">
+          <div class="field"><label>Host</label><input id="sonarr_host" placeholder="sonarr"></div>
+          <div class="field"><label>Porta</label><input id="sonarr_port" type="number" placeholder="8989"></div>
+        </div>
+        <div class="field"><label>API Key</label><input id="sonarr_api_key" type="password" placeholder="API Key do Sonarr"></div>
+      </div>
 
-  <div class="card">
-    <h2>📺 Sonarr</h2>
-    <div class="row">
-      <div class="field"><label>Host</label><input id="sonarr_host" placeholder="sonarr"></div>
-      <div class="field"><label>Porta</label><input id="sonarr_port" type="number" placeholder="8989"></div>
-    </div>
-    <div class="field"><label>API Key</label><input id="sonarr_api_key" type="password" placeholder="API Key do Sonarr"></div>
-  </div>
+      <div class="card">
+        <h2>🎬 Radarr</h2>
+        <div class="row">
+          <div class="field"><label>Host</label><input id="radarr_host" placeholder="radarr"></div>
+          <div class="field"><label>Porta</label><input id="radarr_port" type="number" placeholder="7878"></div>
+        </div>
+        <div class="field"><label>API Key</label><input id="radarr_api_key" type="password" placeholder="API Key do Radarr"></div>
+      </div>
 
-  <div class="card">
-    <h2>🛡️ Guardian</h2>
-    <div class="field" style="margin-bottom:12px">
-      <label>Intervalo de verificacao (segundos, 0 = modo webhook)</label>
-      <input id="check_interval" type="number" min="0" placeholder="300">
-      <span style="font-size:0.75rem;color:#888">0 desativa o polling — use com o script de webhook no qBit</span>
-    </div>
-
-    <div class="field" style="margin-bottom:12px">
-      <label>Extensoes de midia validas (uma por linha)</label>
-      <textarea id="valid_extensions" placeholder=".mkv&#10;.mp4&#10;.avi"></textarea>
-    </div>
-
-    <div class="field" style="margin-bottom:12px">
-      <label>Extensoes perigosas (uma por linha)</label>
-      <textarea id="dangerous_extensions" placeholder=".exe&#10;.scr&#10;.bat&#10;.sh"></textarea>
-    </div>
-
-    <hr>
-
-    <div class="field" style="margin-bottom:12px">
-      <label>Prioridade para arquivos de midia (0-7)</label>
-      <input id="priority_media" type="number" min="0" max="7" placeholder="7">
-      <span style="font-size:0.75rem;color:#888">7 = maxima, 0 = nao baixar</span>
-    </div>
-    <div class="field" style="margin-bottom:12px">
-      <label>Prioridade para arquivos auxiliares (.nfo, .srt, .jpg)</label>
-      <input id="priority_normal" type="number" min="0" max="7" placeholder="1">
-    </div>
-    <div class="field" style="margin-bottom:12px">
-      <label>Prioridade para outros arquivos</label>
-      <input id="priority_skip" type="number" min="0" max="7" placeholder="0">
-    </div>
-
-    <hr>
-
-    <div class="checkbox-row">
-      <input type="checkbox" id="remove_stalled">
-      <label for="remove_stalled">Remover torrents parados (stalled) ha mais de</label>
-      <div class="inline">
-        <input type="number" id="stalled_time" min="0" max="999" value="0" placeholder="0">
-        <select id="stalled_unit">
-          <option value="seconds">segundos</option>
-          <option value="minutes">minutos</option>
-          <option value="hours" selected>horas</option>
-        </select>
+      <div class="card">
+        <h2>🔔 Notificacoes</h2>
+        <div class="field">
+          <label>Apprise URL (Telegram, Discord, etc)</label>
+          <input id="apprise_url" placeholder="tgram://BOT_TOKEN/CHAT_ID">
+        </div>
       </div>
     </div>
 
-    <div class="checkbox-row">
-      <input type="checkbox" id="remove_no_seeds">
-      <label for="remove_no_seeds">Remover torrents sem seeds ha mais de</label>
-      <div class="inline">
-        <input type="number" id="no_seeds_time" min="0" max="999" value="0" placeholder="0">
-        <select id="no_seeds_unit">
-          <option value="seconds">segundos</option>
-          <option value="minutes">minutos</option>
-          <option value="hours" selected>horas</option>
-        </select>
-      </div>
-    </div>
-  </div>
+    <div class="col">
+      <div class="card">
+        <h2>🛡️ Guardian</h2>
+        <div class="field" style="margin-bottom:12px">
+          <label>Intervalo de verificacao (segundos, 0 = modo webhook)</label>
+          <input id="check_interval" type="number" min="0" placeholder="300">
+          <span style="font-size:0.75rem;color:#888">0 desativa o polling — use com o script de webhook no qBit</span>
+        </div>
 
-  <div class="card">
-    <h2>🔔 Notificacoes</h2>
-    <div class="field">
-      <label>Apprise URL (Telegram, Discord, etc)</label>
-      <input id="apprise_url" placeholder="tgram://BOT_TOKEN/CHAT_ID">
+        <div class="field" style="margin-bottom:12px">
+          <label>Extensoes de midia validas (uma por linha)</label>
+          <textarea id="valid_extensions" placeholder=".mkv&#10;.mp4&#10;.avi"></textarea>
+        </div>
+
+        <div class="field" style="margin-bottom:12px">
+          <label>Extensoes perigosas (uma por linha)</label>
+          <textarea id="dangerous_extensions" placeholder=".exe&#10;.scr&#10;.bat&#10;.sh"></textarea>
+        </div>
+
+        <hr>
+
+        <div class="field" style="margin-bottom:12px">
+          <label>Prioridade para arquivos de midia (0-7)</label>
+          <input id="priority_media" type="number" min="0" max="7" placeholder="7">
+          <span style="font-size:0.75rem;color:#888">7 = maxima, 0 = nao baixar</span>
+        </div>
+        <div class="field" style="margin-bottom:12px">
+          <label>Prioridade para arquivos auxiliares (.nfo, .srt, .jpg)</label>
+          <input id="priority_normal" type="number" min="0" max="7" placeholder="1">
+        </div>
+        <div class="field" style="margin-bottom:12px">
+          <label>Prioridade para outros arquivos</label>
+          <input id="priority_skip" type="number" min="0" max="7" placeholder="0">
+        </div>
+
+        <hr>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="remove_stalled">
+          <label for="remove_stalled">Remover torrents parados (stalled) ha mais de</label>
+          <div class="inline">
+            <input type="number" id="stalled_time" min="0" max="999" value="0" placeholder="0">
+            <select id="stalled_unit">
+              <option value="seconds">segundos</option>
+              <option value="minutes">minutos</option>
+              <option value="hours" selected>horas</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="remove_no_seeds">
+          <label for="remove_no_seeds">Remover torrents sem seeds ha mais de</label>
+          <div class="inline">
+            <input type="number" id="no_seeds_time" min="0" max="999" value="0" placeholder="0">
+            <select id="no_seeds_unit">
+              <option value="seconds">segundos</option>
+              <option value="minutes">minutos</option>
+              <option value="hours" selected>horas</option>
+            </select>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
