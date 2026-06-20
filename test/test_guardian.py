@@ -557,3 +557,34 @@ class TestConfigCacheSync:
         g._config = None  # invalida cache para forcar releitura do disco
         disk = g.load_config()
         assert disk["guardian"]["check_interval_seconds"] == 60
+
+    def test_guardian_loop_reloads_interval(self, tmp_config):
+        """Guardian loop deve recarregar check_interval_seconds a cada iteracao."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"]["check_interval_seconds"] = 1  # entra no loop
+        g.save_config(cfg)
+
+        call_count = [0]
+        original_get_config = g.get_config  # salva referencia antes do mock
+
+        def mock_get_config():
+            call_count[0] += 1
+            cfg_copy = original_get_config().copy()  # usa a original, nao o mock
+            # Na segunda chamada, muda para webhook mode
+            if call_count[0] >= 2:
+                cfg_copy["guardian"] = dict(cfg_copy["guardian"])
+                cfg_copy["guardian"]["check_interval_seconds"] = 0
+            return cfg_copy
+
+        with mock.patch.object(g, "get_config", side_effect=mock_get_config), \
+             mock.patch.object(g, "qbit_login"), \
+             mock.patch.object(g, "get_torrents", return_value=[]), \
+             mock.patch.object(g, "time", mock.MagicMock()) as m_time:
+
+            g.guardian_loop()
+
+            # Deve ter saido do loop (entrou em webhook mode)
+            # sleep nao deve ser chamado com intervalo > 0 apos a troca
+            # O importante: a funcao retornou (nao entrou em loop infinito)
+            assert call_count[0] >= 2, "get_config deveria ter sido chamada ao menos 2x"

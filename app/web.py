@@ -69,8 +69,9 @@ def _read_config():
 
 
 def _write_config(data):
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(data, f, indent=2)
+    """Persiste config.json no disco E atualiza cache do guardian (thread-safe)."""
+    import app.guardian as guardian
+    guardian.save_config(data)
 
 
 def deep_merge(base, override):

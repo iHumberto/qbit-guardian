@@ -418,6 +418,13 @@ def guardian_loop():
         except Exception:
             pass
 
+        # Recarrega config a cada iteracao para detectar mudancas no intervalo
+        cfg = get_config()
+        interval = cfg["guardian"].get("check_interval_seconds", 300)
+        if interval == 0:
+            log.info("Intervalo alterado para 0 — entrando em modo webhook. Aguardando /api/trigger.")
+            return
+
         time.sleep(interval)
 
 
