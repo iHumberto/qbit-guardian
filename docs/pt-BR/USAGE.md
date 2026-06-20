@@ -22,7 +22,18 @@ Exemplos práticos:
 - **Em outro computador da rede:** `http://192.168.1.100:5000`
 - **Servidor com nome na rede:** `http://meu-servidor:5000`
 
-Você verá a tela de configuração dividida em seções: **qBittorrent**, **Radarr**, **Sonarr**, **Guardian**, **Notificações** e **Autenticação**.
+Você verá a tela de configuração em duas colunas: **serviços externos** (qBittorrent, Sonarr, Radarr, Notificações) à esquerda e **Guardian** à direita, com o botão **Salvar Configurações** centralizado abaixo.
+
+### Idioma
+
+No canto superior direito de todas as páginas da Web UI, há um dropdown para alternar o idioma da interface:
+
+- 🇧🇷 **PT-BR (padrão):** A interface abre em português do Brasil na primeira vez que você acessa.
+- 🇺🇸 **EN-US:** Alterna toda a interface para inglês americano.
+
+A troca é instantânea — você não precisa recarregar a página. O navegador lembra sua escolha: se você trocar para inglês e fechar a página, quando voltar ela abre em inglês automaticamente.
+
+> 💡 O seletor funciona offline. Toda a tradução já vem pronta dentro da aplicação — nenhum serviço externo de tradução é usado. Sua preferência de idioma fica salva no próprio navegador (localStorage).
 
 ---
 
@@ -32,7 +43,7 @@ Para o qbit-guardian começar a funcionar, apenas dois campos são obrigatórios
 
 | Campo | Onde encontrar |
 |-------|---------------|
-| **Host do qBittorrent** | IP ou nome do computador onde o qBittorrent está instalado |
+| **URL do qBittorrent** | Endereço completo com `http://` e porta (ex: `http://192.168.1.50:8080`) |
 | **API Key do qBittorrent** | No qBittorrent: **Ferramentas → Opções → Web UI → Chave da API** |
 
 > **📘 API Key:** É uma senha longa e aleatória que o qBittorrent gera. Ela permite que outros programas (como o qbit-guardian) conversem com o qBittorrent de forma segura. Pense nela como uma chave de acesso que você entrega para um aplicativo de confiança.
@@ -41,7 +52,7 @@ Preencha esses dois campos, clique em **Salvar Configurações** e pronto — o 
 
 ### Integração com Sonarr e Radarr (opcional)
 
-Se você usa o Sonarr (para séries) ou o Radarr (para filmes), preencha também os campos de **host**, **porta** e **API Key** dessas ferramentas.
+Se você usa o Sonarr (para séries) ou o Radarr (para filmes), preencha também os campos de **URL** e **API Key** dessas ferramentas.
 
 Com essa integração ativa, sempre que o qbit-guardian remover um torrent problemático, ele também:
 1. Bloqueia aquele lançamento no Sonarr/Radarr (para não baixar de novo).
@@ -72,6 +83,24 @@ Os eventos que geram notificação são:
 - 🗑️ **Torrent removido por estar parado há muito tempo** (stalled)
 - 🗑️ **Torrent removido por não ter seeds**
 - ⚡ **Torrent otimizado** (prioridades de arquivos ajustadas)
+
+### Conexão com Apprise auto-assinado (homelab)
+
+Se o seu servidor Apprise usa um certificado SSL auto-assinado (comum em redes domésticas com endereços como `apprise.home.arpa` ou `apprise.local`), o guardião já está configurado para funcionar sem verificação SSL.
+
+> **📘 Certificado SSL auto-assinado:** É um certificado de segurança gerado por você mesmo, sem a validação de uma autoridade externa. Em redes caseiras, é uma alternativa gratuita aos certificados pagos. O navegador e outros programas não confiam nele automaticamente.
+
+O qbit-guardian **sempre** desabilita a verificação SSL nas chamadas ao Apprise (`verify=False`), pois o projeto é feito para homelab/redes locais onde certificados auto-assinados são normais. Nenhuma configuração adicional é necessária.
+
+Basta configurar a URL do Apprise em `config.json`:
+
+```json
+{
+  "notifications": {
+    "apprise_url": "https://apprise.home.arpa/notify/guardian"
+  }
+}
+```
 
 ---
 

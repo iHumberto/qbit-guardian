@@ -35,7 +35,18 @@ Examples:
 | Same computer               | `http://localhost:5000`       |
 | Another computer on your network | `http://192.168.1.100:5000`  |
 
-You will see a dark dashboard with several sections. From here you can configure everything.
+You will see a dark dashboard with two columns: **external services** (qBittorrent, Sonarr, Radarr, Notifications) on the left and **Guardian** on the right, with a centered **Save Configuration** button below.
+
+### Language
+
+Every page of the Web UI has a language dropdown in the top-right corner:
+
+- 🇧🇷 **PT-BR (default):** The interface opens in Brazilian Portuguese the first time you visit.
+- 🇺🇸 **EN-US:** Switches the entire interface to American English.
+
+Switching is instant — no page reload needed. Your browser remembers your choice: switch to English, close the page, and when you come back it opens in English automatically.
+
+> 💡 The selector works offline. All translations are built right into the application — no external translation services are used. Your language preference is saved in your browser (localStorage).
 
 ---
 
@@ -47,18 +58,18 @@ These two fields are the only ones you **must** fill in for qbit-guardian to wor
 
 | Field                | What to enter                                                                 |
 |----------------------|-------------------------------------------------------------------------------|
-| **Host**             | IP address or computer name where qBittorrent is running (e.g. `192.168.1.50`) |
+| **URL**              | The full address where qBittorrent is running (e.g. `http://192.168.1.50:8080`) |
 | **API Key**          | The long random password from qBittorrent's settings                          |
 
 > 💡 **API Key** is a secret code that qBittorrent creates so other programs (like qbit-guardian) can talk to it safely. Find yours in qBittorrent: **Tools → Options → Web UI → API Key**. Copy it exactly — no extra spaces.
 
-**Port** defaults to `8080`, which is qBittorrent's standard port. Change it only if you customized qBittorrent's Web UI port.
+The URL defaults to `http://localhost:8080`, which is qBittorrent's standard port on your local machine. Change it only if qBittorrent runs on a different machine or port.
 
 Click **Save Configuration** and the guardian starts watching. By default it checks every 5 minutes (300 seconds).
 
 ### Optional: Sonarr and Radarr
 
-If you use Sonarr (TV series) or Radarr (movies), fill in their host, port, and API key. This lets qbit-guardian automatically block bad releases and trigger a new search.
+If you use Sonarr (TV series) or Radarr (movies), fill in their URL and API key. This lets qbit-guardian automatically block bad releases and trigger a new search.
 
 If you don't use Sonarr or Radarr, just leave those fields blank. The guardian still removes dangerous files, stalled torrents, and seedless torrents — only the blocklist and re-search steps are skipped.
 
@@ -86,6 +97,24 @@ Events that trigger a notification:
 - ⚡ **Torrent optimized** — media files were prioritized, junk files were lowered or skipped.
 
 > 💡 **Apprise** is like a universal adapter for notifications. Instead of learning how to send messages to each service, you build one URL and Apprise handles the rest.
+
+### Connecting to a self-signed Apprise (homelab)
+
+If your Apprise server uses a self-signed SSL certificate (common in home networks with addresses like `apprise.home.arpa` or `apprise.local`), the guardian is already configured to work without SSL verification.
+
+> **📘 Self-signed SSL certificate:** A security certificate you create yourself, without paying for a commercial one. Your browser and other programs don't trust it automatically.
+
+qbit-guardian **always** disables SSL verification for Apprise calls (`verify=False`), since this project is designed for homelab/local networks where self-signed certificates are normal. No additional configuration is needed.
+
+Just set the Apprise URL in `config.json`:
+
+```json
+{
+  "notifications": {
+    "apprise_url": "https://apprise.home.arpa/notify/guardian"
+  }
+}
+```
 
 ---
 
