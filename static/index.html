@@ -197,7 +197,7 @@ async function saveConfig() {
       api_key: getVal('radarr_api_key')
     },
     guardian: {
-      check_interval_seconds: parseInt(getVal('check_interval')) || 300,
+      check_interval_seconds: (v => isNaN(v = parseInt(getVal('check_interval'))) ? 300 : v)(),
       valid_media_extensions: getVal('valid_extensions').split('\n').map(s=>s.trim()).filter(s=>s),
       dangerous_extensions: getVal('dangerous_extensions').split('\n').map(s=>s.trim()).filter(s=>s),
       remove_stalled: getCheck('remove_stalled'),
@@ -206,9 +206,9 @@ async function saveConfig() {
       remove_no_seeds: getCheck('remove_no_seeds'),
       no_seeds_time: parseInt(getVal('no_seeds_time')) || 0,
       no_seeds_unit: getVal('no_seeds_unit'),
-      priority_media: parseInt(getVal('priority_media')) || 7,
-      priority_normal: parseInt(getVal('priority_normal')) || 1,
-      priority_skip: parseInt(getVal('priority_skip')) || 0
+      priority_media: (v => isNaN(v = parseInt(getVal('priority_media'))) ? 7 : v)(),
+      priority_normal: (v => isNaN(v = parseInt(getVal('priority_normal'))) ? 1 : v)(),
+      priority_skip: (v => isNaN(v = parseInt(getVal('priority_skip'))) ? 0 : v)()
     },
     notifications: {
       apprise_url: getVal('apprise_url')
