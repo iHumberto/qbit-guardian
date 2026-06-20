@@ -10,6 +10,18 @@
   * { box-sizing:border-box; margin:0; padding:0; }
   body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,sans-serif; padding:20px; }
   .container { max-width:1035px; margin:0 auto; }
+
+  /* ── Language bar ── */
+  .lang-bar { display:flex; justify-content:flex-end; margin-bottom:12px; }
+  .lang-bar select {
+    background:var(--card); color:var(--text); border:1px solid var(--border);
+    border-radius:4px; padding:5px 8px; font-size:0.82rem; cursor:pointer;
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 8px center; padding-right:24px;
+  }
+  .lang-bar select:focus { outline:none; border-color:var(--accent); }
+
   .two-col { display:flex; gap:30px; align-items:stretch; }
   .col { flex:1; min-width:0; }
   .col:first-child { display:flex; flex-direction:column; gap:16px; }
@@ -41,74 +53,97 @@
   .toast.show { opacity:1; }
   .toast.ok { background:#2ecc71; }
   .toast.err { background:#e74c3c; }
+
+  /* ── Help text ── */
+  .help { font-size:0.75rem; color:#888; }
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>🛡️ qbit-guardian</h1>
-  <p class="subtitle">Protege seu qBittorrent contra torrents maliciosos</p>
+  <div class="lang-bar" id="lang-bar"></div>
+
+  <h1 data-i18n="title">🛡️ qbit-guardian</h1>
+  <p class="subtitle" data-i18n="subtitle">Protege seu qBittorrent contra torrents maliciosos</p>
 
   <div class="two-col">
     <div class="col">
       <div class="card">
-        <h2>🔗 qBittorrent</h2>
-        <div class="field"><label>URL</label><input id="qbit_url" placeholder="http://192.168.15.3:8080"></div>
-        <div class="field"><label>API Key</label><input id="qbit_api_key" type="password" placeholder="Cole sua API Key do qBittorrent aqui"></div>
-      </div>
-
-      <div class="card">
-        <h2>📺 Sonarr</h2>
-        <div class="field"><label>URL</label><input id="sonarr_url" placeholder="http://192.168.15.3:8989"></div>
-        <div class="field"><label>API Key</label><input id="sonarr_api_key" type="password" placeholder="API Key do Sonarr"></div>
-      </div>
-
-      <div class="card">
-        <h2>🎬 Radarr</h2>
-        <div class="field"><label>URL</label><input id="radarr_url" placeholder="http://192.168.15.3:7878"></div>
-        <div class="field"><label>API Key</label><input id="radarr_api_key" type="password" placeholder="API Key do Radarr"></div>
-      </div>
-
-      <div class="card">
-        <h2>🔔 Notificações</h2>
+        <h2 data-i18n="section_qbit">🔗 qBittorrent</h2>
         <div class="field">
-          <label>Apprise URL (Telegram, Discord, etc.)</label>
-          <input id="apprise_url" placeholder="tgram://BOT_TOKEN/CHAT_ID">
+          <label data-i18n="label_url">URL</label>
+          <input id="qbit_url" data-i18n-placeholder="placeholder_qbit_url" placeholder="http://192.168.15.3:8080">
+        </div>
+        <div class="field">
+          <label data-i18n="label_api_key">API Key</label>
+          <input id="qbit_api_key" type="password" data-i18n-placeholder="placeholder_qbit_api_key" placeholder="Cole sua API Key do qBittorrent aqui">
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="section_sonarr">📺 Sonarr</h2>
+        <div class="field">
+          <label data-i18n="label_url">URL</label>
+          <input id="sonarr_url" data-i18n-placeholder="placeholder_sonarr_url" placeholder="http://192.168.15.3:8989">
+        </div>
+        <div class="field">
+          <label data-i18n="label_api_key">API Key</label>
+          <input id="sonarr_api_key" type="password" data-i18n-placeholder="placeholder_sonarr_api_key" placeholder="API Key do Sonarr">
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="section_radarr">🎬 Radarr</h2>
+        <div class="field">
+          <label data-i18n="label_url">URL</label>
+          <input id="radarr_url" data-i18n-placeholder="placeholder_radarr_url" placeholder="http://192.168.15.3:7878">
+        </div>
+        <div class="field">
+          <label data-i18n="label_api_key">API Key</label>
+          <input id="radarr_api_key" type="password" data-i18n-placeholder="placeholder_radarr_api_key" placeholder="API Key do Radarr">
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="section_notifications">🔔 Notificações</h2>
+        <div class="field">
+          <label data-i18n="label_apprise_url">Apprise URL (Telegram, Discord, etc.)</label>
+          <input id="apprise_url" data-i18n-placeholder="placeholder_apprise_url" placeholder="tgram://BOT_TOKEN/CHAT_ID">
         </div>
       </div>
     </div>
 
     <div class="col">
       <div class="card">
-        <h2>🛡️ Guardian</h2>
+        <h2 data-i18n="section_guardian">🛡️ Guardian</h2>
         <div class="field">
-          <label>Intervalo de verificação (segundos, 0 = modo webhook)</label>
+          <label data-i18n="label_check_interval">Intervalo de verificação (segundos, 0 = modo webhook)</label>
           <input id="check_interval" type="number" min="0" placeholder="300">
-          <span style="font-size:0.75rem;color:#888">0 desativa o polling — use com o script de webhook no qBit</span>
+          <span class="help" data-i18n="help_check_interval">0 desativa o polling — use com o script de webhook no qBit</span>
         </div>
 
         <div class="field">
-          <label>Extensões de mídia válidas (uma por linha)</label>
+          <label data-i18n="label_valid_extensions">Extensões de mídia válidas (uma por linha)</label>
           <textarea id="valid_extensions" placeholder=".mkv&#10;.mp4&#10;.avi"></textarea>
         </div>
 
         <div class="field">
-          <label>Extensões perigosas (uma por linha)</label>
+          <label data-i18n="label_dangerous_extensions">Extensões perigosas (uma por linha)</label>
           <textarea id="dangerous_extensions" placeholder=".exe&#10;.scr&#10;.bat&#10;.sh"></textarea>
         </div>
 
         <hr>
 
         <div class="field">
-          <label>Prioridade para arquivos de mídia (0–7)</label>
+          <label data-i18n="label_priority_media">Prioridade para arquivos de mídia (0–7)</label>
           <input id="priority_media" type="number" min="0" max="7" placeholder="7">
-          <span style="font-size:0.75rem;color:#888">7 = máxima, 0 = não baixar</span>
+          <span class="help" data-i18n="help_priority_media">7 = máxima, 0 = não baixar</span>
         </div>
         <div class="field">
-          <label>Prioridade para arquivos auxiliares (.nfo, .srt, .jpg)</label>
+          <label data-i18n="label_priority_normal">Prioridade para arquivos auxiliares (.nfo, .srt, .jpg)</label>
           <input id="priority_normal" type="number" min="0" max="7" placeholder="1">
         </div>
         <div class="field">
-          <label>Prioridade para outros arquivos</label>
+          <label data-i18n="label_priority_skip">Prioridade para outros arquivos</label>
           <input id="priority_skip" type="number" min="0" max="7" placeholder="0">
         </div>
 
@@ -116,26 +151,26 @@
 
         <div class="checkbox-row">
           <input type="checkbox" id="remove_stalled">
-          <label for="remove_stalled">Remover torrents parados (stalled) há mais de</label>
+          <label for="remove_stalled" data-i18n="label_remove_stalled">Remover torrents parados (stalled) há mais de</label>
           <div class="inline">
             <input type="number" id="stalled_time" min="0" max="999" value="0" placeholder="0">
-            <select id="stalled_unit">
-              <option value="seconds">segundos</option>
-              <option value="minutes">minutos</option>
-              <option value="hours" selected>horas</option>
+            <select id="stalled_unit" data-i18n-units>
+              <option value="seconds" data-i18n-unit="unit_seconds">segundos</option>
+              <option value="minutes" data-i18n-unit="unit_minutes">minutos</option>
+              <option value="hours" selected data-i18n-unit="unit_hours">horas</option>
             </select>
           </div>
         </div>
 
         <div class="checkbox-row">
           <input type="checkbox" id="remove_no_seeds">
-          <label for="remove_no_seeds">Remover torrents sem seeds há mais de</label>
+          <label for="remove_no_seeds" data-i18n="label_remove_no_seeds">Remover torrents sem seeds há mais de</label>
           <div class="inline">
             <input type="number" id="no_seeds_time" min="0" max="999" value="0" placeholder="0">
-            <select id="no_seeds_unit">
-              <option value="seconds">segundos</option>
-              <option value="minutes">minutos</option>
-              <option value="hours" selected>horas</option>
+            <select id="no_seeds_unit" data-i18n-units>
+              <option value="seconds" data-i18n-unit="unit_seconds">segundos</option>
+              <option value="minutes" data-i18n-unit="unit_minutes">minutos</option>
+              <option value="hours" selected data-i18n-unit="unit_hours">horas</option>
             </select>
           </div>
         </div>
@@ -144,12 +179,13 @@
   </div>
 
   <div class="btn-row">
-    <button class="btn btn-save" onclick="saveConfig()">💾 Salvar Configurações</button>
+    <button class="btn btn-save" onclick="saveConfig()" data-i18n="btn_save">💾 Salvar Configurações</button>
   </div>
 </div>
 
 <div id="toast" class="toast"></div>
 
+<script src="/i18n.js"></script>
 <script>
 const API = '/api/config';
 
@@ -177,7 +213,7 @@ async function loadConfig() {
     setVal('priority_skip', c.guardian.priority_skip ?? 0);
     setVal('apprise_url', c.notifications.apprise_url);
   } catch(e) {
-    toast('Erro ao carregar configuração: ' + e.message, 'err');
+    toast(t('toast_load_error') + e.message, 'err');
   }
 }
 
@@ -216,10 +252,10 @@ async function saveConfig() {
 
   try {
     const r = await fetch(API, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
-    if (r.ok) toast('Configurações salvas!', 'ok');
-    else { const e = await r.json(); toast('Erro: ' + e.error, 'err'); }
+    if (r.ok) toast(t('toast_saved'), 'ok');
+    else { const e = await r.json(); toast(t('toast_error') + e.error, 'err'); }
   } catch(e) {
-    toast('Erro: ' + e.message, 'err');
+    toast(t('toast_error') + e.message, 'err');
   }
 }
 
@@ -233,6 +269,7 @@ function toast(msg, type) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
+initI18N();
 loadConfig();
 </script>
 </body>
