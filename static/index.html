@@ -12,26 +12,26 @@
   .container { max-width:1100px; margin:0 auto; }
   .two-col { display:flex; gap:30px; align-items:stretch; }
   .col { flex:1; min-width:0; }
+  .col:first-child { display:flex; flex-direction:column; gap:16px; }
   .col + .col { display:flex; flex-direction:column; }
-  .col + .col > .card { flex:1; display:flex; flex-direction:column; gap:14px; padding:24px 20px 20px; }
-  .col + .col > .card label { margin-bottom:6px; }
-  .col + .col > .card > .checkbox-row { align-items:flex-start; }
+  .col + .col > .card { flex:1; }
   @media (max-width:768px) { .two-col { flex-direction:column; } }
   h1 { color:var(--accent); margin-bottom:8px; font-size:1.6rem; }
   .subtitle { color:#888; margin-bottom:24px; font-size:0.9rem; }
-  .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:20px; margin-bottom:16px; }
-  .card h2 { font-size:1.1rem; margin-bottom:12px; color:var(--accent); }
-  .row { display:flex; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:20px; display:flex; flex-direction:column; gap:14px; }
+  .card h2 { font-size:1.1rem; margin-bottom:0; color:var(--accent); }
+  .row { display:flex; gap:12px; margin-bottom:0; flex-wrap:wrap; }
   .field { flex:1; min-width:180px; }
-  .field label { display:block; font-size:0.82rem; color:#aaa; margin-bottom:4px; }
+  .field label { display:block; font-size:0.82rem; color:#aaa; margin-bottom:6px; }
   .field input, .field select, .field textarea { width:100%; padding:8px 10px; background:var(--input); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.9rem; }
   .field textarea { resize:vertical; min-height:80px; font-family:monospace; }
   .field input:focus, .field select:focus, .field textarea:focus { outline:none; border-color:var(--accent); }
-  .checkbox-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
-  .checkbox-row input[type=checkbox] { width:auto; accent-color:var(--accent); }
+  .checkbox-row { display:flex; align-items:flex-start; gap:8px; margin-bottom:0; }
+  .checkbox-row input[type=checkbox] { width:auto; accent-color:var(--accent); margin-top:2px; }
   .inline { display:flex; gap:8px; align-items:center; }
   .inline input { width:80px; }
   .inline select { width:110px; }
+  .card > hr { margin:0; border:none; border-top:1px solid var(--border); }
   .btn-row { display:flex; gap:12px; margin-top:20px; justify-content:flex-end; }
   .btn { padding:10px 24px; border:none; border-radius:4px; cursor:pointer; font-size:0.95rem; font-weight:600; }
   .btn-save { background:var(--accent); color:#fff; }
@@ -40,7 +40,6 @@
   .toast.show { opacity:1; }
   .toast.ok { background:#2ecc71; }
   .toast.err { background:#e74c3c; }
-  hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
 </style>
 </head>
 <body>
@@ -53,7 +52,7 @@
       <div class="card">
         <h2>🔗 qBittorrent</h2>
         <div class="field"><label>URL</label><input id="qbit_url" placeholder="http://192.168.15.3:8080"></div>
-        <div class="field"><label>API Key</label><input id="qbit_api_key" type="password" placeholder="Cole sua QBittorrent API Key aqui"></div>
+        <div class="field"><label>API Key</label><input id="qbit_api_key" type="password" placeholder="Cole sua API Key do qBittorrent aqui"></div>
       </div>
 
       <div class="card">
@@ -71,7 +70,7 @@
       <div class="card">
         <h2>🔔 Notificações</h2>
         <div class="field">
-          <label>Apprise URL (Telegram, Discord, etc)</label>
+          <label>Apprise URL (Telegram, Discord, etc.)</label>
           <input id="apprise_url" placeholder="tgram://BOT_TOKEN/CHAT_ID">
         </div>
       </div>
