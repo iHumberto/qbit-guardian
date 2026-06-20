@@ -156,7 +156,7 @@ Procure por linhas como `Conectado ao qBittorrent v...` — isso indica que a co
 
 Ele usa a API do qBittorrent para listar torrents, ver arquivos, remover e ajustar prioridades — tudo isso é específico do qBittorrent. Outros clientes como Transmission, Deluge ou uTorrent têm APIs diferentes e não são compatíveis.
 
-Se você usa outro cliente de torrent e gostaria de uma ferramenta parecida, considere migrar para o qBittorrent — ele é gratuito, de código aberto e tem uma das APIs mais completas entre os clientes de torrent.
+No momento, o qbit-guardian funciona exclusivamente com o qBittorrent. Há espaço para evolução futura e suporte a outros clientes de torrent — se você tem interesse nisso, fique de olho nas releases ou contribua com o projeto.
 
 ---
 
