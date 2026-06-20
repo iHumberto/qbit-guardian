@@ -13,7 +13,9 @@
   .two-col { display:flex; gap:30px; align-items:stretch; }
   .col { flex:1; min-width:0; }
   .col + .col { display:flex; flex-direction:column; }
-  .col + .col > .card { flex:1; }
+  .col + .col > .card { flex:1; display:flex; flex-direction:column; justify-content:space-evenly; }
+  .col + .col > .card > hr { margin: 0; }
+  .col + .col > .card > .checkbox-row { margin-bottom: 0; }
   @media (max-width:768px) { .two-col { flex-direction:column; } }
   h1 { color:var(--accent); margin-bottom:8px; font-size:1.6rem; }
   .subtitle { color:#888; margin-bottom:24px; font-size:0.9rem; }
@@ -87,34 +89,34 @@
     <div class="col">
       <div class="card">
         <h2>🛡️ Guardian</h2>
-        <div class="field" style="margin-bottom:12px">
+        <div class="field">
           <label>Intervalo de verificacao (segundos, 0 = modo webhook)</label>
           <input id="check_interval" type="number" min="0" placeholder="300">
           <span style="font-size:0.75rem;color:#888">0 desativa o polling — use com o script de webhook no qBit</span>
         </div>
 
-        <div class="field" style="margin-bottom:12px">
+        <div class="field">
           <label>Extensoes de midia validas (uma por linha)</label>
           <textarea id="valid_extensions" placeholder=".mkv&#10;.mp4&#10;.avi"></textarea>
         </div>
 
-        <div class="field" style="margin-bottom:12px">
+        <div class="field">
           <label>Extensoes perigosas (uma por linha)</label>
           <textarea id="dangerous_extensions" placeholder=".exe&#10;.scr&#10;.bat&#10;.sh"></textarea>
         </div>
 
         <hr>
 
-        <div class="field" style="margin-bottom:12px">
+        <div class="field">
           <label>Prioridade para arquivos de midia (0-7)</label>
           <input id="priority_media" type="number" min="0" max="7" placeholder="7">
           <span style="font-size:0.75rem;color:#888">7 = maxima, 0 = nao baixar</span>
         </div>
-        <div class="field" style="margin-bottom:12px">
+        <div class="field">
           <label>Prioridade para arquivos auxiliares (.nfo, .srt, .jpg)</label>
           <input id="priority_normal" type="number" min="0" max="7" placeholder="1">
         </div>
-        <div class="field" style="margin-bottom:12px">
+        <div class="field">
           <label>Prioridade para outros arquivos</label>
           <input id="priority_skip" type="number" min="0" max="7" placeholder="0">
         </div>
