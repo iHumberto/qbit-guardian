@@ -4,15 +4,12 @@ qbit-guardian — Entrypoint.
 Inicia o loop guardian em background thread e o servidor web Flask.
 """
 import threading
-import logging
+from app.logger import setup_logging, get_logger
 from app.guardian import start_guardian, write_heartbeat
 from app.web import start_web
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
-log = logging.getLogger("qbit-guardian")
+setup_logging()
+log = get_logger("main")
 
 if __name__ == "__main__":
     log.info("qbit-guardian iniciando...")

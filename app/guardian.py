@@ -18,11 +18,9 @@ from datetime import datetime, timezone
 # Suprimir warnings de SSL inseguro (homelab com certificados auto-assinados)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
-log = logging.getLogger("qbit-guardian")
+from app.logger import get_logger, VERBOSE
+
+log = get_logger("guardian")
 
 CONFIG_PATH = os.environ.get("CONFIG_PATH",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json"))
@@ -118,6 +116,7 @@ def get_qbit_session():
 
 def qbit_login():
     sess, base = get_qbit_session()
+    log.debug(f"HTTP GET {base}/api/v2/app/version")
     r = sess.get(f"{base}/api/v2/app/version", timeout=10)
     if r.status_code != 200:
         raise RuntimeError(f"qBittorrent: HTTP {r.status_code}")
@@ -126,6 +125,7 @@ def qbit_login():
 
 def get_torrents():
     sess, base = get_qbit_session()
+    log.debug(f"HTTP GET {base}/api/v2/torrents/info")
     r = sess.get(f"{base}/api/v2/torrents/info", timeout=10)
     r.raise_for_status()
     return r.json()
@@ -133,6 +133,7 @@ def get_torrents():
 
 def get_files(torrent_hash):
     sess, base = get_qbit_session()
+    log.debug(f"HTTP GET {base}/api/v2/torrents/files?hash={torrent_hash[:8]}")
     r = sess.get(f"{base}/api/v2/torrents/files",
                  params={"hash": torrent_hash}, timeout=10)
     r.raise_for_status()
@@ -141,9 +142,10 @@ def get_files(torrent_hash):
 
 def remove_torrent(torrent_hash):
     sess, base = get_qbit_session()
+    log.debug(f"HTTP POST {base}/api/v2/torrents/delete (hash={torrent_hash[:8]})")
     sess.post(f"{base}/api/v2/torrents/delete",
               data={"hashes": torrent_hash, "deleteFiles": "true"}, timeout=10)
-    log.warning(f"Removido: {torrent_hash}")
+    log.error(f"Removido: {torrent_hash}")
 
 
 def set_file_priority(torrent_hash, file_id, priority):
@@ -160,6 +162,7 @@ def send_notification(title, message):
     if not url:
         return
     try:
+        log.debug(f"HTTP POST {url} (Apprise: {title})")
         requests.post(url, data={"title": title, "body": message},
                      timeout=10, verify=False)
     except Exception as e:
@@ -202,6 +205,7 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
         sess.headers.update(hdrs)
 
         # 1. Buscar na queue
+        log.debug(f"HTTP GET {base}/queue")
         rq = sess.get(f"{base}/queue", timeout=10)
         item_id = None
         extra_ids = []  # Sonarr: episode_ids
@@ -209,6 +213,7 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
         for item in rq.json().get("records", []):
             if item.get("downloadId", "").lower() == torrent_hash.lower():
                 # Blocklist
+                log.debug(f"HTTP DELETE {base}/queue/{item['id']}?blocklist=true")
                 sess.delete(f"{base}/queue/{item['id']}",
                                 params={"blocklist": "true", "removeFromClient": "false"},
                                 timeout=10)
@@ -227,9 +232,11 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
         # 2. Fallback: busca por nome
         if not item_id:
             if arr_type == "Radarr":
+                log.debug(f"HTTP GET {base}/movie")
                 rm = sess.get(f"{base}/movie", timeout=10)
                 item_id = _arr_match_by_name(rm.json(), torrent_name)
             elif arr_type == "Sonarr":
+                log.debug(f"HTTP GET {base}/series")
                 rs = sess.get(f"{base}/series", timeout=10)
                 item_id = _arr_match_by_name(rs.json(), torrent_name)
 
@@ -238,6 +245,7 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
 
         # 3. Disparar re-search
         if arr_type == "Radarr":
+            log.debug(f"HTTP POST {base}/command (MoviesSearch)")
             sess.post(f"{base}/command",
                           json={"name": "MoviesSearch", "movieIds": [item_id]},
                           timeout=10)
@@ -250,6 +258,7 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
                 released = []
                 for eid in extra_ids:
                     try:
+                        log.debug(f"HTTP GET {base}/episode/{eid}")
                         re = sess.get(f"{base}/episode/{eid}",
                                          timeout=10)
                         ad = re.json().get("airDateUtc")
@@ -266,6 +275,7 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
                         released.append(eid)
 
                 if released:
+                    log.debug(f"HTTP POST {base}/command (EpisodeSearch)")
                     sess.post(f"{base}/command",
                                   json={"name": "EpisodeSearch",
                                         "episodeIds": released},
@@ -274,6 +284,7 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
                 else:
                     log.warning(f"Sonarr: '{torrent_name}' episodios nao lancados")
             else:
+                log.debug(f"HTTP POST {base}/command (SeriesSearch)")
                 sess.post(f"{base}/command",
                               json={"name": "SeriesSearch",
                                     "seriesId": item_id},
@@ -344,7 +355,7 @@ def analyze_torrent(torrent):
     # Verificar stalled/sem seeds
     stalled, stalled_reason = is_stalled(torrent, cfg)
     if stalled:
-        log.warning(f"[{name}] {stalled_reason} — Removendo")
+        log.verbose(f"[{name}] {stalled_reason} — REMOVIDO")
         remove_torrent(hash_)
         send_notification("🗑️ Torrent Removido (stalled)",
                           f"Nome: {name}\nMotivo: {stalled_reason}")
@@ -352,6 +363,7 @@ def analyze_torrent(torrent):
 
     files = get_files(hash_)
     if not files:
+        log.verbose(f"[{name}] ignorado (sem metadados)")
         return
 
     extensions = [os.path.splitext(f["name"])[1].lower() for f in files]
@@ -382,18 +394,21 @@ def analyze_torrent(torrent):
     prio_media = g.get("priority_media", 7)
     prio_norm  = g.get("priority_normal", 1)
     prio_skip  = g.get("priority_skip", 0)
+    media_count = 0
     for f in files:
             ext = os.path.splitext(f["name"])[1].lower()
             file_id = f.get("index", f.get("id"))
             if ext in valid_ext:
                 set_file_priority(hash_, file_id, prio_media)
                 optimized = True
+                media_count += 1
             elif ext in {".nfo", ".jpg", ".png", ".txt", ".srt", ".sub", ".idx"}:
                 set_file_priority(hash_, file_id, prio_norm)
             else:
                 set_file_priority(hash_, file_id, prio_skip)
-                log.info(f"[{name}] Desativado → {f['name']}")
+                log.debug(f"[{name}] Desativado → {f['name']}")
     if optimized:
+        log.verbose(f"[{name}] otimizado ({media_count} arquivos de midia priorizados)")
         send_notification("⚡ Torrent Otimizado",
                           f"Nome: {name}\nArquivos de midia priorizados.")
 
@@ -416,6 +431,7 @@ def write_heartbeat():
 # ── Loop principal ─────────────────────────────────────────────────────
 
 _processed = set()
+_check_count = 0
 
 
 def _prune_processed(current_hashes):
@@ -430,6 +446,7 @@ def _prune_processed(current_hashes):
 
 
 def guardian_loop():
+    global _check_count
     load_config()
     try:
         qbit_login()
@@ -447,20 +464,28 @@ def guardian_loop():
     log.info(f"Guardian iniciado. Intervalo: {interval}s")
 
     while True:
+        _check_count += 1
+        removed_this_check = 0
+        new_this_check = 0
+
         try:
             torrents = get_torrents()
+            total = len(torrents)
             new = [t for t in torrents if t["hash"] not in _processed]
 
             if new:
-                log.info(f"{len(new)} torrent(s) novo(s)")
+                new_this_check = len(new)
                 for t in new:
                     analyze_torrent(t)
                     _processed.add(t["hash"])
-            else:
-                log.debug("Nenhum torrent novo")
 
             current_hashes = {t["hash"] for t in torrents}
+            removed_this_check = len([h for h in _processed if h not in current_hashes])
             _prune_processed(current_hashes)
+
+            # ── Log INFO: resumo da verificacao ──
+            log.info(f"Verificacao #{_check_count}: {total} torrents, "
+                     f"{new_this_check} novos, {removed_this_check} removidos")
 
         except requests.exceptions.ConnectionError:
             log.warning("qBittorrent inacessivel, reconectando...")

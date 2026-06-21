@@ -7,12 +7,16 @@ Requer autenticacao HTTP Basic Auth (configurada em config.json > webui).
 
 import json
 import os
-import logging
+import warnings
 import functools
 from flask import Flask, request, jsonify, send_from_directory, Response
 import app.guardian as guardian
+from app.logger import get_logger
 
-log = logging.getLogger("qbit-guardian.web")
+# Suprimir warning "This is a development server" do Flask
+warnings.filterwarnings("ignore", message=".*development server.*")
+
+log = get_logger("web")
 
 CONFIG_PATH = os.environ.get("CONFIG_PATH",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json"))

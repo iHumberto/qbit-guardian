@@ -6,6 +6,8 @@ services:
       - "5000:5000"
     volumes:
       - ./config:/app/config
+    environment:
+      - LOG_LEVEL=ERROR
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "cat", "/tmp/heartbeat"]
