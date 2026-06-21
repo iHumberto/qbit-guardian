@@ -867,3 +867,53 @@ class TestConfigAutoCreation:
         w.CONFIG_PATH = old_path
         g.CONFIG_PATH = old_gpath
         g._config = None
+
+    def test_config_dir_exists_but_file_missing(self):
+        """Regressao: diretorio existe (bind mount) mas config.json nao.
+
+        Simula o cenario Docker onde ./config:/app/config monta o diretorio
+        vazio do host — o diretorio /app/config/ existe (bind mount),
+        mas /app/config/config.json ainda nao foi criado.
+        load_config() deve criar o arquivo dentro do diretorio existente.
+        """
+        import app.web as w
+
+        old_path = w.CONFIG_PATH
+        old_gpath = g.CONFIG_PATH
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Cria o diretorio (simula bind mount que ja existe)
+            config_dir = os.path.join(tmpdir, "config")
+            os.makedirs(config_dir)
+            assert os.path.isdir(config_dir)
+
+            config_file = os.path.join(config_dir, "config.json")
+            w.CONFIG_PATH = config_file
+            g.CONFIG_PATH = config_file
+            g._config = None
+
+            # Arquivo NAO existe ainda (primeiro run)
+            assert not os.path.exists(config_file)
+
+            # load_config deve criar o config.json dentro do dir existente
+            cfg = g.load_config()
+
+            # Arquivo foi criado DENTRO do diretorio existente
+            assert os.path.exists(config_file)
+            assert os.path.dirname(config_file) == config_dir
+
+            # Estrutura default completa
+            assert cfg["qbit"]["url"] == ""
+            assert cfg["sonarr"]["url"] == ""
+            assert cfg["radarr"]["url"] == ""
+            assert cfg["guardian"]["check_interval_seconds"] == 300
+            assert cfg["notifications"]["apprise_url"] == ""
+            assert cfg["webui"]["user"] == ""
+
+            # Verifica que os.makedirs nao quebrou o diretorio existente
+            assert os.path.isdir(config_dir)
+            assert len(os.listdir(config_dir)) == 1  # so config.json
+
+        w.CONFIG_PATH = old_path
+        g.CONFIG_PATH = old_gpath
+        g._config = None

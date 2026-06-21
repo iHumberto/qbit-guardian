@@ -5,7 +5,7 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./config.json:/app/config.json
+      - ./config:/app/config
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "cat", "/tmp/heartbeat"]
