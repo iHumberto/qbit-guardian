@@ -760,3 +760,110 @@ class TestArrSession:
             g._handle_arr("Sonarr", "sonarr", "hash123", "Test.Show")
 
         mock_session.headers.update.assert_called_once_with({"X-Api-Key": "my-secret-key"})
+
+
+# ── Config auto-creation (zero config) ──────────────────────────────────
+
+class TestConfigAutoCreation:
+    """Config.json criado automaticamente se nao existir."""
+
+    def test_creates_default_config_when_file_missing(self):
+        """load_config() cria config.json default em diretorio vazio."""
+        import app.web as w
+
+        old_path = w.CONFIG_PATH
+        old_gpath = g.CONFIG_PATH
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_config = os.path.join(tmpdir, "config.json")
+            w.CONFIG_PATH = tmp_config
+            g.CONFIG_PATH = tmp_config
+            g._config = None
+
+            # Arquivo nao existe ainda
+            assert not os.path.exists(tmp_config)
+
+            cfg = g.load_config()
+
+            # Arquivo foi criado
+            assert os.path.exists(tmp_config)
+
+            # Estrutura default
+            assert "qbit" in cfg
+            assert cfg["qbit"]["url"] == ""
+            assert cfg["qbit"]["api_key"] == ""
+            assert "sonarr" in cfg
+            assert "radarr" in cfg
+            assert "guardian" in cfg
+            assert cfg["guardian"]["check_interval_seconds"] == 300
+            assert len(cfg["guardian"]["valid_media_extensions"]) > 0
+            assert len(cfg["guardian"]["dangerous_extensions"]) > 0
+            assert "notifications" in cfg
+            assert cfg["notifications"]["apprise_url"] == ""
+            assert "webui" in cfg
+            assert cfg["webui"]["user"] == ""
+            assert cfg["webui"]["password"] == ""
+
+            # Verifica JSON salvo no disco
+            with open(tmp_config) as f:
+                saved = json.load(f)
+            assert saved == cfg
+
+        w.CONFIG_PATH = old_path
+        g.CONFIG_PATH = old_gpath
+        g._config = None
+
+    def test_load_config_existing_file_still_works(self):
+        """load_config() continua lendo arquivo existente normalmente."""
+        import app.web as w
+
+        old_path = w.CONFIG_PATH
+        old_gpath = g.CONFIG_PATH
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_config = os.path.join(tmpdir, "config.json")
+            w.CONFIG_PATH = tmp_config
+            g.CONFIG_PATH = tmp_config
+            g._config = None
+
+            custom = {
+                "qbit": {"url": "http://x:8080", "api_key": "mykey"},
+                "sonarr": {"url": "", "api_key": ""},
+                "radarr": {"url": "", "api_key": ""},
+                "guardian": {"check_interval_seconds": 60},
+                "notifications": {"apprise_url": ""},
+                "webui": {"user": "", "password": ""}
+            }
+            with open(tmp_config, "w") as f:
+                json.dump(custom, f)
+
+            cfg = g.load_config()
+            assert cfg["qbit"]["url"] == "http://x:8080"
+            assert cfg["qbit"]["api_key"] == "mykey"
+            assert cfg["guardian"]["check_interval_seconds"] == 60
+
+        w.CONFIG_PATH = old_path
+        g.CONFIG_PATH = old_gpath
+        g._config = None
+
+    def test_config_created_in_nested_directory(self):
+        """load_config() cria diretorios pais se necessario."""
+        import app.web as w
+
+        old_path = w.CONFIG_PATH
+        old_gpath = g.CONFIG_PATH
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nested = os.path.join(tmpdir, "a", "b", "config.json")
+            w.CONFIG_PATH = nested
+            g.CONFIG_PATH = nested
+            g._config = None
+
+            assert not os.path.exists(os.path.dirname(nested))
+            cfg = g.load_config()
+            assert os.path.exists(nested)
+            assert "qbit" in cfg
+
+        w.CONFIG_PATH = old_path
+        g.CONFIG_PATH = old_gpath
+        g._config = None

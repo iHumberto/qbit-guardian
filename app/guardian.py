@@ -35,9 +35,44 @@ _config_lock = threading.Lock()
 
 
 def load_config():
-    """Le config.json (thread-safe)."""
+    """Le config.json (thread-safe). Cria default se nao existir."""
     global _config
     with _config_lock:
+        if not os.path.exists(CONFIG_PATH):
+            default = {
+                "qbit": {"url": "", "api_key": ""},
+                "sonarr": {"url": "", "api_key": ""},
+                "radarr": {"url": "", "api_key": ""},
+                "guardian": {
+                    "check_interval_seconds": 300,
+                    "valid_media_extensions": [
+                        ".mkv", ".mp4", ".avi", ".mov", ".m4v",
+                        ".ts", ".wmv", ".flv", ".webm"
+                    ],
+                    "dangerous_extensions": [
+                        ".exe", ".scr", ".bat", ".cmd", ".vbs",
+                        ".js", ".com", ".pif", ".msi", ".dll",
+                        ".ps1", ".sh", ".bin"
+                    ],
+                    "remove_stalled": False,
+                    "stalled_time": 0,
+                    "stalled_unit": "hours",
+                    "remove_no_seeds": False,
+                    "no_seeds_time": 0,
+                    "no_seeds_unit": "hours",
+                    "priority_media": 7,
+                    "priority_normal": 1,
+                    "priority_skip": 0
+                },
+                "notifications": {"apprise_url": ""},
+                "webui": {"user": "", "password": ""}
+            }
+            os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+            with open(CONFIG_PATH, "w") as f:
+                json.dump(default, f, indent=2)
+            _config = default
+            log.info("config.json criado com valores default — configure pela Web UI")
+            return _config
         with open(CONFIG_PATH, "r") as f:
             _config = json.load(f)
     return _config
@@ -54,6 +89,7 @@ def get_config():
 def save_config(data):
     """Salva config.json (thread-safe)."""
     with _config_lock:
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
         with open(CONFIG_PATH, "w") as f:
             json.dump(data, f, indent=2)
         global _config

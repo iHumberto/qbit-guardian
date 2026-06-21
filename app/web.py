@@ -10,6 +10,7 @@ import os
 import logging
 import functools
 from flask import Flask, request, jsonify, send_from_directory, Response
+import app.guardian as guardian
 
 log = logging.getLogger("qbit-guardian.web")
 
@@ -64,13 +65,11 @@ def requires_auth(f):
 # ── Helpers ────────────────────────────────────────────────────────────
 
 def _read_config():
-    with open(CONFIG_PATH, "r") as f:
-        return json.load(f)
+    return guardian.load_config()
 
 
 def _write_config(data):
     """Persiste config.json no disco E atualiza cache do guardian (thread-safe)."""
-    import app.guardian as guardian
     guardian.save_config(data)
 
 
@@ -123,7 +122,6 @@ def api_health():
 @requires_auth
 def api_trigger():
     """Forca uma verificacao imediata (acionamento manual ou webhook)."""
-    import app.guardian as guardian
     try:
         guardian.load_config()
         torrents = guardian.get_torrents()
