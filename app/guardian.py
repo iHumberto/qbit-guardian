@@ -398,6 +398,21 @@ def analyze_torrent(torrent):
                           f"Nome: {name}\nArquivos de midia priorizados.")
 
 
+# ── Heartbeat ──────────────────────────────────────────────────────────
+
+def write_heartbeat():
+    """Escreve timestamp em /tmp/heartbeat para healthcheck Docker.
+
+    Chamado no startup (main.py), periodicamente (guardian_loop)
+    e sob demanda (api_trigger em modo webhook).
+    """
+    try:
+        with open("/tmp/heartbeat", "w") as f:
+            f.write(str(time.time()))
+    except Exception:
+        pass
+
+
 # ── Loop principal ─────────────────────────────────────────────────────
 
 _processed = set()
@@ -457,8 +472,7 @@ def guardian_loop():
             log.error(f"Erro: {e}")
 
         try:
-            with open("/tmp/heartbeat", "w") as f:
-                f.write(str(time.time()))
+            write_heartbeat()
         except Exception:
             pass
 

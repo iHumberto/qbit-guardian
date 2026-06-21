@@ -51,7 +51,7 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./qbit-guardian/config.json:/app/config.json
+      - ./config:/app/config
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "cat", "/tmp/heartbeat"]
@@ -60,25 +60,13 @@ services:
       retries: 3
 ```
 
-Crie um `config.json` mínimo na mesma pasta do compose:
-
-```json
-{
-  "qbit": {
-    "host": "ip-ou-nome-do-seu-qbit",
-    "port": 8080,
-    "api_key": "SUA_API_KEY_DO_QBITTORRENT"
-  }
-}
-```
-
 Depois inicie:
 
 ```bash
-docker compose up -d qbit-guardian
+docker compose up -d
 ```
 
-Acesse `http://seu-host:5000` para configurar o restante (Sonarr, Radarr, notificações, etc.).
+Na primeira execução, o sistema cria a configuração automaticamente — nada de editar JSON manualmente. Acesse `http://seu-host:5000` para preencher todas as configurações pela Web UI.
 
 > 💡 **O que é uma API Key?** É uma senha longa e aleatória que o qBittorrent gera para que outros programas (como o qbit-guardian) conversem com ele de forma segura. Encontre a sua no qBittorrent em **Ferramentas → Opções → Web UI → Chave da API**.
 

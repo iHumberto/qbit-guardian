@@ -917,3 +917,114 @@ class TestConfigAutoCreation:
         w.CONFIG_PATH = old_path
         g.CONFIG_PATH = old_gpath
         g._config = None
+
+
+# ── Heartbeat ───────────────────────────────────────────────────────────
+
+class TestHeartbeat:
+    """write_heartbeat() para healthcheck Docker."""
+
+    def test_write_heartbeat_creates_file(self):
+        """Funcao cria /tmp/heartbeat com timestamp."""
+        import os
+        import app.guardian as g
+
+        # Remove se existir de teste anterior
+        try:
+            os.unlink("/tmp/heartbeat")
+        except FileNotFoundError:
+            pass
+
+        g.write_heartbeat()
+
+        assert os.path.exists("/tmp/heartbeat")
+        with open("/tmp/heartbeat") as f:
+            content = f.read().strip()
+        assert content  # nao vazio
+        # Deve ser um timestamp (float)
+        float(content)
+
+    def test_write_heartbeat_silent_on_permission_error(self):
+        """Erro de permissao nao propaga excecao."""
+        import app.guardian as g
+        from unittest import mock
+
+        with mock.patch("builtins.open", side_effect=PermissionError("denied")):
+            # Nao deve lancar excecao
+            g.write_heartbeat()
+
+    def test_trigger_endpoint_writes_heartbeat(self, client, tmp_config):
+        """/api/trigger atualiza o heartbeat (modo webhook)."""
+        import os
+        import app.guardian as g
+        from unittest import mock
+
+        g.load_config()
+        g._processed.clear()
+
+        mock_torrents = [{"hash": "h1", "name": "test1", "state": "downloading",
+                          "added_on": __import__("time").time(), "num_complete": 50}]
+
+        # Remove heartbeat se existir
+        try:
+            os.unlink("/tmp/heartbeat")
+        except FileNotFoundError:
+            pass
+
+        with mock.patch.object(g, "get_torrents", return_value=mock_torrents), \
+             mock.patch.object(g, "analyze_torrent"):
+            r = client.post("/api/trigger")
+            assert r.status_code == 200
+
+        # Heartbeat deve existir apos trigger
+        assert os.path.exists("/tmp/heartbeat"), \
+            "api_trigger deve escrever heartbeat (modo webhook)"
+        with open("/tmp/heartbeat") as f:
+            assert f.read().strip()
+
+    def test_guardian_loop_writes_heartbeat(self, tmp_config):
+        """guardian_loop escreve heartbeat durante iteracao."""
+        import os
+        import app.guardian as g
+        from unittest import mock
+
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"]["check_interval_seconds"] = 1
+        g.save_config(cfg)
+
+        # Remove heartbeat
+        try:
+            os.unlink("/tmp/heartbeat")
+        except FileNotFoundError:
+            pass
+
+        heartbeat_calls = []
+
+        def fake_write_heartbeat():
+            heartbeat_calls.append(1)
+
+        # Captura referencia original ANTES do mock
+        orig_get_config = g.get_config
+
+        # Mock get_config para alternar para webhook mode na 2a chamada
+        call_count = [0]
+
+        def mock_get_config():
+            call_count[0] += 1
+            cfg_copy = orig_get_config().copy()
+            if call_count[0] >= 2:
+                cfg_copy["guardian"] = dict(cfg_copy["guardian"])
+                cfg_copy["guardian"]["check_interval_seconds"] = 0
+            return cfg_copy
+
+        with mock.patch.object(g, "qbit_login"), \
+             mock.patch.object(g, "get_torrents", return_value=[]), \
+             mock.patch.object(g, "write_heartbeat", side_effect=fake_write_heartbeat), \
+             mock.patch.object(g, "get_config", side_effect=mock_get_config):
+
+            g.guardian_loop()
+
+            # Deve ter chamado write_heartbeat ao menos 1x
+            assert len(heartbeat_calls) >= 1, \
+                f"guardian_loop deve chamar write_heartbeat, chamadas: {len(heartbeat_calls)}"

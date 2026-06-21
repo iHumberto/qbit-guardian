@@ -132,6 +132,7 @@ def api_trigger():
             guardian.analyze_torrent(t)
             guardian._processed.add(t["hash"])
         guardian._prune_processed(current)
+        guardian.write_heartbeat()
         return jsonify({"status": "ok", "checked": len(torrents), "new": count})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500

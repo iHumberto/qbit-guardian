@@ -34,25 +34,7 @@ Quando você usa **Sonarr** (séries) ou **Radarr** (filmes), o qbit-guardian bl
 
 > 💡 **Docker** é como uma caixa que empacota o programa com tudo que ele precisa para rodar. Funciona igual em qualquer computador, sem instalar dependências extras.
 
-### Passo 1: Crie um arquivo de configuração
-
-Primeiro, crie um arquivo chamado `config.json` com o conteúdo abaixo. Ajuste os campos de **host** e **porta** conforme seu qBittorrent:
-
-```json
-{
-  "qbit": {
-    "host": "192.168.1.100",
-    "port": 8080,
-    "api_key": "COLE-SUA-API-KEY-AQUI"
-  }
-}
-```
-
-> ⚠️ Substitua `192.168.1.100` pelo IP ou nome do computador onde o qBittorrent roda. Se ambos estão na mesma máquina Docker, use `host.docker.internal` (Windows/Mac) ou `172.17.0.1` (Linux).
-
-Salve esse arquivo em uma pasta do seu servidor, por exemplo: `/home/usuario/docker/qbit-guardian/config.json`.
-
-### Passo 2: Adicione ao seu docker-compose.yml
+### Passo 1: Adicione ao seu docker-compose.yml
 
 Abra o arquivo `docker-compose.yml` onde você já configura seus outros serviços (qBittorrent, Sonarr, Radarr) e adicione:
 
@@ -64,19 +46,35 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./qbit-guardian/config.json:/app/config.json
+      - ./config:/app/config
     restart: unless-stopped
 ```
 
-### Passo 3: Inicie o container
+> 📘 **Volume** é a ponte entre os arquivos do container e os arquivos da sua máquina. O que o programa salvar em `/app/config` dentro do container aparece na pasta `./config` do seu servidor. Assim, mesmo se recriar o container, suas configurações não se perdem.
+
+### Passo 2: Inicie o container
 
 Na pasta onde está seu `docker-compose.yml`, execute:
 
 ```bash
-docker compose up -d qbit-guardian
+docker compose up -d
 ```
 
-O programa vai baixar a imagem e iniciar automaticamente.
+O programa baixa a imagem e inicia automaticamente. **Nenhum arquivo de configuração precisa ser criado antes** — o sistema gera tudo sozinho na primeira execução.
+
+### Passo 3: Configure tudo pela Web UI
+
+Abra o navegador e acesse `http://endereco-do-seu-servidor:5000`. Todos os campos aparecem vazios, prontos para você preencher:
+
+- **qBittorrent**: endereço, porta e a API Key do seu cliente de torrents.
+- **Sonarr** e **Radarr**: integração com séries e filmes (opcional — pode deixar em branco).
+- **Guardian**: regras de monitoramento, intervalos, prioridades.
+- **Notificações**: alertas via Telegram, Discord e outros (opcional).
+- **Web UI**: proteção com senha para o painel (opcional).
+
+Preencha os campos que desejar e clique em **Salvar**. Pronto — as configurações são gravadas automaticamente em `./config/config.json` e carregadas nas próximas execuções.
+
+> ⚠️ No Docker, `localhost` dentro do container aponta para o próprio container, não para sua máquina. Se o qBittorrent está em outro container ou na máquina host, use `host.docker.internal` (Windows/Mac) ou o IP real da máquina (Linux, ex: `172.17.0.1`).
 
 ---
 
@@ -139,12 +137,14 @@ Exemplos:
 - Se roda na mesma máquina: `http://localhost:5000`
 - Se roda em outro computador da rede: `http://192.168.1.100:5000`
 
-Você verá a tela de configuração com as seções:
+**Na primeira vez**, todos os campos aparecem vazios — o sistema cria um arquivo de configuração novo. Preencha as seções conforme sua necessidade:
 
 - **qBittorrent**: conexão com seu cliente de torrents.
 - **Radarr** e **Sonarr**: integração (opcional, pode deixar em branco).
 - **Guardian**: regras de monitoramento.
 - **Notificações**: alertas via Telegram, Discord, etc.
+
+Depois de preencher, clique em **Salvar**. A configuração fica gravada e carrega automaticamente nas próximas execuções.
 
 > ⚠️ Na primeira execução, a página **não tem senha**. Qualquer pessoa na sua rede pode acessar. Veja abaixo como proteger.
 
