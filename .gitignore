@@ -7,3 +7,4 @@ __pycache__/
 # Desenvolvimento local
 dev-config.json
 docker-compose.dev.yaml
+config/
