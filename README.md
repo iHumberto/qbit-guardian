@@ -24,7 +24,7 @@ It runs as a lightweight Docker container (or a Python process) with a built-in 
 | Web UI      | Flask 3.x                           |
 | HTTP client | requests 2.x                        |
 | Notifications | Apprise (Telegram, Discord, Slack, and 100+ services) |
-| Testing     | pytest 8.x (58 tests)               |
+| Testing     | pytest 8.x (79 tests: 59 functional + 20 security) |
 | License     | GNU GPL v3                          |
 
 ## Features
@@ -211,6 +211,56 @@ curl -X POST http://your-host:5000/api/config \
 | Variable       | Default        | Description                    |
 |----------------|----------------|--------------------------------|
 | `CONFIG_PATH`  | `./config.json` | Path to the config file       |
+| `LOG_LEVEL`    | `ERROR`         | Log verbosity (see [Log Levels](#log-levels)) |
+
+## Log Levels
+
+qbit-guardian can output different amounts of detail in its logs. Choose the level that matches your needs:
+
+| Level    | What you'll see |
+|----------|----------------|
+| `ERROR`  | Only problems: removed torrents, connection failures. The default — quiet and focused. |
+| `INFO`   | ERROR plus a summary line after each check: "Check #42: 23 torrents, 2 new, 1 removed". Good for knowing the guardian is alive and working. |
+| `VERBOSE` | INFO plus one line per torrent action: "[Movie.Name.2026] stalled for >5h — REMOVED", "[TV.Show.S01] optimized". Ideal for understanding *why* a torrent was removed. |
+| `DEBUG`   | Everything: HTTP calls, URLs, payloads. Very noisy — use only for troubleshooting integrations (Sonarr, Radarr, qBittorrent). |
+
+### Setting the log level
+
+**Docker (recommended):** Add the `LOG_LEVEL` environment variable to your `docker-compose.yml`:
+
+```yaml
+services:
+  qbit-guardian:
+    environment:
+      - LOG_LEVEL=VERBOSE
+```
+
+Then recreate the container:
+
+```bash
+docker compose up -d
+```
+
+**Manual install:** Set the variable before starting:
+
+```bash
+LOG_LEVEL=DEBUG python app/app.py
+```
+
+> 💡 **What is a log level?** Think of it as a volume knob for your logs. Turn it down (`ERROR`) and you only hear about problems. Turn it up (`DEBUG`) and you hear every detail — useful when something isn't working and you need to investigate.
+
+### Example output
+
+Here's what you'd see after one check with `LOG_LEVEL=VERBOSE`:
+
+```
+2026-06-22 14:35:01,012 [VERBOSE] [Movie.Name.2026.1080p] optimized (2 media files prioritized)
+2026-06-22 14:35:01,123 [VERBOSE] [TV.Show.S01E05.1080p] optimized (1 media files prioritized)
+2026-06-22 14:35:01,234 [VERBOSE] [Old.Release.2025.720p] stalled for >5h — REMOVED
+2026-06-22 14:35:01,456 [INFO   ] Check #1: 23 torrents, 23 new, 2 removed
+```
+
+With `LOG_LEVEL=ERROR` (the default), you'd only see the removal line and any connection errors — nothing else.
 
 ## Troubleshooting
 
@@ -244,7 +294,7 @@ Leave the `sonarr.host` and `radarr.host` fields empty. The guardian works fine 
 # Install dependencies (includes pytest)
 pip install -r requirements.txt
 
-# Run all tests (58: 38 functional + 20 security)
+# Run all tests (79: 59 functional + 20 security)
 python -m pytest test/ -v
 
 # Functional tests only

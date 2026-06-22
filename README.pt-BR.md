@@ -24,7 +24,7 @@ Ele roda como um container Docker leve (ou como um processo Python) com uma inte
 | Interface Web | Flask 3.x                           |
 | Cliente HTTP  | requests 2.x                        |
 | Notificações  | Apprise (Telegram, Discord, Slack e mais de 100 serviços) |
-| Testes        | pytest 8.x (58 testes)              |
+| Testes        | pytest 8.x (79 testes: 59 funcionais + 20 segurança) |
 | Licença       | GNU GPL v3                          |
 
 ## Funcionalidades
@@ -211,6 +211,56 @@ curl -X POST http://seu-host:5000/api/config \
 | Variável       | Padrão          | Descrição                          |
 |----------------|-----------------|------------------------------------|
 | `CONFIG_PATH`  | `./config.json` | Caminho para o arquivo de configuração |
+| `LOG_LEVEL`    | `ERROR`         | Nível de detalhe dos logs (veja [Níveis de Log](#níveis-de-log)) |
+
+## Níveis de Log
+
+O qbit-guardian pode mostrar diferentes quantidades de detalhes nos logs. Escolha o nível ideal para você:
+
+| Nível    | O que aparece |
+|----------|--------------|
+| `ERROR`  | Só problemas: torrents removidos, falhas de conexão. É o padrão — silencioso e direto ao ponto. |
+| `INFO`   | ERROR mais uma linha de resumo após cada verificação: "Verificação #42: 23 torrents, 2 novos, 1 removidos". Bom para saber que o guardian está funcionando. |
+| `VERBOSE` | INFO mais uma linha por ação em cada torrent: "[Filme.Nome.2026] stalled por >5h — REMOVIDO", "[TV.Show.S01] otimizado". Ideal para entender *por que* um torrent foi removido. |
+| `DEBUG`   | Tudo: chamadas HTTP, URLs, dados enviados. Bem verboso — use só para investigar problemas de integração (Sonarr, Radarr, qBittorrent). |
+
+### Como configurar
+
+**Docker (recomendado):** Adicione a variável `LOG_LEVEL` no seu `docker-compose.yml`:
+
+```yaml
+services:
+  qbit-guardian:
+    environment:
+      - LOG_LEVEL=VERBOSE
+```
+
+Depois recrie o container:
+
+```bash
+docker compose up -d
+```
+
+**Instalação manual:** Defina a variável antes de iniciar:
+
+```bash
+LOG_LEVEL=DEBUG python app/app.py
+```
+
+> 💡 **O que é nível de log?** Pense como um controle de volume para os logs. No mínimo (`ERROR`) você só escuta quando algo dá errado. No máximo (`DEBUG`) você escuta cada detalhe — útil quando algo não está funcionando e você precisa investigar.
+
+### Exemplo de saída
+
+Veja o que aparece após uma verificação com `LOG_LEVEL=VERBOSE`:
+
+```
+2026-06-22 14:35:01,012 [VERBOSE] [Filme.Nome.2026.1080p] otimizado (2 arquivos de midia priorizados)
+2026-06-22 14:35:01,123 [VERBOSE] [Serie.T01E05.1080p] otimizado (1 arquivos de midia priorizados)
+2026-06-22 14:35:01,234 [VERBOSE] [Lancamento.Antigo.2025.720p] stalled por >5h — REMOVIDO
+2026-06-22 14:35:01,456 [INFO   ] Verificacao #1: 23 torrents, 23 novos, 2 removidos
+```
+
+Com `LOG_LEVEL=ERROR` (o padrão), você veria apenas a linha de remoção e eventuais erros de conexão — nada além disso.
 
 ## Problemas Comuns
 
@@ -244,7 +294,7 @@ Deixe os campos `sonarr.host` e `radarr.host` em branco. O guardian funciona per
 # Instalar dependências (inclui pytest)
 pip install -r requirements.txt
 
-# Rodar todos os testes (58: 38 funcionais + 20 de segurança)
+# Rodar todos os testes (79: 59 funcionais + 20 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais
