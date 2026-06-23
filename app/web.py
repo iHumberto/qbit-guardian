@@ -135,9 +135,17 @@ def api_trigger():
         for t in new:
             guardian.analyze_torrent(t)
             guardian._processed.add(t["hash"])
+
+        # Pass 2: reavalia stalled/no-seeds para TODOS os torrents
+        stalled_removed = 0
+        for t in torrents:
+            if guardian.check_stalled_and_remove(t):
+                stalled_removed += 1
+
         guardian._prune_processed(current)
         guardian.write_heartbeat()
-        return jsonify({"status": "ok", "checked": len(torrents), "new": count})
+        return jsonify({"status": "ok", "checked": len(torrents), "new": count,
+                       "stalled_removed": stalled_removed})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 

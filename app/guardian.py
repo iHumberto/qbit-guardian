@@ -338,6 +338,33 @@ def _time_to_seconds(value, unit):
         return int(value) * 3600
 
 
+def check_stalled_and_remove(torrent):
+    """Verifica stalled/sem seeds e remove se necessario.
+
+    Funcao leve: so le campos do JSON, sem chamadas HTTP.
+    Extraida de analyze_torrent para permitir reavaliacao
+    periodica de torrents ja processados (pass 2 do loop).
+    Retorna True se removeu o torrent.
+    """
+    cfg = get_config()
+    state = torrent.get("state", "")
+
+    # UP states: skip (torrent ja completou ou esta enviando)
+    if state in ("uploading", "stalledUP", "pausedUP", "checkingUP", "queuedUP"):
+        return False
+
+    stalled, stalled_reason = is_stalled(torrent, cfg)
+    if stalled:
+        hash_ = torrent["hash"]
+        name = torrent["name"]
+        log.verbose(f"[{name}] {stalled_reason} — REMOVIDO")
+        remove_torrent(hash_)
+        send_notification("🗑️ Torrent Removido (stalled)",
+                          f"Nome: {name}\nMotivo: {stalled_reason}")
+        return True
+    return False
+
+
 def analyze_torrent(torrent):
     cfg = get_config()
     g = cfg["guardian"]
@@ -352,13 +379,8 @@ def analyze_torrent(torrent):
     if state in ("uploading", "stalledUP", "pausedUP", "checkingUP", "queuedUP"):
         return
 
-    # Verificar stalled/sem seeds
-    stalled, stalled_reason = is_stalled(torrent, cfg)
-    if stalled:
-        log.verbose(f"[{name}] {stalled_reason} — REMOVIDO")
-        remove_torrent(hash_)
-        send_notification("🗑️ Torrent Removido (stalled)",
-                          f"Nome: {name}\nMotivo: {stalled_reason}")
+    # Verificar stalled/sem seeds (funcao extraida, mesma logica)
+    if check_stalled_and_remove(torrent):
         return
 
     files = get_files(hash_)
@@ -479,13 +501,21 @@ def guardian_loop():
                     analyze_torrent(t)
                     _processed.add(t["hash"])
 
+            # Pass 2: reavalia stalled/no-seeds para TODOS os torrents
+            # (torrents ja em _processed podem ter ficado stalled depois)
+            stalled_removed = 0
+            for t in torrents:
+                if check_stalled_and_remove(t):
+                    stalled_removed += 1
+
             current_hashes = {t["hash"] for t in torrents}
             removed_this_check = len([h for h in _processed if h not in current_hashes])
             _prune_processed(current_hashes)
 
             # ── Log INFO: resumo da verificacao ──
             log.info(f"Verificacao #{_check_count}: {total} torrents, "
-                     f"{new_this_check} novos, {removed_this_check} removidos")
+                     f"{new_this_check} novos, {stalled_removed} stalled removidos, "
+                     f"{removed_this_check} removidos do historico")
 
         except requests.exceptions.ConnectionError:
             log.warning("qBittorrent inacessivel, reconectando...")
