@@ -5,13 +5,10 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Modificado
-- Layout da Web UI refinado: container ampliado (+15% width, max-width: 1035px); gap entre colunas de 30px; coluna do Guardian estica verticalmente para mesma altura da coluna de serviços via flexbox aninhado (`align-items: stretch` + `.col + .col > .card { flex: 1 }`); título centralizado; botão "Salvar Configurações" centralizado. (#0f528c9)
+## [2.0.1] — 2026-06-23
 
 ### Corrigido
-- Erro de SSL ao conectar com Apprise usando certificado auto-assinado (comum em homelabs com dominios `.home.arpa` ou `.local`). A verificacao SSL foi removida: `requests.post(verify=False)` usado diretamente, sem config `verify_ssl` e sem fallback. Warnings do urllib3 sao suprimidos. (#t_397f341c)
+- Bug: guardian nao reavaliava stalled/sem seeds em torrents ja processados em ciclos anteriores. O set global `_processed` impedia que torrents fossem reavaliados apos a primeira analise, fazendo com que torrents que ficassem stalled depois nunca fossem detectados nem removidos. Corrigido com funcao `check_stalled_and_remove()` extraida de `analyze_torrent()` e segunda passada no loop principal (`guardian_loop`) e endpoint `/api/trigger` (`api_trigger`) que reavalia TODOS os torrents a cada ciclo. (#898e822)
 
 ## [2.0.0] — 2026-06-07
 
@@ -35,15 +32,20 @@ e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Notas de conceito no vault Obsidian (thread-safe-config, Apprise, qBit API)
 - `README.md` com instrucoes Docker, manual, API REST e desenvolvimento
 - `CHANGELOG.md` (este arquivo)
+- Workflow GitHub Actions `docker-build.yml` — build multi-arch (amd64/arm64) e push para GHCR
 
 ### Modificado
 - Layout refeito como duas colunas seguindo protótipo Penpot: serviços externos (qBittorrent, Sonarr, Radarr, notificações) à esquerda, Guardian à direita
+- Layout da Web UI refinado: container ampliado (+15% width, max-width: 1035px); gap entre colunas de 30px; coluna do Guardian estica verticalmente para mesma altura da coluna de serviços via flexbox aninhado (`align-items: stretch` + `.col + .col > .card { flex: 1 }`); título centralizado; botão "Salvar Configurações" centralizado. (#0f528c9)
 - Arquitetura: monolito (`guardian.py` 327 linhas) → modulos (`app.py` + `guardian.py` + `web.py` 507 linhas)
 - Configuracao: env vars → JSON editavel via Web UI
 - Guardian loop: processo unico → thread daemon com Flask na main thread
 - Extensoes: sets hardcoded → customizaveis via Web UI
 - Docker: `docker-compose.yaml` generico (sem rede fixa), `python:3.12-slim`
 - Licenca: adicionada GPL v3 explicita
+
+### Corrigido
+- Erro de SSL ao conectar com Apprise usando certificado auto-assinado (comum em homelabs com dominios `.home.arpa` ou `.local`). A verificacao SSL foi removida: `requests.post(verify=False)` usado diretamente, sem config `verify_ssl` e sem fallback. Warnings do urllib3 sao suprimidos. (#66e1e4f)
 
 ### Removido
 - Dependencia de env vars para credenciais (`.env/.env` depreciado)
