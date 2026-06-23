@@ -268,11 +268,13 @@ class TestAnalyzeTorrent:
 
         with mock.patch.object(g, "get_files") as m_files, \
              mock.patch.object(g, "remove_torrent") as m_remove, \
+             mock.patch.object(g, "block_and_search") as m_block, \
              mock.patch.object(g, "send_notification") as m_notify:
 
             g.analyze_torrent(t)
 
             m_files.assert_not_called()
+            m_block.assert_called_once_with("stalledhash", "Old.Stalled.Torrent")
             m_remove.assert_called_once_with("stalledhash")
             m_notify.assert_called_once()
             assert "stalled" in m_notify.call_args[0][0].lower()

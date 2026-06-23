@@ -358,6 +358,7 @@ def check_stalled_and_remove(torrent):
         hash_ = torrent["hash"]
         name = torrent["name"]
         log.verbose(f"[{name}] {stalled_reason} — REMOVIDO")
+        block_and_search(hash_, name)
         remove_torrent(hash_)
         send_notification("🗑️ Torrent Removido (stalled)",
                           f"Nome: {name}\nMotivo: {stalled_reason}")
