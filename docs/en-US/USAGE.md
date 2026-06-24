@@ -258,3 +258,69 @@ Both are **off by default**. To enable them:
 | **No Seeds Unit**      | Unit for the time: `seconds`, `minutes`, or `hours`.              |
 
 Example: set **Remove No Seeds** ON, **No Seeds Time** to `48`, and **No Seeds Unit** to `hours`. After two days with nobody sharing the file, the torrent is automatically removed.
+
+---
+
+## Understanding the logs
+
+qbit-guardian logs everything it does. You can see the logs in two ways:
+
+- **Docker:** `docker logs qbit-guardian`
+- **Manual install:** directly in the terminal where the program is running
+
+Here's what each message means:
+
+| Log message | What happened |
+|-------------|---------------|
+| `Dangerous files: ['.exe'] — Removing and Blocking` | The torrent contained an `.exe` and was removed. If Sonarr/Radarr are configured, the release was blocked and a new search started. |
+| `No valid media files — Removing and Blocking` | The torrent had no files matching the configured media extensions. It was removed. |
+| `stalled (stalledDL) for >6h — Removing` | The torrent was stuck for more than 6 hours. Removed. |
+| `0 seeds — Removing` | The torrent had no seeds for longer than the configured time. Removed. |
+| `Disabled → filename.exe` | A file inside the torrent was set to priority zero — it won't be downloaded. |
+| `Media files prioritized` | Download priorities were adjusted. Video files were moved to the top of the queue. |
+| `No new torrents` | The guardian checked and found no unprocessed torrents. Everything is fine. |
+| `qBittorrent unreachable, reconnecting...` | The guardian lost contact with qBittorrent. It retries automatically on each cycle. |
+
+### Processed torrent statuses
+
+The guardian keeps an internal list of torrents it has already processed. This prevents the same torrent from being checked multiple times. Possible statuses:
+
+| Status | Description |
+|--------|-------------|
+| **completed** | Torrents that finished downloading and are now uploading/seeding. The guardian **does not touch** them — they're already done. |
+| **dangerous** | Torrents that contained dangerous files. Already removed. |
+| **stalled** | Torrents that were removed for being stuck too long. |
+| **no_seeds** | Torrents removed for lack of seeds. |
+| **no_media** | Torrents removed for having no valid media files. |
+| **optimized** | Torrents where file priorities were adjusted. They continue downloading normally. |
+
+---
+
+## Forcing a manual check
+
+If you want the guardian to check torrents right now, without waiting for the interval, use the **Force Check** button on the configuration page.
+
+Or, from the command line:
+
+```bash
+curl -X POST http://your-server:5000/api/trigger -u username:password
+```
+
+This is useful for testing that everything works after configuring.
+
+---
+
+## Tips and best practices
+
+- **Test without notifications first.** Let the guardian run silently for a few days. Once you're confident in its behavior, enable notifications.
+- **A 5-minute interval is enough.** For home use, checking every 300 seconds is fast enough. You don't need 10 seconds — you won't notice the difference and it only wastes resources.
+- **Keep dangerous extensions up to date.** New file types used to spread malware appear from time to time. Stay alert.
+- **If you use Sonarr/Radarr, take advantage of the integration.** Filling in the integration fields lets the guardian block bad releases and search for alternatives automatically. Your library grows without you lifting a finger.
+
+---
+
+## Need help?
+
+- Read the [Frequently Asked Questions](FAQ.md) for common questions.
+- See the [Installation Guide](INSTALL.md) if you need to install from scratch.
+- Issues, suggestions, and contributions: [project repository](https://forgejo.home.arpa/Humberto/qbit-guardian).

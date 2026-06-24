@@ -222,7 +222,7 @@ qbit-guardian can output different amounts of detail in its logs. Choose the lev
 |----------|----------------|
 | `ERROR`  | Only problems: removed torrents, connection failures. The default — quiet and focused. |
 | `INFO`   | ERROR plus a summary line after each check: "Check #42: 23 torrents, 2 new, 1 removed". Good for knowing the guardian is alive and working. |
-| `VERBOSE` | INFO plus one line per torrent action: "[Movie.Name.2026] stalled for >5h — REMOVED", "[TV.Show.S01] optimized". Ideal for understanding *why* a torrent was removed. |
+| `VERBOSE` | INFO plus one line per torrent action: "[Movie.Name.2026] stalled (stalledDL) for >5h — REMOVED", "[TV.Show.S01] optimized". Ideal for understanding *why* a torrent was removed. |
 | `DEBUG`   | Everything: HTTP calls, URLs, payloads. Very noisy — use only for troubleshooting integrations (Sonarr, Radarr, qBittorrent). |
 
 ### Setting the log level
@@ -257,7 +257,7 @@ Here's what you'd see after one check with `LOG_LEVEL=VERBOSE`:
 ```
 2026-06-22 14:35:01,012 [VERBOSE] [Movie.Name.2026.1080p] optimized (2 media files prioritized)
 2026-06-22 14:35:01,123 [VERBOSE] [TV.Show.S01E05.1080p] optimized (1 media files prioritized)
-2026-06-22 14:35:01,234 [VERBOSE] [Old.Release.2025.720p] stalled for >5h — REMOVED
+2026-06-22 14:35:01,234 [VERBOSE] [Old.Release.2025.720p] stalled (stalledDL) for >5h — REMOVED
 2026-06-22 14:35:01,456 [INFO   ] Check #1: 23 torrents, 23 new, 2 removed
 ```
 

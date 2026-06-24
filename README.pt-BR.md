@@ -222,7 +222,7 @@ O qbit-guardian pode mostrar diferentes quantidades de detalhes nos logs. Escolh
 |----------|--------------|
 | `ERROR`  | Só problemas: torrents removidos, falhas de conexão. É o padrão — silencioso e direto ao ponto. |
 | `INFO`   | ERROR mais uma linha de resumo após cada verificação: "Verificação #42: 23 torrents, 2 novos, 1 removidos". Bom para saber que o guardian está funcionando. |
-| `VERBOSE` | INFO mais uma linha por ação em cada torrent: "[Filme.Nome.2026] stalled por >5h — REMOVIDO", "[TV.Show.S01] otimizado". Ideal para entender *por que* um torrent foi removido. |
+| `VERBOSE` | INFO mais uma linha por ação em cada torrent: "[Filme.Nome.2026] stalled (stalledDL) por >5h — REMOVIDO", "[TV.Show.S01] otimizado". Ideal para entender *por que* um torrent foi removido. |
 | `DEBUG`   | Tudo: chamadas HTTP, URLs, dados enviados. Bem verboso — use só para investigar problemas de integração (Sonarr, Radarr, qBittorrent). |
 
 ### Como configurar
@@ -257,7 +257,7 @@ Veja o que aparece após uma verificação com `LOG_LEVEL=VERBOSE`:
 ```
 2026-06-22 14:35:01,012 [VERBOSE] [Filme.Nome.2026.1080p] otimizado (2 arquivos de midia priorizados)
 2026-06-22 14:35:01,123 [VERBOSE] [Serie.T01E05.1080p] otimizado (1 arquivos de midia priorizados)
-2026-06-22 14:35:01,234 [VERBOSE] [Lancamento.Antigo.2025.720p] stalled por >5h — REMOVIDO
+2026-06-22 14:35:01,234 [VERBOSE] [Lancamento.Antigo.2025.720p] stalled (stalledDL) por >5h — REMOVIDO
 2026-06-22 14:35:01,456 [INFO   ] Verificacao #1: 23 torrents, 23 novos, 2 removidos
 ```
 

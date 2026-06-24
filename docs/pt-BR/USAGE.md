@@ -231,7 +231,7 @@ Veja o que cada mensagem significa:
 |----------------|-----------------|
 | `Arquivos perigosos: ['.exe'] — Removendo e Bloqueando` | O torrent continha um `.exe` e foi removido. Se Sonarr/Radarr estiverem configurados, o lançamento foi bloqueado e uma nova busca iniciada. |
 | `Nenhum arquivo de midia valido — Removendo e Bloqueando` | O torrent não tinha nenhum arquivo com as extensões de mídia configuradas. Foi removido. |
-| `stalled por >6h — Removendo` | O torrent estava parado há mais de 6 horas. Removido. |
+| `stalled (stalledDL) por >6h — Removendo` | O torrent estava parado há mais de 6 horas. Removido. |
 | `0 seeds — Removendo` | O torrent estava sem seeds pelo tempo configurado. Removido. |
 | `Desativado → nome-do-arquivo.exe` | Um arquivo dentro do torrent foi marcado como prioridade zero — não será baixado. |
 | `Arquivos de midia priorizados` | As prioridades de download foram ajustadas. Os arquivos de vídeo foram colocados no topo da fila. |
