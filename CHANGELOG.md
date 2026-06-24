@@ -9,6 +9,7 @@ e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Corrigido
 - Bug: `check_stalled_and_remove()` removia o torrent do qBittorrent mas não chamava `block_and_search()` — ou seja, não bloqueava no Radarr/Sonarr nem iniciava nova pesquisa. Corrigido adicionando `block_and_search()` antes de `remove_torrent()`, igual ao fluxo de torrents maliciosos. (#ee9878a)
+- Bug: torrents presos em `state=metaDL` (baixando metadados) nunca eram removidos. `is_stalled()` só verificava `stalledDL` e `stalledUP`. Corrigido adicionando `metaDL` à tupla de estados stalled e incluindo o estado no log (`stalled (metaDL) por >5h`). (#b734e32)
 
 ## [2.0.1] — 2026-06-23
 
