@@ -309,12 +309,12 @@ def is_stalled(torrent, cfg):
     state = torrent.get("state", "")
 
     # Stalled (parado por X tempo)
-    if g.get("remove_stalled") and state in ("stalledDL", "stalledUP"):
+    if g.get("remove_stalled") and state in ("stalledDL", "stalledUP", "metaDL"):
         seconds = _time_to_seconds(g.get("stalled_time", 0), g.get("stalled_unit", "hours"))
         if seconds > 0:
             added_on = torrent.get("added_on", 0)
             if time.time() - added_on >= seconds:
-                return True, f"stalled por >{g['stalled_time']}{g['stalled_unit'][0]}"
+                return True, f"stalled ({state}) por >{g['stalled_time']}{g['stalled_unit'][0]}"
 
     # Sem seeds
     if g.get("remove_no_seeds") and state in ("stalledDL", "downloading", "queuedDL"):

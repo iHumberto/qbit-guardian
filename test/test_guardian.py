@@ -138,6 +138,7 @@ class TestIsStalled:
         past = time.time() - 120
         assert g.is_stalled(self.make_torrent("stalledDL", past), cfg)[0]
         assert g.is_stalled(self.make_torrent("stalledUP", past), cfg)[0]
+        assert g.is_stalled(self.make_torrent("metaDL", past), cfg)[0]
         assert not g.is_stalled(self.make_torrent("downloading", past), cfg)[0]
         assert not g.is_stalled(self.make_torrent("uploading", past), cfg)[0]
 
