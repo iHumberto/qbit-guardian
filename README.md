@@ -55,11 +55,14 @@ services:
       - ./config:/app/config
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "cat", "/tmp/heartbeat"]
+      test: ["CMD", "python", "app/healthcheck.py"]
       interval: 60s
-      timeout: 5s
+      timeout: 10s
       retries: 3
+      start_period: 30s
 ```
+
+> The healthcheck checks the **age** of the heartbeat against the configured `check_interval_seconds`, not just whether the file exists — so a stalled loop is detected instead of reporting `healthy` forever.
 
 Then start:
 
