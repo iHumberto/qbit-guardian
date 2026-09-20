@@ -317,6 +317,52 @@ class TestAnalyzeTorrent:
             assert len(apprise_calls) == 0
 
 
+# ── set_file_priority ──────────────────────────────────────────────────
+
+class TestSetFilePriority:
+    """Prioridade invalida devolvia HTTP 400 em silencio no qBittorrent.
+
+    O qBittorrent aceita apenas -1, 0, 1, 6 e 7. Qualquer outro valor (ex.: 4)
+    devolve 400 "A prioridade nao e valida" — e como o retorno do POST nao era
+    conferido, a priorizacao simplesmente nao acontecia, sem nenhum sinal.
+    """
+
+    @pytest.mark.parametrize("prio", [-1, 0, 1, 6, 7])
+    def test_prioridade_valida_envia(self, prio, tmp_config):
+        g.load_config()
+        with mock.patch.object(g, "get_qbit_session") as m_sess:
+            sess = mock.MagicMock()
+            sess.post.return_value = mock.MagicMock(status_code=200, text="")
+            m_sess.return_value = (sess, "http://qbit")
+            g.set_file_priority("hash123", 0, prio)
+        sess.post.assert_called_once()
+
+    @pytest.mark.parametrize("prio", [2, 3, 4, 5, 8, 99])
+    def test_prioridade_invalida_nao_envia_e_avisa(self, prio, tmp_config):
+        g.load_config()
+        with mock.patch.object(g, "get_qbit_session") as m_sess, \
+             mock.patch.object(g, "log") as m_log:
+            sess = mock.MagicMock()
+            m_sess.return_value = (sess, "http://qbit")
+            g.set_file_priority("hash123", 0, prio)
+
+        assert not sess.post.called, f"prioridade {prio} nao deveria ser enviada"
+        m_log.warning.assert_called_once()
+
+    def test_erro_da_api_gera_warning(self, tmp_config):
+        """Falha do filePrio nao pode passar em silencio."""
+        g.load_config()
+        with mock.patch.object(g, "get_qbit_session") as m_sess, \
+             mock.patch.object(g, "log") as m_log:
+            sess = mock.MagicMock()
+            sess.post.return_value = mock.MagicMock(
+                status_code=400, text="A prioridade não é válida")
+            m_sess.return_value = (sess, "http://qbit")
+            g.set_file_priority("hash123", 0, 7)
+
+        m_log.warning.assert_called_once()
+
+
 # ── _prune_processed ───────────────────────────────────────────────────
 
 class TestPruneProcessed:

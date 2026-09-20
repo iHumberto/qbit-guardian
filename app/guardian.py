@@ -148,10 +148,29 @@ def remove_torrent(torrent_hash):
     log.error(f"Removido: {torrent_hash}")
 
 
+# O qBittorrent aceita APENAS estas prioridades de arquivo. Qualquer outro
+# valor devolve HTTP 400 "A prioridade nao e valida" — que antes passava em
+# silencio (o retorno do POST nao era conferido), deixando os arquivos sem
+# priorizacao nenhuma.
+#   -1 = sem prioridade | 0 = nao baixar | 1 = normal | 6 = alta | 7 = maxima
+VALID_FILE_PRIORITIES = {-1, 0, 1, 6, 7}
+
+
 def set_file_priority(torrent_hash, file_id, priority):
+    if priority not in VALID_FILE_PRIORITIES:
+        log.warning(f"prioridade de arquivo invalida: {priority} "
+                    f"(validas: -1, 0, 1, 6, 7) — arquivo NAO priorizado. "
+                    f"Corrija priority_media/priority_normal/priority_skip na config.")
+        return
+
     sess, base = get_qbit_session()
-    sess.post(f"{base}/api/v2/torrents/filePrio",
-              data={"hash": torrent_hash, "id": file_id, "priority": priority}, timeout=10)
+    r = sess.post(f"{base}/api/v2/torrents/filePrio",
+                  data={"hash": torrent_hash, "id": file_id, "priority": priority},
+                  timeout=10)
+    if r.status_code != 200:
+        log.warning(f"filePrio falhou (hash={torrent_hash[:8]} id={file_id} "
+                    f"priority={priority}): HTTP {r.status_code} "
+                    f"{r.text.strip()[:60]}")
 
 
 # ── Notificacoes ───────────────────────────────────────────────────────

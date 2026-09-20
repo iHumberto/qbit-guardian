@@ -5,6 +5,14 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5] — 2026-09-19
+
+### Corrigido
+- Bug: prioridade de arquivo **invalida** falhava em silencio. O qBittorrent aceita apenas `-1`, `0`, `1`, `6` e `7` em `/api/v2/torrents/filePrio` — qualquer outro valor devolve HTTP 400 `A prioridade nao e valida`. Como `set_file_priority()` nao conferia o retorno do POST, a priorizacao simplesmente nao acontecia e nada era registrado em log. Descoberto em producao: a config tinha `priority_normal: 4` (valor inexistente na escala), entao os arquivos auxiliares (`.nfo`, `.srt`, `.jpg`) eram rejeitados em rajada a cada ciclo — 8 HTTP 400 por varredura, invisiveis sem LOG_LEVEL=DEBUG.
+  - `set_file_priority()` valida contra `VALID_FILE_PRIORITIES` antes de enviar e emite `log.warning` (valor invalido ou HTTP != 200), em vez de silenciar;
+  - Config do servidor ajustada: `priority_normal` 4 -> 1 (o default do codigo);
+  - Testes: `TestSetFilePriority` (5 valores validos, 6 invalidos, erro da API).
+
 ## [2.0.4] — 2026-09-19
 
 ### Corrigido
