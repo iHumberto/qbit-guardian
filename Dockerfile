@@ -12,7 +12,7 @@ COPY static/ static/
 
 EXPOSE 5000
 
-HEALTHCHECK --interval=60s --timeout=5s --start-period=10s --retries=3 \
-    CMD cat /tmp/heartbeat || exit 1
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+    CMD ["python", "app/healthcheck.py"]
 
 CMD ["python", "-u", "app/main.py"]

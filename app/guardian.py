@@ -367,6 +367,13 @@ def check_stalled_and_remove(torrent):
 
 
 def analyze_torrent(torrent):
+    """Analisa um torrent novo.
+
+    Retorna True quando a analise foi concluida (o torrent pode ser marcado
+    como processado) e False quando os metadados ainda nao chegaram — nesse
+    caso ele precisa ser reavaliado num ciclo futuro. Marcar como processado
+    antes dos metadados existirem fazia o torrent nunca mais ser validado.
+    """
     cfg = get_config()
     g = cfg["guardian"]
     valid_ext = set(g.get("valid_media_extensions", []))
@@ -378,16 +385,19 @@ def analyze_torrent(torrent):
 
     # Pular torrents ja completos/uploading
     if state in ("uploading", "stalledUP", "pausedUP", "checkingUP", "queuedUP"):
-        return
+        return True
 
     # Verificar stalled/sem seeds (funcao extraida, mesma logica)
     if check_stalled_and_remove(torrent):
-        return
+        return True
 
     files = get_files(hash_)
     if not files:
-        log.verbose(f"[{name}] ignorado (sem metadados)")
-        return
+        # Metadados ainda nao chegaram (magnet em metaDL/queuedDL). Validar
+        # agora e impossivel, e marcar como processado impediria a validacao
+        # definitiva quando os arquivos aparecessem.
+        log.verbose(f"[{name}] sem metadados — sera reavaliado no proximo ciclo")
+        return False
 
     extensions = [os.path.splitext(f["name"])[1].lower() for f in files]
     dangerous_found = [e for e in extensions if e in dangerous_ext]
@@ -410,7 +420,7 @@ def analyze_torrent(torrent):
         remove_torrent(hash_)
         send_notification("⚠️ Torrent Removido",
                           f"Nome: {name}\nMotivo: {reason}")
-        return
+        return True
 
     # Otimizar prioridades
     optimized = False
@@ -434,6 +444,8 @@ def analyze_torrent(torrent):
         log.verbose(f"[{name}] otimizado ({media_count} arquivos de midia priorizados)")
         send_notification("⚡ Torrent Otimizado",
                           f"Nome: {name}\nArquivos de midia priorizados.")
+
+    return True
 
 
 # ── Heartbeat ──────────────────────────────────────────────────────────
@@ -499,8 +511,11 @@ def guardian_loop():
             if new:
                 new_this_check = len(new)
                 for t in new:
-                    analyze_torrent(t)
-                    _processed.add(t["hash"])
+                    # So marca como processado se a analise foi concluida:
+                    # torrents sem metadados voltam a ser avaliados no proximo
+                    # ciclo, quando os arquivos ja existirem.
+                    if analyze_torrent(t):
+                        _processed.add(t["hash"])
 
             # Pass 2: reavalia stalled/no-seeds para TODOS os torrents
             # (torrents ja em _processed podem ter ficado stalled depois)

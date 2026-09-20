@@ -5,6 +5,19 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] — 2026-09-19
+
+### Corrigido
+- Bug: torrents vistos **sem metadados** (`metaDL`/`queuedDL` — magnet ainda resolvendo) eram marcados como processados mesmo com a analise incompleta. `analyze_torrent()` retornava cedo no caso "sem metadados" sem validar nada, mas `guardian_loop()` e `api_trigger()` adicionavam o hash em `_processed` de forma incondicional — e o torrent **nunca mais** era reavaliado. Quando os metadados chegavam (trazendo `.exe`/`.scr` ou nenhum arquivo de midia valida), nada acontecia: o torrent ficava no cliente indefinidamente. Como `_processed` vive em memoria, so um restart do container reprocessava o backlog — o que produzia a rajada de remocoes que o usuario observava ("do nada disparou varias mensagens"). O 2.0.1 corrigiu o caso analogo para stalled/no-seeds; este fix cobre a validacao de **arquivos**.
+  - `analyze_torrent()` agora retorna `True` (analise concluida) ou `False` (sem metadados, reavaliar depois);
+  - `guardian_loop()` e `api_trigger()` so marcam o hash como processado quando a analise retorna `True`;
+  - Teste de regressao: `test_trigger_reprocessa_torrent_sem_metadados`.
+
+### Alterado
+- Healthcheck agora detecta loop travado. O anterior (`cat /tmp/heartbeat`) apenas verificava a **existencia** do arquivo — como o heartbeat nunca e apagado, um guardian travado permanecia reportando `healthy` indefinidamente (o que mascarava justamente este tipo de bug). Substituido por `app/healthcheck.py`, que compara a **idade** do heartbeat com `guardian.check_interval_seconds`: falha quando o atraso passa de `max(600s, 3x intervalo)`. Modo webhook (intervalo = 0) sempre passa, pois nao ha loop periodico.
+  - Dockerfile e os dois composes atualizados para `["CMD", "python", "app/healthcheck.py"]` (timeout 10s, start_period 30s);
+  - Testes: `TestHealthcheck` (heartbeat recente, atrasado, ausente, intervalo longo e modo webhook).
+
 ## [2.0.3] — 2026-06-23
 
 ### Corrigido

@@ -133,8 +133,10 @@ def api_trigger():
         new = [t for t in torrents if t["hash"] not in guardian._processed]
         count = len(new)
         for t in new:
-            guardian.analyze_torrent(t)
-            guardian._processed.add(t["hash"])
+            # So marca como processado se a analise foi concluida (torrents sem
+            # metadados sao reavaliados no proximo ciclo).
+            if guardian.analyze_torrent(t):
+                guardian._processed.add(t["hash"])
 
         # Pass 2: reavalia stalled/no-seeds para TODOS os torrents
         stalled_removed = 0

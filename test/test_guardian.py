@@ -435,6 +435,47 @@ class TestFlaskEndpoints:
             assert r.json["status"] == "error"
             assert "qBit offline" in r.json["message"]
 
+    def test_trigger_reprocessa_torrent_sem_metadados(self, client, tmp_config):
+        """Regressao: nao 'queimar' torrent cuja analise foi incompleta (sem metadados).
+
+        Sintoma real: torrents baixados via magnet eram vistos em metaDL,
+        ignorados por falta de metadados ('sem metadados') e MESMO ASSIM
+        marcados como processados. Quando os metadados chegavam — trazendo
+        arquivos .exe/.scr — o guardian nunca mais os validava. So voltavam a
+        ser tratados quando o container reiniciava (o _processed e em memoria),
+        o que explicava a rajada de remocoes apos um restart.
+        """
+        g.load_config()
+        g._processed.clear()
+
+        torrent = {"hash": "h1", "name": "Fake.Movie.2024", "state": "metaDL",
+                   "added_on": time.time(), "num_complete": 10}
+
+        # Ciclo 1 — torrent ainda sem metadados (magnet resolvendo)
+        with mock.patch.object(g, "get_torrents", return_value=[torrent]), \
+             mock.patch.object(g, "get_files", return_value=[]):
+            r = client.post("/api/trigger")
+            assert r.status_code == 200
+            assert r.json["new"] == 1
+
+        assert "h1" not in g._processed, (
+            "torrent sem metadados foi marcado como processado — "
+            "nunca mais sera reavaliado quando os metadados chegarem"
+        )
+
+        # Ciclo 2 — metadados chegaram, com arquivo malicioso
+        with mock.patch.object(g, "get_torrents", return_value=[torrent]), \
+             mock.patch.object(g, "get_files",
+                               return_value=[{"index": 0, "name": "malware.exe"}]), \
+             mock.patch.object(g, "remove_torrent") as m_remove, \
+             mock.patch.object(g, "block_and_search"), \
+             mock.patch.object(g, "send_notification"):
+            r = client.post("/api/trigger")
+            assert r.status_code == 200
+            assert m_remove.call_count == 1, (
+                "torrent malicioso nao foi removido apos os metadados chegarem"
+            )
+
 
 # ── HTTP Basic Auth ────────────────────────────────────────────────────
 
@@ -1031,3 +1072,75 @@ class TestHeartbeat:
             # Deve ter chamado write_heartbeat ao menos 1x
             assert len(heartbeat_calls) >= 1, \
                 f"guardian_loop deve chamar write_heartbeat, chamadas: {len(heartbeat_calls)}"
+
+
+# ── Healthcheck ─────────────────────────────────────────────────────────
+
+class TestHealthcheck:
+    """app/healthcheck.py — detecta loop travado via idade do heartbeat.
+
+    O healthcheck antigo (`cat /tmp/heartbeat`) so verificava a EXISTENCIA do
+    arquivo, entao um loop morto continuava reportando "healthy" para sempre.
+    """
+
+    def _config(self, path, interval):
+        with open(path, "w") as f:
+            json.dump({"guardian": {"check_interval_seconds": interval}}, f)
+
+    def _heartbeat(self, path, age_seconds):
+        with open(path, "w") as f:
+            f.write(str(time.time() - age_seconds))
+
+    def test_ok_quando_heartbeat_recente(self, tmp_path):
+        from app import healthcheck
+
+        cfg, hb = tmp_path / "config.json", tmp_path / "heartbeat"
+        self._config(cfg, 180)
+        self._heartbeat(hb, 30)
+
+        ok, msg = healthcheck.check(heartbeat_path=str(hb), config_path=str(cfg))
+        assert ok, msg
+
+    def test_falha_quando_heartbeat_atrasado(self, tmp_path):
+        from app import healthcheck
+
+        cfg, hb = tmp_path / "config.json", tmp_path / "heartbeat"
+        self._config(cfg, 180)
+        self._heartbeat(hb, 2000)  # muito acima da tolerancia (600s)
+
+        ok, msg = healthcheck.check(heartbeat_path=str(hb), config_path=str(cfg))
+        assert not ok
+        assert "atrasado" in msg
+
+    def test_tolerancia_acompanha_intervalo_longo(self, tmp_path):
+        """Intervalo de 1h nao pode gerar falso positivo aos 20 min."""
+        from app import healthcheck
+
+        cfg, hb = tmp_path / "config.json", tmp_path / "heartbeat"
+        self._config(cfg, 3600)
+        self._heartbeat(hb, 1200)  # 20 min < 3*3600
+
+        ok, msg = healthcheck.check(heartbeat_path=str(hb), config_path=str(cfg))
+        assert ok, msg
+
+    def test_modo_webhook_sempre_ok(self, tmp_path):
+        """Intervalo 0 (webhook) nao tem loop periodico — healthcheck passa."""
+        from app import healthcheck
+
+        cfg, hb = tmp_path / "config.json", tmp_path / "heartbeat"
+        self._config(cfg, 0)
+
+        ok, msg = healthcheck.check(heartbeat_path=str(hb), config_path=str(cfg))
+        assert ok
+        assert "webhook" in msg
+
+    def test_falha_quando_heartbeat_ausente(self, tmp_path):
+        from app import healthcheck
+
+        cfg = tmp_path / "config.json"
+        self._config(cfg, 180)
+
+        ok, msg = healthcheck.check(heartbeat_path=str(tmp_path / "inexistente"),
+                                    config_path=str(cfg))
+        assert not ok
+        assert "ausente" in msg
