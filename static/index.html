@@ -133,18 +133,37 @@
 
         <hr>
 
+        <!-- Prioridade: a escala do qBittorrent NAO e continua. O filePrio
+             aceita apenas 0, 1, 6 e 7 — 2 a 5 devolvem HTTP 400. Por isso os
+             tres campos sao listas de selecao, e nao campos numericos: um
+             min/max nao expressa um conjunto com buracos. -->
         <div class="field">
-          <label data-i18n="label_priority_media">Prioridade para arquivos de mídia (0–7)</label>
-          <input id="priority_media" type="number" min="0" max="7" placeholder="7">
-          <span class="help" data-i18n="help_priority_media">7 = máxima, 0 = não baixar</span>
+          <label data-i18n="label_priority_media">Prioridade para arquivos de mídia (0, 1, 6 ou 7)</label>
+          <select id="priority_media">
+            <option value="0" data-i18n-option="prio_skip">0 — não baixar</option>
+            <option value="1" data-i18n-option="prio_normal">1 — normal</option>
+            <option value="6" data-i18n-option="prio_high">6 — alta</option>
+            <option value="7" selected data-i18n-option="prio_max">7 — máxima</option>
+          </select>
+          <span class="help" data-i18n="help_priority_media">0 = não baixar · 1 = normal · 6 = alta · 7 = máxima</span>
         </div>
         <div class="field">
           <label data-i18n="label_priority_normal">Prioridade para arquivos auxiliares (.nfo, .srt, .jpg)</label>
-          <input id="priority_normal" type="number" min="0" max="7" placeholder="1">
+          <select id="priority_normal">
+            <option value="0" data-i18n-option="prio_skip">0 — não baixar</option>
+            <option value="1" selected data-i18n-option="prio_normal">1 — normal</option>
+            <option value="6" data-i18n-option="prio_high">6 — alta</option>
+            <option value="7" data-i18n-option="prio_max">7 — máxima</option>
+          </select>
         </div>
         <div class="field">
           <label data-i18n="label_priority_skip">Prioridade para outros arquivos</label>
-          <input id="priority_skip" type="number" min="0" max="7" placeholder="0">
+          <select id="priority_skip">
+            <option value="0" selected data-i18n-option="prio_skip">0 — não baixar</option>
+            <option value="1" data-i18n-option="prio_normal">1 — normal</option>
+            <option value="6" data-i18n-option="prio_high">6 — alta</option>
+            <option value="7" data-i18n-option="prio_max">7 — máxima</option>
+          </select>
         </div>
 
         <hr>
@@ -154,10 +173,10 @@
           <label for="remove_stalled" data-i18n="label_remove_stalled">Remover torrents parados (stalled) há mais de</label>
           <div class="inline">
             <input type="number" id="stalled_time" min="0" max="999" value="0" placeholder="0">
-            <select id="stalled_unit" data-i18n-units>
-              <option value="seconds" data-i18n-unit="unit_seconds">segundos</option>
-              <option value="minutes" data-i18n-unit="unit_minutes">minutos</option>
-              <option value="hours" selected data-i18n-unit="unit_hours">horas</option>
+            <select id="stalled_unit">
+              <option value="seconds" data-i18n-option="unit_seconds">segundos</option>
+              <option value="minutes" data-i18n-option="unit_minutes">minutos</option>
+              <option value="hours" selected data-i18n-option="unit_hours">horas</option>
             </select>
           </div>
         </div>
@@ -167,10 +186,10 @@
           <label for="remove_no_seeds" data-i18n="label_remove_no_seeds">Remover torrents sem seeds há mais de</label>
           <div class="inline">
             <input type="number" id="no_seeds_time" min="0" max="999" value="0" placeholder="0">
-            <select id="no_seeds_unit" data-i18n-units>
-              <option value="seconds" data-i18n-unit="unit_seconds">segundos</option>
-              <option value="minutes" data-i18n-unit="unit_minutes">minutos</option>
-              <option value="hours" selected data-i18n-unit="unit_hours">horas</option>
+            <select id="no_seeds_unit">
+              <option value="seconds" data-i18n-option="unit_seconds">segundos</option>
+              <option value="minutes" data-i18n-option="unit_minutes">minutos</option>
+              <option value="hours" selected data-i18n-option="unit_hours">horas</option>
             </select>
           </div>
         </div>
@@ -208,9 +227,9 @@ async function loadConfig() {
     setVal('remove_no_seeds', c.guardian.remove_no_seeds);
     setVal('no_seeds_time', c.guardian.no_seeds_time);
     setVal('no_seeds_unit', c.guardian.no_seeds_unit);
-    setVal('priority_media', c.guardian.priority_media ?? 7);
-    setVal('priority_normal', c.guardian.priority_normal ?? 1);
-    setVal('priority_skip', c.guardian.priority_skip ?? 0);
+    setVal('priority_media', prioOrDefault(c.guardian.priority_media, 7));
+    setVal('priority_normal', prioOrDefault(c.guardian.priority_normal, 1));
+    setVal('priority_skip', prioOrDefault(c.guardian.priority_skip, 0));
     setVal('apprise_url', c.notifications.apprise_url);
   } catch(e) {
     toast(t('toast_load_error') + e.message, 'err');
@@ -257,6 +276,16 @@ async function saveConfig() {
   } catch(e) {
     toast(t('toast_error') + e.message, 'err');
   }
+}
+
+// Escala aceita pelo POST /api/v2/torrents/filePrio do qBittorrent. Nao e
+// continua: 2 a 5 devolvem HTTP 400. Um config gravado antes desta correcao
+// pode trazer 4 — sem opcao correspondente o select ficaria em branco, entao
+// o valor invalido cai no default da propria chave.
+const VALID_PRIORITIES = [0, 1, 6, 7];
+function prioOrDefault(val, fallback) {
+  const n = parseInt(val);
+  return VALID_PRIORITIES.includes(n) ? n : fallback;
 }
 
 function getVal(id) { const el = document.getElementById(id); return el.type==='checkbox' ? el.checked : el.value; }

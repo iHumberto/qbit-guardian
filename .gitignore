@@ -8,3 +8,7 @@ __pycache__/
 dev-config.json
 docker-compose.dev.yaml
 config/
+
+# Cobertura de testes
+.coverage
+htmlcov/

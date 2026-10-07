@@ -28,8 +28,12 @@ const translations = {
         help_check_interval: '0 desativa o polling \u2014 use com o script de webhook no qBit',
         label_valid_extensions: 'Extens\u00F5es de m\u00EDdia v\u00E1lidas (uma por linha)',
         label_dangerous_extensions: 'Extens\u00F5es perigosas (uma por linha)',
-        label_priority_media: 'Prioridade para arquivos de m\u00EDdia (0\u20137)',
-        help_priority_media: '7 = m\u00E1xima, 0 = n\u00E3o baixar',
+        label_priority_media: 'Prioridade para arquivos de m\u00EDdia (0, 1, 6 ou 7)',
+        help_priority_media: '0 = n\u00E3o baixar \u00B7 1 = normal \u00B7 6 = alta \u00B7 7 = m\u00E1xima',
+        prio_skip: '0 \u2014 n\u00E3o baixar',
+        prio_normal: '1 \u2014 normal',
+        prio_high: '6 \u2014 alta',
+        prio_max: '7 \u2014 m\u00E1xima',
         label_priority_normal: 'Prioridade para arquivos auxiliares (.nfo, .srt, .jpg)',
         label_priority_skip: 'Prioridade para outros arquivos',
         label_remove_stalled: 'Remover torrents parados (stalled) h\u00E1 mais de',
@@ -64,8 +68,12 @@ const translations = {
         help_check_interval: '0 disables polling \u2014 use with the qBit webhook script',
         label_valid_extensions: 'Valid media extensions (one per line)',
         label_dangerous_extensions: 'Dangerous extensions (one per line)',
-        label_priority_media: 'Media file priority (0\u20137)',
-        help_priority_media: '7 = maximum, 0 = skip',
+        label_priority_media: 'Media file priority (0, 1, 6 or 7)',
+        help_priority_media: '0 = skip \u00B7 1 = normal \u00B7 6 = high \u00B7 7 = maximum',
+        prio_skip: '0 \u2014 skip',
+        prio_normal: '1 \u2014 normal',
+        prio_high: '6 \u2014 high',
+        prio_max: '7 \u2014 maximum',
         label_priority_normal: 'Auxiliary file priority (.nfo, .srt, .jpg)',
         label_priority_skip: 'Other file priority',
         label_remove_stalled: 'Remove stalled torrents older than',
@@ -139,15 +147,13 @@ function applyTranslations() {
         if (key) el.placeholder = t(key);
     }
 
-    // Update unit selects (value stays the same, only display text changes)
-    var unitSelects = document.querySelectorAll('[data-i18n-units]');
-    for (var i = 0; i < unitSelects.length; i++) {
-        var sel = unitSelects[i];
-        for (var j = 0; j < sel.options.length; j++) {
-            var opt = sel.options[j];
-            var unitKey = opt.getAttribute('data-i18n-unit');
-            if (unitKey) opt.textContent = t(unitKey);
-        }
+    // Select options (value stays the same, only display text changes).
+    // Cobre unidades de tempo e a escala de prioridade.
+    els = document.querySelectorAll('option[data-i18n-option]');
+    for (var i = 0; i < els.length; i++) {
+        var opt = els[i];
+        var optKey = opt.getAttribute('data-i18n-option');
+        if (optKey) opt.textContent = t(optKey);
     }
 }
 

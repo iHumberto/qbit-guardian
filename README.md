@@ -62,7 +62,7 @@ services:
       start_period: 30s
 ```
 
-> The healthcheck checks the **age** of the heartbeat against the configured `check_interval_seconds`, not just whether the file exists — so a stalled loop is detected instead of reporting `healthy` forever.
+> The healthcheck checks the **age** of the heartbeat, not just whether the file exists — so a stalled loop is detected instead of reporting `healthy` forever. The tolerance is `max(600s, 3 × check_interval_seconds, 3 × retry_interval_seconds)`: the retry counts because, while qBittorrent is down, the heartbeat is written at the retry's pace.
 
 Then start:
 
@@ -104,22 +104,20 @@ All settings live in `config.json` and can be edited through the Web UI or direc
 ```json
 {
   "qbit": {
-    "host": "localhost",
-    "port": 8080,
+    "url": "http://localhost:8080",
     "api_key": ""
   },
   "sonarr": {
-    "host": "",
-    "port": 8989,
+    "url": "",
     "api_key": ""
   },
   "radarr": {
-    "host": "",
-    "port": 7878,
+    "url": "",
     "api_key": ""
   },
   "guardian": {
     "check_interval_seconds": 300,
+    "retry_interval_seconds": 120,
     "valid_media_extensions": [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".webm"],
     "dangerous_extensions": [".exe", ".scr", ".bat", ".cmd", ".vbs", ".js", ".com", ".pif", ".msi", ".dll", ".ps1", ".sh", ".bin"],
     "remove_stalled": false,
@@ -144,10 +142,10 @@ All settings live in `config.json` and can be edited through the Web UI or direc
 
 | Section         | Key fields                                                                 |
 |-----------------|---------------------------------------------------------------------------|
-| **qbit**        | `host`, `port`, `api_key` — connection to your qBittorrent instance       |
-| **sonarr**      | `host`, `port`, `api_key` — optional, leave blank to disable              |
-| **radarr**      | `host`, `port`, `api_key` — optional, leave blank to disable              |
-| **guardian**    | `check_interval_seconds` (0 = webhook mode), extension lists, stalled/seedless rules, file priorities |
+| **qbit**        | `url` (scheme + host + port), `api_key` — connection to your qBittorrent instance |
+| **sonarr**      | `url`, `api_key` — optional, leave blank to disable                      |
+| **radarr**      | `url`, `api_key` — optional, leave blank to disable                      |
+| **guardian**    | `check_interval_seconds` (0 = webhook mode), `retry_interval_seconds`, extension lists, stalled/seedless rules, file priorities |
 | **notifications** | `apprise_url` — Apprise-compatible URL (see [Apprise docs](https://github.com/caronc/apprise)) |
 | **webui**       | `user`, `password` — HTTP Basic Auth credentials. Leave both empty for public access |
 
@@ -162,6 +160,14 @@ To password-protect the dashboard, fill in `webui.user` and `webui.password`. Th
 ### Polling (default)
 
 The guardian checks torrents every N seconds. Set `guardian.check_interval_seconds` to any value above 0. Default: 300 seconds (5 minutes).
+
+### Reconnecting to qBittorrent
+
+If qBittorrent isn't reachable — typically when the server reboots and the guardian comes up first — the guardian **doesn't give up**: it logs a `WARNING` and retries every `guardian.retry_interval_seconds` (default: 120 seconds) until it connects. The same applies if qBittorrent goes down later, while already running.
+
+The heartbeat keeps being written during the retry: the healthcheck measures the health of the guardian **process**, not qBittorrent's — that's an external, transient dependency. So the container stays `healthy` while retrying; watch the log to see the outage.
+
+> If you raise `retry_interval_seconds`, the healthcheck tolerance grows with it (3×), so a long retry can't get the container marked `unhealthy` on its own.
 
 ### Webhook (real-time)
 
@@ -271,8 +277,9 @@ With `LOG_LEVEL=ERROR` (the default), you'd only see the removal line and any co
 ### "Connection refused" or "Failed to connect to qBit"
 
 - Make sure qBittorrent is running and its Web UI is enabled.
-- Check that `qbit.host` and `qbit.port` are correct in `config.json`.
+- Check that `qbit.url` is correct in `config.json` — it includes the scheme, host and port (e.g. `http://192.168.1.10:8080`).
 - **Docker users:** `localhost` inside a container points to the container itself, not your host. Use `host.docker.internal` (Windows/Mac) or your host machine's real IP (Linux, e.g. `172.17.0.1`).
+- The guardian **keeps retrying** instead of exiting, so this shows up as a repeating `WARNING` in the log, not as a dead container. Fix the URL or bring qBittorrent up and the next retry connects on its own — no restart needed.
 
 ### "HTTP 403" / "Unauthorized"
 
@@ -290,15 +297,15 @@ Your API key is wrong or empty.
 
 ### I don't use Sonarr or Radarr
 
-Leave the `sonarr.host` and `radarr.host` fields empty. The guardian works fine without them — you'll still get dangerous file removal, stalled/seedless cleanup, and file priority optimization. Only blocklisting and re-search are skipped.
+Leave the `sonarr.url` and `radarr.url` fields empty. The guardian works fine without them — you'll still get dangerous file removal, stalled/seedless cleanup, and file priority optimization. Only blocklisting and re-search are skipped.
 
 ## Development
 
 ```bash
-# Install dependencies (includes pytest)
-pip install -r requirements.txt
+# Install dependencies (runtime + test tooling)
+pip install -r requirements-dev.txt
 
-# Run all tests (79: 59 functional + 20 security)
+# Run all tests (174: 154 functional + 20 security)
 python -m pytest test/ -v
 
 # Functional tests only
@@ -308,7 +315,7 @@ python -m pytest test/test_guardian.py -v
 python -m pytest test/test_security.py -v
 ```
 
-CI runs on every push and pull request via GitHub Actions (`.github/workflows/test.yml`).
+CI runs on every push and pull request via GitHub Actions (`.github/workflows/test.yml`). The image build (`docker-build.yml`) depends on that suite, so nothing is published to the GHCR with failing tests.
 
 ## Documentation
 

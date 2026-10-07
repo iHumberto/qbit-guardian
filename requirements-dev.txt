@@ -1,0 +1,5 @@
+# Dependencias de desenvolvimento/teste. NAO entram na imagem Docker —
+# o Dockerfile instala apenas requirements.txt.
+-r requirements.txt
+pytest>=8.0
+coverage>=7.0

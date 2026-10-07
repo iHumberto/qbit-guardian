@@ -8,8 +8,10 @@ HTTP Basic Auth e deep merge de config.
 Run: .venv/bin/python -m pytest test/test_guardian.py -v
 """
 
+import contextlib
 import json
 import os
+import re
 import tempfile
 import time
 import base64
@@ -852,6 +854,377 @@ class TestArrSession:
         mock_session.headers.update.assert_called_once_with({"X-Api-Key": "my-secret-key"})
 
 
+# ── Match por nome (_normalize_title / _arr_match_by_name) ──────────────
+
+class TestArrMatchByName:
+    """Fallback por nome quando o torrent nao esta na queue do *Arr.
+
+    Dois bugs cobertos aqui:
+    1. Item sem titulo casava com QUALQUER torrent (`"" in x` e sempre True),
+       disparando re-search na midia errada.
+    2. O match cru nunca casava com release name real: o *Arr devolve
+       `Breaking Bad` e o torrent chama `Breaking.Bad.S01E01` — comparar sem
+       normalizar os separadores deixava o fallback inteiro morto.
+    """
+
+    def test_match_release_name_com_separadores(self):
+        """Titulo com espacos casa com release name pontuado."""
+        items = [{"id": 7, "title": "Breaking Bad"}]
+        assert g._arr_match_by_name(
+            items, "Breaking.Bad.S01E01.1080p.WEB-DL.x264.mkv") == 7
+
+    def test_match_com_hifen_no_titulo(self):
+        """Separadores do titulo tambem sao normalizados."""
+        items = [{"id": 5, "title": "Spider-Man"}]
+        assert g._arr_match_by_name(items, "Spider.Man.2002.1080p.mkv") == 5
+
+    def test_match_case_insensitive(self):
+        items = [{"id": 3, "title": "THE OFFICE"}]
+        assert g._arr_match_by_name(items, "the.office.s02e01.mkv") == 3
+
+    def test_item_sem_title_e_ignorado(self):
+        """REGRESSAO: item sem a chave title nao pode casar com tudo."""
+        items = [{"id": 99}, {"id": 7, "title": "Breaking Bad"}]
+        assert g._arr_match_by_name(items, "Breaking.Bad.S01E01.mkv") == 7
+
+    @pytest.mark.parametrize("empty", [None, "", "   "])
+    def test_item_com_title_vazio_e_ignorado(self, empty):
+        """REGRESSAO: title nulo/vazio/so-espacos nao pode casar com tudo."""
+        items = [{"id": 99, "title": empty}, {"id": 7, "title": "Breaking Bad"}]
+        assert g._arr_match_by_name(items, "Breaking.Bad.S01E01.mkv") == 7
+
+    def test_so_item_sem_title_retorna_none(self):
+        """REGRESSAO: sem candidato valido, o resultado e None (nao o id 99)."""
+        assert g._arr_match_by_name([{"id": 99}], "Breaking.Bad.S01E01.mkv") is None
+
+    def test_torrent_sem_nome_nao_casa_com_item_sem_title(self):
+        """Nome vazio dos dois lados nao pode virar match.
+
+        Borda que justifica a guarda explicita de titulo vazio: com o torrent
+        sem nome, a forma normalizada dos dois lados e a mesma e o match por
+        substring passaria a valer sem essa checagem.
+        """
+        assert g._arr_match_by_name([{"id": 99}], "") is None
+        assert g._arr_match_by_name([{"id": 99, "title": ""}], "") is None
+
+    def test_titulo_curto_nao_casa_no_meio_de_palavra(self):
+        """'Her' nao pode casar dentro de 'Where' (match em limite de palavra)."""
+        items = [{"id": 5, "title": "Her"}]
+        assert g._arr_match_by_name(
+            items, "Where.The.Wild.Things.Are.2009.mkv") is None
+
+    def test_sem_match_retorna_none(self):
+        items = [{"id": 9, "title": "Dexter"}]
+        assert g._arr_match_by_name(items, "Breaking.Bad.S01E01.mkv") is None
+
+    def test_lista_vazia_retorna_none(self):
+        assert g._arr_match_by_name([], "Breaking.Bad.S01E01.mkv") is None
+
+    def test_primeiro_match_ganha(self):
+        items = [{"id": 1, "title": "Breaking Bad"},
+                 {"id": 2, "title": "Breaking Bad"}]
+        assert g._arr_match_by_name(items, "Breaking.Bad.S01E01.mkv") == 1
+
+    def test_title_field_customizado(self):
+        items = [{"id": 4, "nome": "Breaking Bad"}]
+        assert g._arr_match_by_name(
+            items, "Breaking.Bad.S01E01.mkv", title_field="nome") == 4
+        assert g._arr_match_by_name(items, "Breaking.Bad.S01E01.mkv") is None
+
+
+# ── _handle_arr: blocklist + re-search ──────────────────────────────────
+
+class _FakeArrSession:
+    """Session falsa que roteia GET por sufixo de URL e grava DELETE/POST.
+
+    Um GET para URL nao mapeada e um erro do TESTE, nao do codigo: _handle_arr
+    engole qualquer excecao num `except Exception` generico, entao um mock
+    permissivo esconderia a falha.
+    """
+
+    def __init__(self, get_map):
+        self._get_map = get_map
+        self.verify = True
+        self.headers = mock.MagicMock()
+        self.gets = []
+        self.deletes = []
+        self.posts = []
+
+    def get(self, url, **kwargs):
+        self.gets.append(url)
+        for suffix, payload in self._get_map.items():
+            if url.endswith(suffix):
+                if isinstance(payload, Exception):
+                    raise payload
+                resp = mock.MagicMock()
+                resp.json.return_value = payload
+                return resp
+        raise AssertionError(f"GET nao mapeado no teste: {url}")
+
+    def delete(self, url, **kwargs):
+        self.deletes.append((url, kwargs.get("params")))
+        return mock.MagicMock()
+
+    def post(self, url, **kwargs):
+        self.posts.append((url, kwargs.get("json")))
+        return mock.MagicMock()
+
+    @property
+    def commands(self):
+        """Payloads dos POST /command disparados."""
+        return [body for url, body in self.posts if url.endswith("/command")]
+
+
+@contextlib.contextmanager
+def _run_handle_arr(arr_type, config_key, get_map, torrent_hash, torrent_name):
+    """Executa _handle_arr com Session falsa e falha se log.error for emitido.
+
+    O `except Exception` generico de _handle_arr transforma qualquer erro em
+    um log.error silencioso — sem esta guarda, um teste passaria verde mesmo
+    com o fluxo inteiro estourando na primeira linha.
+    """
+    sess = _FakeArrSession(get_map)
+    with mock.patch("app.guardian.requests.Session", return_value=sess), \
+         mock.patch.object(g.log, "error") as m_err:
+        yield sess
+    assert not m_err.called, f"log.error inesperado: {m_err.call_args_list}"
+
+
+class TestHandleArrRadarr:
+    """Radarr: blocklist na queue, fallback por nome e MoviesSearch."""
+
+    @pytest.fixture
+    def radarr_cfg(self, tmp_config):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["radarr"]["url"] = "https://radarr.home.arpa/"
+        cfg["radarr"]["api_key"] = "rkey"
+        g.save_config(cfg)
+        return cfg
+
+    BASE = "https://radarr.home.arpa/api/v3"
+
+    def test_queue_match_faz_blocklist_e_dispara_busca(self, radarr_cfg):
+        """Torrent na queue → DELETE com blocklist + MoviesSearch no movieId."""
+        get_map = {
+            "/queue": {"records": [
+                {"id": 11, "downloadId": "OTHERHASH", "movieId": 1},
+                {"id": 42, "downloadId": "ABC123", "movieId": 77},
+            ]},
+        }
+        with _run_handle_arr("Radarr", "radarr", get_map,
+                             "abc123", "Some.Movie.2020.mkv") as sess:
+            g._handle_arr("Radarr", "radarr", "abc123", "Some.Movie.2020.mkv")
+
+        # Blocklist no item certo (match de downloadId e case-insensitive)
+        assert sess.deletes == [(f"{self.BASE}/queue/42",
+                                 {"blocklist": "true", "removeFromClient": "false"})]
+        # Re-search no movieId extraido da queue — sem fallback por nome
+        assert sess.commands == [{"name": "MoviesSearch", "movieIds": [77]}]
+        assert not any(u.endswith("/movie") for u in sess.gets)
+
+    def test_fallback_por_nome_quando_fora_da_queue(self, radarr_cfg):
+        """Sem match na queue → busca em /movie e dispara MoviesSearch."""
+        get_map = {
+            "/queue": {"records": []},
+            "/movie": [{"id": 5, "title": "Some Movie"}],
+        }
+        with _run_handle_arr("Radarr", "radarr", get_map,
+                             "abc123", "Some.Movie.2020.1080p.mkv") as sess:
+            g._handle_arr("Radarr", "radarr", "abc123", "Some.Movie.2020.1080p.mkv")
+
+        assert sess.deletes == []  # nao estava na queue: nada a bloquear
+        assert sess.commands == [{"name": "MoviesSearch", "movieIds": [5]}]
+
+    def test_sem_movie_id_nao_dispara_busca(self, radarr_cfg):
+        """Nem queue nem nome casam → nenhum comando e enviado."""
+        get_map = {
+            "/queue": {"records": []},
+            "/movie": [{"id": 5, "title": "Outro Filme"}],
+        }
+        with _run_handle_arr("Radarr", "radarr", get_map,
+                             "abc123", "Some.Movie.2020.mkv") as sess:
+            g._handle_arr("Radarr", "radarr", "abc123", "Some.Movie.2020.mkv")
+
+        assert sess.posts == []
+        assert sess.deletes == []
+
+    def test_blocklist_sem_movie_id_cai_no_fallback(self, radarr_cfg):
+        """Queue sem movieId: bloqueia e ainda tenta achar o filme por nome."""
+        get_map = {
+            "/queue": {"records": [{"id": 42, "downloadId": "ABC123"}]},
+            "/movie": [{"id": 5, "title": "Some Movie"}],
+        }
+        with _run_handle_arr("Radarr", "radarr", get_map,
+                             "abc123", "Some.Movie.2020.mkv") as sess:
+            g._handle_arr("Radarr", "radarr", "abc123", "Some.Movie.2020.mkv")
+
+        assert len(sess.deletes) == 1
+        assert sess.commands == [{"name": "MoviesSearch", "movieIds": [5]}]
+
+    @pytest.mark.parametrize("field", ["url", "api_key"])
+    def test_secao_incompleta_nao_faz_request(self, radarr_cfg, field):
+        """URL ou API key vazia → _handle_arr sai sem tocar na rede."""
+        cfg = g.get_config()
+        cfg["radarr"][field] = ""
+        g.save_config(cfg)
+
+        with mock.patch("app.guardian.requests.Session") as m_sess:
+            g._handle_arr("Radarr", "radarr", "abc123", "Some.Movie.mkv")
+
+        assert not m_sess.called
+
+
+class TestHandleArrSonarr:
+    """Sonarr: blocklist, validacao de data de lancamento e re-search."""
+
+    BASE = "https://sonarr.home.arpa/api/v3"
+    PAST = "2020-01-01T00:00:00Z"
+    FUTURE = "2099-01-01T00:00:00Z"
+
+    @pytest.fixture
+    def sonarr_cfg(self, tmp_config):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["sonarr"]["url"] = "https://sonarr.home.arpa/"
+        cfg["sonarr"]["api_key"] = "skey"
+        g.save_config(cfg)
+        return cfg
+
+    def test_queue_match_com_episode_id_dispara_episode_search(self, sonarr_cfg):
+        """episodeId na queue + episodio lancado → EpisodeSearch."""
+        get_map = {
+            "/queue": {"records": [
+                {"id": 42, "downloadId": "ABC123", "seriesId": 9, "episodeId": 31},
+            ]},
+            "/episode/31": {"airDateUtc": self.PAST},
+        }
+        with _run_handle_arr("Sonarr", "sonarr", get_map,
+                             "abc123", "Show.S01E01.mkv") as sess:
+            g._handle_arr("Sonarr", "sonarr", "abc123", "Show.S01E01.mkv")
+
+        assert sess.deletes == [(f"{self.BASE}/queue/42",
+                                 {"blocklist": "true", "removeFromClient": "false"})]
+        assert sess.commands == [{"name": "EpisodeSearch", "episodeIds": [31]}]
+
+    def test_queue_match_com_lista_episodes(self, sonarr_cfg):
+        """Queue com lista `episodes` → todos os ids entram na busca."""
+        get_map = {
+            "/queue": {"records": [
+                {"id": 42, "downloadId": "ABC123", "seriesId": 9,
+                 "episodes": [{"id": 31}, {"id": 32}]},
+            ]},
+            "/episode/31": {"airDateUtc": self.PAST},
+            "/episode/32": {"airDateUtc": self.PAST},
+        }
+        with _run_handle_arr("Sonarr", "sonarr", get_map,
+                             "abc123", "Show.S01.mkv") as sess:
+            g._handle_arr("Sonarr", "sonarr", "abc123", "Show.S01.mkv")
+
+        assert sess.commands == [{"name": "EpisodeSearch", "episodeIds": [31, 32]}]
+
+    def test_episodio_nao_lancado_e_excluido_da_busca(self, sonarr_cfg):
+        """Episodio com airDate futuro nao entra no EpisodeSearch."""
+        get_map = {
+            "/queue": {"records": [
+                {"id": 42, "downloadId": "ABC123", "seriesId": 9,
+                 "episodes": [{"id": 31}, {"id": 32}]},
+            ]},
+            "/episode/31": {"airDateUtc": self.PAST},
+            "/episode/32": {"airDateUtc": self.FUTURE},
+        }
+        with _run_handle_arr("Sonarr", "sonarr", get_map,
+                             "abc123", "Show.S01.mkv") as sess:
+            g._handle_arr("Sonarr", "sonarr", "abc123", "Show.S01.mkv")
+
+        assert sess.commands == [{"name": "EpisodeSearch", "episodeIds": [31]}]
+
+    def test_todos_nao_lancados_nao_dispara_busca(self, sonarr_cfg):
+        """Nenhum episodio lancado → blocklist sim, re-search nao."""
+        get_map = {
+            "/queue": {"records": [
+                {"id": 42, "downloadId": "ABC123", "seriesId": 9, "episodeId": 31},
+            ]},
+            "/episode/31": {"airDateUtc": self.FUTURE},
+        }
+        with _run_handle_arr("Sonarr", "sonarr", get_map,
+                             "abc123", "Show.S01E01.mkv") as sess:
+            g._handle_arr("Sonarr", "sonarr", "abc123", "Show.S01E01.mkv")
+
+        assert len(sess.deletes) == 1, "blocklist deve acontecer de todo jeito"
+        assert sess.commands == []
+
+    def test_sem_airdate_trata_como_lancado(self, sonarr_cfg):
+        """airDateUtc ausente → nao bloqueia a busca (fail-open)."""
+        get_map = {
+            "/queue": {"records": [
+                {"id": 42, "downloadId": "ABC123", "seriesId": 9, "episodeId": 31},
+            ]},
+            "/episode/31": {},
+        }
+        with _run_handle_arr("Sonarr", "sonarr", get_map,
+                             "abc123", "Show.S01E01.mkv") as sess:
+            g._handle_arr("Sonarr", "sonarr", "abc123", "Show.S01E01.mkv")
+
+        assert sess.commands == [{"name": "EpisodeSearch", "episodeIds": [31]}]
+
+    def test_erro_ao_consultar_episodio_trata_como_lancado(self, sonarr_cfg):
+        """Falha no GET /episode nao impede a busca (fail-open, loga o erro)."""
+        get_map = {
+            "/queue": {"records": [
+                {"id": 42, "downloadId": "ABC123", "seriesId": 9, "episodeId": 31},
+            ]},
+            "/episode/31": requests.exceptions.Timeout("timeout"),
+        }
+        sess = _FakeArrSession(get_map)
+        with mock.patch("app.guardian.requests.Session", return_value=sess), \
+             mock.patch.object(g.log, "error") as m_err:
+            g._handle_arr("Sonarr", "sonarr", "abc123", "Show.S01E01.mkv")
+
+        assert sess.commands == [{"name": "EpisodeSearch", "episodeIds": [31]}]
+        assert m_err.called, "a falha do episodio deve ser logada"
+
+    def test_fallback_por_nome_dispara_series_search(self, sonarr_cfg):
+        """Fora da queue → match em /series e SeriesSearch (sem episodeIds)."""
+        get_map = {
+            "/queue": {"records": []},
+            "/series": [{"id": 9, "title": "Some Show"}],
+        }
+        with _run_handle_arr("Sonarr", "sonarr", get_map,
+                             "abc123", "Some.Show.S01E01.1080p.mkv") as sess:
+            g._handle_arr("Sonarr", "sonarr", "abc123", "Some.Show.S01E01.1080p.mkv")
+
+        assert sess.deletes == []
+        assert sess.commands == [{"name": "SeriesSearch", "seriesId": 9}]
+
+    def test_queue_sem_episodios_dispara_series_search(self, sonarr_cfg):
+        """Queue com seriesId mas sem episodio → SeriesSearch."""
+        get_map = {
+            "/queue": {"records": [
+                {"id": 42, "downloadId": "ABC123", "seriesId": 9},
+            ]},
+        }
+        with _run_handle_arr("Sonarr", "sonarr", get_map,
+                             "abc123", "Show.S01.mkv") as sess:
+            g._handle_arr("Sonarr", "sonarr", "abc123", "Show.S01.mkv")
+
+        assert len(sess.deletes) == 1
+        assert sess.commands == [{"name": "SeriesSearch", "seriesId": 9}]
+
+
+class TestBlockAndSearch:
+    """block_and_search() aciona os dois *Arr."""
+
+    def test_chama_radarr_e_sonarr(self, tmp_config):
+        with mock.patch.object(g, "_handle_arr") as m:
+            g.block_and_search("abc123", "Some.Movie.mkv")
+
+        assert m.call_args_list == [
+            mock.call("Radarr", "radarr", "abc123", "Some.Movie.mkv"),
+            mock.call("Sonarr", "sonarr", "abc123", "Some.Movie.mkv"),
+        ]
+
+
 # ── Config auto-creation (zero config) ──────────────────────────────────
 
 class TestConfigAutoCreation:
@@ -886,6 +1259,8 @@ class TestConfigAutoCreation:
             assert "radarr" in cfg
             assert "guardian" in cfg
             assert cfg["guardian"]["check_interval_seconds"] == 300
+            assert cfg["guardian"]["retry_interval_seconds"] == \
+                g.DEFAULT_RETRY_INTERVAL
             assert len(cfg["guardian"]["valid_media_extensions"]) > 0
             assert len(cfg["guardian"]["dangerous_extensions"]) > 0
             assert "notifications" in cfg
@@ -902,6 +1277,44 @@ class TestConfigAutoCreation:
         w.CONFIG_PATH = old_path
         g.CONFIG_PATH = old_gpath
         g._config = None
+
+    def test_config_json_do_repo_bate_com_o_default(self):
+        """O config.json versionado e o default de load_config() sao o MESMO contrato.
+
+        Divergiam: `retry_interval_seconds` entrou no default de load_config()
+        em v2.0.6 mas nao no config.json do repo. Sem esta guarda, quem le o
+        arquivo versionado para saber o que existe nao ve a chave nova.
+        """
+        import app.web as w
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(repo_root, "config.json")) as f:
+            versionado = json.load(f)
+
+        old_path, old_gpath = w.CONFIG_PATH, g.CONFIG_PATH
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                w.CONFIG_PATH = g.CONFIG_PATH = os.path.join(tmpdir, "config.json")
+                g._config = None
+                gerado = g.load_config()
+        finally:
+            w.CONFIG_PATH, g.CONFIG_PATH = old_path, old_gpath
+            g._config = None
+
+        def chaves(d, prefixo=""):
+            out = set()
+            for k, v in d.items():
+                out.add(prefixo + k)
+                if isinstance(v, dict):
+                    out |= chaves(v, prefixo + k + ".")
+            return out
+
+        so_no_default = chaves(gerado) - chaves(versionado)
+        so_no_arquivo = chaves(versionado) - chaves(gerado)
+        assert not so_no_default, \
+            f"chaves no default de load_config() e nao no config.json: {sorted(so_no_default)}"
+        assert not so_no_arquivo, \
+            f"chaves no config.json e nao no default de load_config(): {sorted(so_no_arquivo)}"
 
     def test_load_config_existing_file_still_works(self):
         """load_config() continua lendo arquivo existente normalmente."""
@@ -1007,6 +1420,216 @@ class TestConfigAutoCreation:
         w.CONFIG_PATH = old_path
         g.CONFIG_PATH = old_gpath
         g._config = None
+
+
+# ── Contrato da Web UI (static/) ────────────────────────────────────────
+
+STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "static")
+
+
+def _read_static(name):
+    """Le um arquivo de static/ com os escapes \\uXXXX ja resolvidos.
+
+    O i18n.js escreve acentos e pontuacao como escape JS (`(0\\u20137)`), o
+    index.html usa o caractere direto. Normalizar na leitura faz a asserção
+    valer para os dois sem depender de qual forma o arquivo usa.
+    """
+    with open(os.path.join(STATIC_DIR, name), encoding="utf-8") as f:
+        raw = f.read()
+    return re.sub(r"\\u([0-9a-fA-F]{4})",
+                  lambda m: chr(int(m.group(1), 16)), raw)
+
+
+def _i18n_tables():
+    """Extrai as tabelas pt-BR / en-US do static/i18n.js.
+
+    Parse por regex em vez de execucao de JS: so precisamos das CHAVES, e
+    manter o teste sem dependencia (node/JS engine) e deliberado.
+    """
+    src = _read_static("i18n.js")
+    tables = {}
+    for lang in ("pt-BR", "en-US"):
+        m = re.search(r"'" + lang + r"':\s*\{(.*?)\n    \}", src, re.S)
+        assert m, f"tabela {lang} nao encontrada em i18n.js"
+        tables[lang] = set(re.findall(r"^\s{8}(\w+):", m.group(1), re.M))
+    return tables
+
+
+class TestWebUIPriorityScale:
+    """A Web UI nao pode oferecer prioridades que o qBittorrent rejeita.
+
+    A escala do filePrio nao e continua: so -1, 0, 1, 6 e 7 sao aceitos. A UI
+    trazia `<input type="number" min="0" max="7">`, que deixava digitar 2, 3,
+    4 e 5 — o guardian recusava depois, com um WARNING no log, e a priorizacao
+    silenciosamente nao acontecia. Ver TestSetFilePriority para o lado do motor.
+    """
+
+    PRIORITY_IDS = ["priority_media", "priority_normal", "priority_skip"]
+
+    @pytest.mark.parametrize("field_id", PRIORITY_IDS)
+    def test_select_so_oferece_valores_validos(self, field_id):
+        """Cada campo de prioridade e um select com exatamente 0, 1, 6 e 7."""
+        html = _read_static("index.html")
+        m = re.search(r'<select id="' + field_id + r'">(.*?)</select>', html, re.S)
+        assert m, f"{field_id} deveria ser um <select>"
+
+        values = [int(v) for v in re.findall(r'value="(-?\d+)"', m.group(1))]
+        assert values == [0, 1, 6, 7], f"{field_id} oferece {values}"
+        assert set(values) <= g.VALID_FILE_PRIORITIES, \
+            f"{field_id} oferece valor recusado pelo filePrio: {values}"
+
+    @pytest.mark.parametrize("field_id", PRIORITY_IDS)
+    def test_nao_e_input_numerico(self, field_id):
+        """REGRESSAO: input numerico 0-7 aceitava 2, 3, 4 e 5."""
+        html = _read_static("index.html")
+        assert not re.search(r'<input[^>]*id="' + field_id + r'"', html), \
+            f"{field_id} voltou a ser <input> — a escala nao e continua"
+
+    @pytest.mark.parametrize("field_id", PRIORITY_IDS)
+    def test_select_tem_exatamente_um_default(self, field_id):
+        """Um e so um `selected`, senao o campo abre em branco ou ambiguo."""
+        html = _read_static("index.html")
+        m = re.search(r'<select id="' + field_id + r'">(.*?)</select>', html, re.S)
+        assert m.group(1).count("selected") == 1
+
+    def test_defaults_da_ui_batem_com_o_config(self):
+        """O `selected` de cada select e o default da chave no config.json."""
+        html = _read_static("index.html")
+        with open(os.path.join(os.path.dirname(STATIC_DIR), "config.json")) as f:
+            guardian_cfg = json.load(f)["guardian"]
+
+        for field_id in self.PRIORITY_IDS:
+            m = re.search(r'<select id="' + field_id + r'">(.*?)</select>', html, re.S)
+            selected = re.search(r'value="(-?\d+)" selected', m.group(1))
+            assert selected, f"{field_id} sem opcao selected"
+            assert int(selected.group(1)) == guardian_cfg[field_id], \
+                f"{field_id}: UI default {selected.group(1)} != config"
+
+    @pytest.mark.parametrize("fonte", ["index.html", "i18n.js"])
+    def test_nenhum_texto_anuncia_escala_continua(self, fonte):
+        """REGRESSAO: o rotulo dizia "(0–7)", sugerindo que 2-5 valem."""
+        texto = _read_static(fonte)
+        for proibido in ("(0\u20137)", "(0-7)", "0 a 7",
+                         "7 = m\u00e1xima, 0", "7 = maximum, 0"):
+            assert proibido not in texto, \
+                f"{fonte} ainda anuncia a escala antiga: {proibido!r}"
+
+
+class TestWebUIi18n:
+    """Toda chave usada no HTML existe nos DOIS idiomas."""
+
+    def test_tabelas_tem_as_mesmas_chaves(self):
+        """pt-BR e en-US nao podem divergir — chave faltante vira texto cru."""
+        tables = _i18n_tables()
+        assert tables["pt-BR"] == tables["en-US"], (
+            f"so em pt-BR: {sorted(tables['pt-BR'] - tables['en-US'])}; "
+            f"so em en-US: {sorted(tables['en-US'] - tables['pt-BR'])}")
+
+    @pytest.mark.parametrize("attr", ["data-i18n", "data-i18n-placeholder",
+                                      "data-i18n-option"])
+    def test_chaves_do_html_existem_nas_tabelas(self, attr):
+        html = _read_static("index.html")
+        keys = set(re.findall(attr + r'="(\w+)"', html))
+        assert keys, f"nenhuma chave {attr} encontrada — seletor desatualizado?"
+
+        tables = _i18n_tables()
+        for lang, known in tables.items():
+            faltando = keys - known
+            assert not faltando, f"{attr} sem traducao em {lang}: {sorted(faltando)}"
+
+    def test_escala_de_prioridade_traduzida_nos_dois_idiomas(self):
+        """As 4 opcoes de prioridade tem chave propria em cada idioma."""
+        tables = _i18n_tables()
+        esperadas = {"prio_skip", "prio_normal", "prio_high", "prio_max"}
+        for lang, known in tables.items():
+            assert esperadas <= known, \
+                f"{lang} sem as chaves de prioridade: {sorted(esperadas - known)}"
+
+
+# ── Paridade doc x codigo ───────────────────────────────────────────────
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _flat_keys(d, prefixo=""):
+    """Caminhos de chave de um dict aninhado ("qbit.url", "guardian.priority_media")."""
+    out = set()
+    for k, v in d.items():
+        out.add(prefixo + k)
+        if isinstance(v, dict):
+            out |= _flat_keys(v, prefixo + k + ".")
+    return out
+
+
+class TestDocsConfigParity:
+    """O exemplo de config dos READMEs tem que ser o config de verdade.
+
+    Os dois READMEs documentavam `qbit.host` + `qbit.port` enquanto o codigo le
+    `qbit.url` (unificado em v2.0.x). Quem seguisse o README montava um
+    config.json que estourava KeyError em get_qbit_session() — load_config()
+    nao faz merge com os defaults quando o arquivo existe.
+    """
+
+    READMES = ["README.md", "README.pt-BR.md"]
+
+    def _exemplo_do_readme(self, nome):
+        with open(os.path.join(REPO_ROOT, nome), encoding="utf-8") as f:
+            texto = f.read()
+        blocos = re.findall(r"```json\n(.*?)```", texto, re.S)
+        assert blocos, f"{nome}: nenhum bloco ```json encontrado"
+        # O primeiro bloco json de cada README e a estrutura completa do config
+        return json.loads(blocos[0])
+
+    @pytest.mark.parametrize("nome", READMES)
+    def test_exemplo_do_readme_e_json_valido(self, nome):
+        assert isinstance(self._exemplo_do_readme(nome), dict)
+
+    @pytest.mark.parametrize("nome", READMES)
+    def test_exemplo_do_readme_bate_com_config_json(self, nome):
+        """Mesmas chaves do config.json versionado — nem a mais, nem a menos."""
+        with open(os.path.join(REPO_ROOT, "config.json")) as f:
+            real = json.load(f)
+
+        doc = self._exemplo_do_readme(nome)
+        so_no_doc = _flat_keys(doc) - _flat_keys(real)
+        so_no_real = _flat_keys(real) - _flat_keys(doc)
+
+        assert not so_no_doc, f"{nome} documenta chave inexistente: {sorted(so_no_doc)}"
+        assert not so_no_real, f"{nome} nao documenta: {sorted(so_no_real)}"
+
+    @pytest.mark.parametrize("nome", READMES)
+    def test_exemplo_do_readme_e_aceito_por_load_config(self, nome):
+        """O exemplo, salvo como config.json, faz o guardian funcionar.
+
+        Checagem de ponta a ponta: carrega o exemplo e exercita os acessos que
+        o codigo faz de verdade (cfg["qbit"]["url"] etc.).
+        """
+        import app.web as w
+
+        doc = self._exemplo_do_readme(nome)
+        old_path, old_gpath = w.CONFIG_PATH, g.CONFIG_PATH
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                caminho = os.path.join(tmpdir, "config.json")
+                with open(caminho, "w") as f:
+                    json.dump(doc, f)
+                w.CONFIG_PATH = g.CONFIG_PATH = caminho
+                g._config = None
+                cfg = g.load_config()
+
+                # Acessos reais do codigo — KeyError aqui = README quebrado
+                assert cfg["qbit"]["url"] is not None
+                assert cfg["qbit"]["api_key"] is not None
+                for arr in ("sonarr", "radarr"):
+                    assert cfg[arr]["url"] is not None
+                    assert cfg[arr]["api_key"] is not None
+                assert g._retry_interval(cfg) > 0
+                assert cfg["guardian"]["check_interval_seconds"] is not None
+                assert cfg["notifications"]["apprise_url"] is not None
+        finally:
+            w.CONFIG_PATH, g.CONFIG_PATH = old_path, old_gpath
+            g._config = None
 
 
 # ── Heartbeat ───────────────────────────────────────────────────────────
@@ -1129,9 +1752,12 @@ class TestHealthcheck:
     arquivo, entao um loop morto continuava reportando "healthy" para sempre.
     """
 
-    def _config(self, path, interval):
+    def _config(self, path, interval, retry=None):
+        guardian = {"check_interval_seconds": interval}
+        if retry is not None:
+            guardian["retry_interval_seconds"] = retry
         with open(path, "w") as f:
-            json.dump({"guardian": {"check_interval_seconds": interval}}, f)
+            json.dump({"guardian": guardian}, f)
 
     def _heartbeat(self, path, age_seconds):
         with open(path, "w") as f:
@@ -1191,6 +1817,89 @@ class TestHealthcheck:
         assert not ok
         assert "ausente" in msg
 
+    # ── Interacao com o retry de conexao ────────────────────────────────
+
+    def test_tolerancia_acompanha_retry_longo(self, tmp_path):
+        """Retry maior que a tolerancia base nao pode marcar unhealthy.
+
+        Enquanto o qBit esta fora, o heartbeat sai a cada retry_interval — nao
+        a cada check_interval. Com retry de 1h e tolerancia presa em
+        max(600, 3*300)=900s, o container seria marcado unhealthy justamente no
+        cenario que o retry existe para sobreviver, e `restart: always` nao
+        reinicia container unhealthy: o guardian ficaria morto.
+        """
+        from app import healthcheck
+
+        cfg, hb = tmp_path / "config.json", tmp_path / "heartbeat"
+        self._config(cfg, 300, retry=3600)
+        self._heartbeat(hb, 2000)  # > max(600, 3*300), < 3*3600
+
+        ok, msg = healthcheck.check(heartbeat_path=str(hb), config_path=str(cfg))
+        assert ok, msg
+
+    def test_retry_longo_nao_torna_tolerancia_infinita(self, tmp_path):
+        """A tolerancia cresce com o retry, mas continua finita (3x)."""
+        from app import healthcheck
+
+        cfg, hb = tmp_path / "config.json", tmp_path / "heartbeat"
+        self._config(cfg, 300, retry=600)
+        self._heartbeat(hb, 5000)  # acima de 3*600 e de 3*300
+
+        ok, msg = healthcheck.check(heartbeat_path=str(hb), config_path=str(cfg))
+        assert not ok
+        assert "retry" in msg, f"a mensagem deve citar o retry: {msg}"
+
+    def test_retry_ausente_usa_default(self, tmp_path):
+        """Config sem a chave: tolerancia e a base de 600s (3*120 < 600)."""
+        from app import healthcheck
+
+        cfg, hb = tmp_path / "config.json", tmp_path / "heartbeat"
+        self._config(cfg, 300)  # sem retry_interval_seconds
+        self._heartbeat(hb, 500)
+
+        ok, msg = healthcheck.check(heartbeat_path=str(hb), config_path=str(cfg))
+        assert ok, msg
+        assert "tolerancia 900s" in msg, msg
+
+    @pytest.mark.parametrize("bad", [None, 0, -5, "abc", ""])
+    def test_retry_invalido_cai_no_default(self, tmp_path, bad):
+        """Retry invalido nao pode zerar nem explodir o calculo.
+
+        Com o default de 120s, 3*120 fica abaixo do piso de 600s: a tolerancia
+        resultante e a mesma do check_interval (3*300=900).
+        """
+        from app import healthcheck
+
+        cfg, hb = tmp_path / "config.json", tmp_path / "heartbeat"
+        self._config(cfg, 300, retry=bad)
+        self._heartbeat(hb, 500)
+
+        ok, msg = healthcheck.check(heartbeat_path=str(hb), config_path=str(cfg))
+        assert ok, msg
+        assert "tolerancia 900s" in msg, msg
+
+    @pytest.mark.parametrize("bad", ["abc", None, -1])
+    def test_check_interval_invalido_cai_no_default(self, tmp_path, bad):
+        """REGRESSAO: `intervalo * 3` com valor nao numerico estourava.
+
+        A tolerancia precisa cair em 3*DEFAULT_INTERVAL (900s) em vez de
+        propagar o valor cru para a multiplicacao.
+        """
+        from app import healthcheck
+
+        cfg, hb = tmp_path / "config.json", tmp_path / "heartbeat"
+        self._config(cfg, bad)
+        self._heartbeat(hb, 100)
+
+        ok, msg = healthcheck.check(heartbeat_path=str(hb), config_path=str(cfg))
+        assert ok, msg
+        assert "tolerancia 900s" in msg, msg
+
+    def test_webhook_aceita_zero_como_string(self):
+        """Config com "0" (string) tambem e modo webhook."""
+        from app import healthcheck
+        assert healthcheck._as_int("0", 300, allow_zero=True) == 0
+
 
 # ── Retry de conexao ao qBit ───────────────────────────────────────────
 
@@ -1208,7 +1917,9 @@ class TestGuardianRetry:
         g.load_config()
         cfg = g.get_config()
         cfg["guardian"]["check_interval_seconds"] = 0  # webhook apos conectar
-        cfg["guardian"]["retry_interval_seconds"] = 1
+        # Valor deliberadamente distinto do DEFAULT_RETRY_INTERVAL (120) e do
+        # check_interval (0): o sleep do retry precisa vir DESTA chave.
+        cfg["guardian"]["retry_interval_seconds"] = 7
         g.save_config(cfg)
 
         attempts = {"n": 0}
@@ -1221,7 +1932,7 @@ class TestGuardianRetry:
 
         with mock.patch.object(g, "qbit_login", side_effect=fake_qbit_login), \
              mock.patch.object(g, "write_heartbeat") as m_hb, \
-             mock.patch("time.sleep"):
+             mock.patch("time.sleep") as m_sleep:
             g.guardian_loop()
 
         assert attempts["n"] == 3, \
@@ -1229,6 +1940,10 @@ class TestGuardianRetry:
         # heartbeat escrito nas 2 tentativas fracassadas (criterio de aceite)
         assert m_hb.call_count >= 2, \
             f"heartbeat deve ser escrito a cada retry, chamadas: {m_hb.call_count}"
+        # O retry dorme retry_interval_seconds, nao um valor fixo nem o
+        # check_interval: em modo webhook o unico sleep e o do retry.
+        assert m_sleep.call_args_list == [mock.call(7), mock.call(7)], \
+            f"sleep deve usar retry_interval_seconds, chamadas: {m_sleep.call_args_list}"
 
     def test_heartbeat_kept_alive_during_prolonged_retry(self, tmp_config):
         """Heartbeat continua vivo enquanto o qBit esta fora (retry prolongado)."""
@@ -1252,9 +1967,12 @@ class TestGuardianRetry:
         class _StopRetry(Exception):
             pass
 
-        def fake_sleep(_):
+        slept = []
+
+        def fake_sleep(secs):
             # time.sleep fica FORA do try/except de _connect_with_retry, entao
             # levantar aqui propaga e interrompe o loop de retry no teste.
+            slept.append(secs)
             sleeps["n"] += 1
             if sleeps["n"] >= 4:
                 raise _StopRetry()
@@ -1268,6 +1986,8 @@ class TestGuardianRetry:
         # 4 falhas processadas → 4 heartbeats, um por tentativa
         assert attempts["n"] >= 4
         assert hb["n"] == 4, f"heartbeat esperado 4x durante retry, obtido {hb['n']}"
+        # Todo sleep do retry usa retry_interval_seconds (nao decai nem muda)
+        assert slept == [1, 1, 1, 1], f"intervalos de retry: {slept}"
 
     @pytest.mark.parametrize("exc", [
         requests.exceptions.ConnectionError("conn refused"),
@@ -1287,18 +2007,8 @@ class TestGuardianRetry:
         cfg["guardian"]["retry_interval_seconds"] = 1
         g.save_config(cfg)
 
-        orig_get_config = g.get_config
-        call_count = {"n": 0}
-
-        def mock_get_config():
-            call_count["n"] += 1
-            c = orig_get_config().copy()
-            if call_count["n"] >= 3:
-                c["guardian"] = dict(c["guardian"])
-                c["guardian"]["check_interval_seconds"] = 0  # sai do loop
-            return c
-
         torrent_calls = {"n": 0}
+        login_calls = {"n": 0}
 
         def fake_get_torrents():
             torrent_calls["n"] += 1
@@ -1306,10 +2016,26 @@ class TestGuardianRetry:
                 raise exc
             return []
 
-        login_calls = {"n": 0}
-
         def fake_qbit_login():
             login_calls["n"] += 1
+            # Startup conecta de primeira. A reconexao disparada pelo erro de
+            # transporte falha 2x antes de dar certo: o loop principal precisa
+            # RETENTAR ate conectar, nao tentar uma unica vez e seguir adiante.
+            if login_calls["n"] in (2, 3):
+                raise exc
+
+        orig_get_config = g.get_config
+
+        def mock_get_config():
+            # Sai do loop depois do ciclo bem-sucedido pos-reconexao. O gatilho
+            # e o progresso de get_torrents, nao a contagem de get_config —
+            # assim o numero de reconexoes nao altera quando o loop termina.
+            c = orig_get_config()
+            if torrent_calls["n"] >= 2:
+                c = dict(c)
+                c["guardian"] = dict(c["guardian"])
+                c["guardian"]["check_interval_seconds"] = 0
+            return c
 
         with mock.patch.object(g, "get_config", side_effect=mock_get_config), \
              mock.patch.object(g, "qbit_login", side_effect=fake_qbit_login), \
@@ -1319,11 +2045,12 @@ class TestGuardianRetry:
             g.guardian_loop()
 
         # get_torrents voltou a rodar apos a reconexao e o loop principal seguiu
-        assert torrent_calls["n"] >= 2, \
+        assert torrent_calls["n"] == 2, \
             f"get_torrents deveria rodar apos reconexao, chamadas: {torrent_calls['n']}"
-        # startup + reconexao apos o erro de transporte
-        assert login_calls["n"] >= 2, \
-            f"qbit_login deveria ser chamado para reconectar, chamadas: {login_calls['n']}"
+        # 1 login no startup + 3 na reconexao (2 falhas + 1 sucesso). Uma
+        # implementacao que tenta reconectar so uma vez para em 2.
+        assert login_calls["n"] == 4, \
+            f"a reconexao deve retentar ate conectar, logins: {login_calls['n']}"
 
     def test_retry_interval_default_positive(self, tmp_config):
         """Chave valida e respeitada."""

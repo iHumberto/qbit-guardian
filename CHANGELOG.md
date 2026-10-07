@@ -5,6 +5,35 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.7] — 2026-10-07
+
+### Corrigido
+- Bug: `_arr_match_by_name()` casava com item sem titulo. `item.get("title", "").lower() in torrent_name.lower()` — `"" in qualquer_string` e sempre `True`, entao um unico item sem `title` (ou com titulo vazio/nulo) na resposta do Sonarr/Radarr casava com QUALQUER torrent e disparava `MoviesSearch`/`SeriesSearch` na midia errada. Itens sem titulo agora sao ignorados.
+- Bug: o fallback por nome nunca casava com release name real. O *Arr devolve o titulo com espacos (`Breaking Bad`) e o torrent usa separadores (`Breaking.Bad.S01E01.1080p`), entao a comparacao crua por substring era codigo morto na pratica — o unico "match" que acontecia era o acidental do bug acima. A comparacao passa por `_normalize_title()`: minusculas, separadores viram espaco e as pontas sao delimitadas, o que tambem evita casar titulo curto no meio de outra palavra (`Her` em `Where`).
+- Web UI: escala de prioridade errada (pendencia aberta desde v2.0.5). Os tres campos eram `<input type="number" min="0" max="7">` e o rotulo dizia "(0–7)", mas o `POST /api/v2/torrents/filePrio` do qBittorrent aceita apenas `0`, `1`, `6` e `7` — 2 a 5 devolvem HTTP 400. Quem digitasse `4` tinha a priorizacao silenciosamente descartada (o motor recusa com WARNING desde v2.0.5). Agora sao `<select>` com so os valores validos; um config gravado antes disso com valor invalido cai no default da chave em vez de abrir o campo em branco.
+- `app/healthcheck.py`: a tolerancia ignorava `retry_interval_seconds`. Era `max(600s, 3 × check_interval)`, mas durante indisponibilidade do qBit o heartbeat sai no ritmo do RETRY — um `retry_interval_seconds` maior que a tolerancia marcaria o container `unhealthy` exatamente no cenario que o retry do v2.0.6 existe para sobreviver (e `restart: always` nao reinicia container unhealthy). Agora e `max(600s, 3 × check_interval, 3 × retry_interval)`, e a mensagem de falha cita os dois intervalos.
+- `app/healthcheck.py`: valor nao numerico de intervalo estourava o calculo (`"300" * 3` em `max()`). Nova coercao `_as_int()` com fallback seguro; `check_interval` continua aceitando `0` (modo webhook), `retry_interval` nao.
+- READMEs (pt-BR e en-US): o exemplo de config e a tabela de secoes documentavam `qbit.host` + `qbit.port`, enquanto o codigo le `qbit.url` desde a unificacao de URL. Como `load_config()` NAO faz merge com os defaults quando o arquivo existe, quem seguisse o README montava um `config.json` que estourava `KeyError` em `get_qbit_session()`. Corrigido tambem no troubleshooting e na secao "nao uso Sonarr/Radarr".
+- `config.json` versionado nao trazia `retry_interval_seconds`, divergindo do default de `load_config()` — quem lia o arquivo para saber o que existe nao via a chave nova. Adicionada aqui e no `dev-config.json`.
+
+### Adicionado
+- Docs: nova secao "Reconexao ao qBittorrent" nos dois READMEs, com o comportamento do retry, a razao de o container seguir `healthy` durante a indisponibilidade e a relacao com a tolerancia do healthcheck. `retry_interval_seconds` entrou no exemplo de config e na tabela de secoes.
+- Testes — 109 → 174 (154 funcionais + 20 de seguranca). Cobertura de `app/guardian.py`: 75% → 89%.
+  - `TestArrMatchByName` (12): regressao dos dois bugs de match, normalizacao de separadores, limite de palavra, `title_field` customizado.
+  - `TestHandleArrRadarr` / `TestHandleArrSonarr` / `TestBlockAndSearch` (16): a maior funcao do projeto (`_handle_arr`, 115 linhas) estava sem teste comportamental — so `verify=False` e headers. Agora cobre blocklist (`DELETE` com `blocklist=true` / `removeFromClient=false`), `movieId` vs `seriesId`, extracao de `episodeId`/`episodes`, fallback por nome, validacao de `airDateUtc` (episodio futuro e excluido do re-search), `EpisodeSearch` vs `SeriesSearch` e secao desconfigurada. O helper falha o teste se `log.error` for emitido: o `except Exception` generico de `_handle_arr` transformava qualquer erro em log silencioso.
+  - `TestWebUIPriorityScale` / `TestWebUIi18n` (17): nenhum teste tocava em `static/` antes. Travam a escala oferecida pela UI contra `VALID_FILE_PRIORITIES`, o alinhamento do default do select com o `config.json`, a ausencia do rotulo "(0–7)" e a paridade de chaves i18n entre pt-BR e en-US.
+  - `TestDocsConfigParity` (6): o exemplo `json` de cada README precisa ter exatamente as chaves do `config.json` e ser aceito por `load_config()` — e a classe de drift que passou despercebida na unificacao de URL.
+  - `TestConfigAutoCreation.test_config_json_do_repo_bate_com_o_default`: impede o `config.json` versionado de divergir do default de `load_config()`.
+  - `TestHealthcheck`: 5 casos novos para a interacao com o retry e para intervalos invalidos.
+  - `test/conftest.py`: fixture `autouse` zerando `_processed`, `_check_count` e a sessao HTTP em cache entre testes. Eram globais de modulo limpos na mao, teste a teste — a suite agora passa tambem em ordem inversa.
+- `requirements-dev.txt`: dependencias de teste separadas do runtime.
+
+### Alterado
+- Reforco dos testes de retry do v2.0.6, que tinham dois furos (confirmados por mutacao): nada amarrava `_retry_interval()` ao `time.sleep()` do retry (um valor fixo passaria a suite) e nada distinguia "reconecta retentando ate conectar" de "tenta uma vez e segue" no loop principal.
+- `pytest` saiu do `requirements.txt` para o `requirements-dev.txt` — nao vai mais para a imagem Docker, que instala apenas o runtime.
+- CI: `docker-build.yml` agora depende de `test.yml` (via `workflow_call`). Antes os dois workflows corriam em paralelo e independentes no push para `main`, entao teste quebrado nao impedia a publicacao da imagem no GHCR.
+- Web UI: o marcador de traducao de `<option>` passou de `data-i18n-unit`/`data-i18n-units` (so unidades de tempo) para `data-i18n-option`, generico, agora usado tambem pela escala de prioridade.
+
 ## [2.0.6] — 2026-09-25
 
 ### Corrigido

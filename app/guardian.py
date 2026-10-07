@@ -7,6 +7,7 @@ Configuravel via config.json + Web UI (web.py).
 """
 
 import os
+import re
 import json
 import time
 import logging
@@ -209,11 +210,35 @@ def send_notification(title, message):
 
 # ── Bloqueio e re-busca ────────────────────────────────────────────────
 
+def _normalize_title(value):
+    """Normaliza nome para comparacao por palavras.
+
+    Minusculas, qualquer sequencia de nao-alfanumericos vira um espaco, e o
+    resultado e envolto em espacos. Necessario porque release names usam
+    separadores (`Breaking.Bad.S01E01.1080p.WEB-DL`) enquanto o *Arr devolve o
+    titulo com espacos (`Breaking Bad`) — comparar os dois crus nunca casa.
+
+    Os espacos nas pontas forcam alinhamento em limite de palavra: evita que
+    um titulo curto case no meio de outra palavra (`Her` em `Where`).
+    """
+    return " " + re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip() + " "
+
+
 def _arr_match_by_name(items, torrent_name, title_field="title"):
-    """Busca item na lista por match parcial de nome."""
+    """Busca item na lista por match parcial de nome.
+
+    Itens sem titulo (ausente, nulo ou vazio) sao IGNORADOS: `"" in qualquer`
+    e sempre True, entao um unico item sem titulo na resposta do *Arr casava
+    com qualquer torrent e disparava o re-search na midia errada.
+
+    O match continua sendo por substring (titulo contido no nome do torrent),
+    agora sobre a forma normalizada — ver _normalize_title().
+    """
+    name = _normalize_title(torrent_name)
     for item in items:
-        if item.get(title_field, "").lower() in torrent_name.lower():
-            return item["id"]
+        title = _normalize_title(item.get(title_field))
+        if title.strip() and title in name:
+            return item.get("id")
     return None
 
 
@@ -297,9 +322,9 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
                 for eid in extra_ids:
                     try:
                         log.debug(f"HTTP GET {base}/episode/{eid}")
-                        re = sess.get(f"{base}/episode/{eid}",
-                                         timeout=10)
-                        ad = re.json().get("airDateUtc")
+                        rep = sess.get(f"{base}/episode/{eid}",
+                                       timeout=10)
+                        ad = rep.json().get("airDateUtc")
                         if ad:
                             adt = datetime.fromisoformat(ad.replace("Z", "+00:00"))
                             if adt <= now:

@@ -62,7 +62,7 @@ services:
       start_period: 30s
 ```
 
-> O healthcheck verifica a **idade** do heartbeat contra o `check_interval_seconds` configurado, não apenas a existência do arquivo — assim um loop travado é detectado em vez de reportar `healthy` para sempre.
+> O healthcheck verifica a **idade** do heartbeat, não apenas a existência do arquivo — assim um loop travado é detectado em vez de reportar `healthy` para sempre. A tolerância é `max(600s, 3 × check_interval_seconds, 3 × retry_interval_seconds)`: o retry entra na conta porque, enquanto o qBittorrent está fora, o heartbeat sai no ritmo do retry.
 
 Depois inicie:
 
@@ -104,22 +104,20 @@ Todas as opções ficam no arquivo `config.json` e podem ser editadas pela Web U
 ```json
 {
   "qbit": {
-    "host": "localhost",
-    "port": 8080,
+    "url": "http://localhost:8080",
     "api_key": ""
   },
   "sonarr": {
-    "host": "",
-    "port": 8989,
+    "url": "",
     "api_key": ""
   },
   "radarr": {
-    "host": "",
-    "port": 7878,
+    "url": "",
     "api_key": ""
   },
   "guardian": {
     "check_interval_seconds": 300,
+    "retry_interval_seconds": 120,
     "valid_media_extensions": [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".webm"],
     "dangerous_extensions": [".exe", ".scr", ".bat", ".cmd", ".vbs", ".js", ".com", ".pif", ".msi", ".dll", ".ps1", ".sh", ".bin"],
     "remove_stalled": false,
@@ -144,10 +142,10 @@ Todas as opções ficam no arquivo `config.json` e podem ser editadas pela Web U
 
 | Seção            | Campos principais                                                                                     |
 |------------------|-------------------------------------------------------------------------------------------------------|
-| **qbit**         | `host`, `port`, `api_key` — conexão com sua instância do qBittorrent                                 |
-| **sonarr**       | `host`, `port`, `api_key` — opcional, deixe em branco para desativar                                 |
-| **radarr**       | `host`, `port`, `api_key` — opcional, deixe em branco para desativar                                 |
-| **guardian**     | `check_interval_seconds` (0 = modo webhook), listas de extensões, regras de stalled/sem seeds, prioridades |
+| **qbit**         | `url` (esquema + host + porta), `api_key` — conexão com sua instância do qBittorrent                 |
+| **sonarr**       | `url`, `api_key` — opcional, deixe em branco para desativar                                          |
+| **radarr**       | `url`, `api_key` — opcional, deixe em branco para desativar                                          |
+| **guardian**     | `check_interval_seconds` (0 = modo webhook), `retry_interval_seconds`, listas de extensões, regras de stalled/sem seeds, prioridades |
 | **notifications** | `apprise_url` — URL compatível com Apprise (veja [documentação do Apprise](https://github.com/caronc/apprise)) |
 | **webui**        | `user`, `password` — credenciais HTTP Basic Auth. Deixe ambos vazios para acesso público             |
 
@@ -162,6 +160,14 @@ Para proteger o painel com senha, preencha `webui.user` e `webui.password`. O na
 ### Polling (padrão)
 
 O guardian verifica os torrents a cada N segundos. Defina `guardian.check_interval_seconds` com qualquer valor acima de 0. Padrão: 300 segundos (5 minutos).
+
+### Reconexão ao qBittorrent
+
+Se o qBittorrent não estiver disponível — tipicamente quando o servidor reinicia e o guardian sobe primeiro — o guardian **não desiste**: ele registra um `WARNING` e tenta de novo a cada `guardian.retry_interval_seconds` (padrão: 120 segundos) até conectar. O mesmo vale se o qBittorrent cair depois, já em operação.
+
+Durante o retry o heartbeat continua sendo atualizado: o healthcheck mede a saúde do **processo** guardian, não a do qBittorrent, que é uma dependência externa e transitória. Por isso o container permanece `healthy` enquanto está retentando — acompanhe o log para ver a indisponibilidade.
+
+> Se você aumentar `retry_interval_seconds`, a tolerância do healthcheck cresce junto (3×), então não há risco de o container ser marcado `unhealthy` só por causa de um retry longo.
 
 ### Webhook (tempo real)
 
@@ -271,8 +277,9 @@ Com `LOG_LEVEL=ERROR` (o padrão), você veria apenas a linha de remoção e eve
 ### "Connection refused" ou "Falha ao conectar no qBit"
 
 - Verifique se o qBittorrent está rodando e com a Web UI ativada.
-- Confira se `qbit.host` e `qbit.port` estão corretos no `config.json`.
+- Confira se `qbit.url` está correto no `config.json` — ele inclui esquema, host e porta (ex.: `http://192.168.1.10:8080`).
 - **Usuários Docker:** `localhost` dentro do container aponta para o próprio container, não para a máquina host. Use `host.docker.internal` (Windows/Mac) ou o IP real da máquina (Linux, ex: `172.17.0.1`).
+- O guardian **continua retentando** em vez de encerrar, então isso aparece como um `WARNING` repetido no log, não como container morto. Corrija a URL ou suba o qBittorrent e a próxima tentativa conecta sozinha — sem precisar reiniciar.
 
 ### "HTTP 403" / "Unauthorized"
 
@@ -290,15 +297,15 @@ A API Key está errada ou vazia.
 
 ### Não uso Sonarr nem Radarr
 
-Deixe os campos `sonarr.host` e `radarr.host` em branco. O guardian funciona perfeitamente sem eles — você ainda terá remoção de arquivos perigosos, limpeza de stalled/sem seeds e otimização de prioridades. Apenas o bloqueio e a re-busca automática são ignorados.
+Deixe os campos `sonarr.url` e `radarr.url` em branco. O guardian funciona perfeitamente sem eles — você ainda terá remoção de arquivos perigosos, limpeza de stalled/sem seeds e otimização de prioridades. Apenas o bloqueio e a re-busca automática são ignorados.
 
 ## Desenvolvimento
 
 ```bash
-# Instalar dependências (inclui pytest)
-pip install -r requirements.txt
+# Instalar dependências (runtime + ferramentas de teste)
+pip install -r requirements-dev.txt
 
-# Rodar todos os testes (79: 59 funcionais + 20 de segurança)
+# Rodar todos os testes (174: 154 funcionais + 20 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais
@@ -308,7 +315,7 @@ python -m pytest test/test_guardian.py -v
 python -m pytest test/test_security.py -v
 ```
 
-CI roda a cada push e pull request via GitHub Actions (`.github/workflows/test.yml`).
+CI roda a cada push e pull request via GitHub Actions (`.github/workflows/test.yml`). O build da imagem (`docker-build.yml`) depende dessa suite, então nada é publicado no GHCR com teste quebrado.
 
 ## Documentação
 

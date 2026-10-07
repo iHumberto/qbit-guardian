@@ -13,6 +13,7 @@
   },
   "guardian": {
     "check_interval_seconds": 300,
+    "retry_interval_seconds": 120,
     "valid_media_extensions": [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".webm"],
     "dangerous_extensions": [".exe", ".scr", ".bat", ".cmd", ".vbs", ".js", ".com", ".pif", ".msi", ".dll", ".ps1", ".sh", ".bin"],
     "remove_stalled": false,
