@@ -6,108 +6,228 @@
 <title>qbit-guardian</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
-  :root { --bg: #1a1a2e; --card: #16213e; --accent: #e94560; --text: #eee; --input: #0f3460; --border: #533483; }
-  * { box-sizing:border-box; margin:0; padding:0; }
-  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,sans-serif; padding:20px; }
-  .container { max-width:1035px; margin:0 auto; }
+  /* ── Tokens ──────────────────────────────────────────────────────────
+     Valores medidos no prototipo Penpot. Referencia durável no vault:
+     DevOpsExpert/qbit-guardian/conceitos/design-system-webui.md
+     A grade e 3 colunas de 365px com gutters de 28px (365*3 + 28*2 = 1151).
+  */
+  :root {
+    --bg: #1a1a2e;
+    --card: #16213e;
+    --line: #ffffff;          /* borda de card e de controle */
+    --text: #ffffff;
+    --text-on-field: #1a1a2e; /* campos sao brancos: texto escuro */
+    --field: #ffffff;
+    --muted: #cfd3e0;
+    --accent: #e94560;        /* so em :focus e no toast de erro */
 
-  /* ── Language bar ── */
-  .lang-bar { display:flex; justify-content:flex-end; margin-bottom:12px; }
+    --col: 365px;
+    --gutter: 28px;
+    --card-pad-x: 26px;
+    --card-pad-y: 14px;
+
+    --r-card: 15px;           /* cards e caixas de texto grandes */
+    --r-pill: 13px;           /* campos curtos (altura 26) */
+    --r-stepper: 16px;        /* caixas valor + unidade (altura 32) */
+
+    --fs-title: 36px;
+    --fs-base: 14px;
+    --fs-help: 11px;
+    --fs-btn: 16px;
+  }
+
+  * { box-sizing:border-box; margin:0; padding:0; }
+
+  body {
+    background:var(--bg); color:var(--text);
+    /* Prototipo usa Source Sans Pro. Nao carregamos webfont: um painel de
+       homelab precisa abrir sem internet. Usa a fonte se estiver instalada. */
+    font-family:'Source Sans 3','Source Sans Pro',-apple-system,BlinkMacSystemFont,sans-serif;
+    font-size:var(--fs-base);
+    padding:24px 20px 40px;
+  }
+
+  .container { width:100%; max-width:calc(var(--col) * 3 + var(--gutter) * 2); margin:0 auto; }
+
+  /* ── Cabecalho ── */
+  .topbar { display:flex; justify-content:flex-end; align-items:center; gap:14px; min-height:42px; }
+
+  h1 { font-size:var(--fs-title); font-weight:400; text-align:center; line-height:1.2; }
+  .subtitle { color:var(--text); font-size:var(--fs-base); text-align:center; margin:6px 0 34px; }
+
+  /* Icone de documentacao + tooltip em hover */
+  .docs { position:relative; display:flex; flex-direction:column; align-items:center;
+          gap:2px; color:var(--text); text-decoration:none; padding:2px; }
+  .docs svg { width:28px; height:28px; display:block; fill:currentColor; }
+  .docs span { font-size:var(--fs-base); line-height:1; }
+  .docs:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px; }
+  .docs-tip {
+    position:absolute; top:calc(100% + 8px); right:0; width:281px;
+    background:var(--card); color:var(--text); border-radius:var(--r-card);
+    padding:14px 18px; font-size:var(--fs-base); line-height:1.3;
+    opacity:0; visibility:hidden; transition:opacity .3s linear, visibility .3s;
+    z-index:20; pointer-events:none;
+  }
+  .docs:hover .docs-tip, .docs:focus-visible .docs-tip { opacity:1; visibility:visible; }
+
+  /* ── Seletor de idioma (pilula, igual ao prototipo) ── */
   .lang-bar select {
-    background:var(--card); color:var(--text); border:1px solid var(--border);
-    border-radius:4px; padding:5px 8px; font-size:0.82rem; cursor:pointer;
+    background:var(--card); color:var(--text); border:1px solid var(--line);
+    border-radius:14px; height:28px; padding:0 24px 0 9px; font-size:13px; cursor:pointer;
     appearance:none; -webkit-appearance:none; -moz-appearance:none;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
-    background-repeat:no-repeat; background-position:right 8px center; padding-right:24px;
+    background-repeat:no-repeat; background-position:right 9px center;
   }
   .lang-bar select:focus { outline:none; border-color:var(--accent); }
 
-  .two-col { display:flex; gap:30px; align-items:stretch; }
-  .col { flex:1; min-width:0; }
-  .col:first-child { display:flex; flex-direction:column; gap:16px; }
-  .col + .col { display:flex; flex-direction:column; }
-  .col + .col > .card { flex:1; }
-  .col + .col > .card > .checkbox-row { align-items:flex-start; }
-  @media (max-width:768px) { .two-col { flex-direction:column; } }
-  h1 { color:var(--accent); margin-bottom:8px; font-size:1.6rem; text-align:center; }
-  .subtitle { color:#888; margin-bottom:24px; font-size:0.9rem; text-align:center; }
-  .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:20px; display:flex; flex-direction:column; gap:14px; }
-  .card h2 { font-size:1.1rem; margin-bottom:0; color:var(--accent); }
-  .row { display:flex; gap:12px; margin-bottom:0; flex-wrap:wrap; }
-  .field { flex:1; min-width:180px; }
-  .field label { display:block; font-size:0.82rem; color:#aaa; margin-bottom:6px; }
-  .field input, .field select, .field textarea { width:100%; padding:8px 10px; background:var(--input); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:0.9rem; }
-  .field textarea { resize:vertical; min-height:80px; font-family:monospace; }
-  .field input:focus, .field select:focus, .field textarea:focus { outline:none; border-color:var(--accent); }
-  .checkbox-row { display:flex; align-items:center; gap:8px; }
-  .checkbox-row input[type=checkbox] { width:auto; accent-color:var(--accent); }
+  /* ── Grade de 3 colunas ── */
+  .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:var(--gutter); align-items:stretch; }
+  .col { display:flex; flex-direction:column; gap:29px; min-width:0; }
+  .col > .card { flex:1; }
+
+  /* ── Card ── */
+  .card {
+    background:var(--card); border:1px solid var(--line); border-radius:var(--r-card);
+    padding:var(--card-pad-y) var(--card-pad-x);
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .card h2 { font-size:var(--fs-base); font-weight:400; color:var(--text); }
+
+  /* ── Campos ── */
+  .field label { display:block; font-size:var(--fs-base); color:var(--text); margin-bottom:5px; }
+  .field input, .field select, .field textarea {
+    width:100%; background:var(--field); color:var(--text-on-field);
+    border:none; border-radius:var(--r-pill); font-size:var(--fs-base);
+    font-family:inherit; height:26px; padding:0 12px;
+  }
+  .field textarea {
+    border-radius:var(--r-card); height:auto; min-height:88px; padding:8px 12px;
+    resize:vertical; line-height:1.3;
+  }
+  .field select { padding-right:26px; appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%231a1a2e'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 10px center; }
+  .field input:focus, .field select:focus, .field textarea:focus {
+    outline:2px solid var(--accent); outline-offset:0;
+  }
+  .field input::placeholder, .field textarea::placeholder { color:#7b8098; }
+
+  .help { font-size:var(--fs-help); color:var(--text); margin-top:4px; display:block; }
+
+  /* ── Linha com liga/desliga (stalled, sem seeds) ── */
+  .toggle-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .toggle-row > label { flex:1; min-width:150px; font-size:var(--fs-base); color:var(--text); }
   .inline { display:flex; gap:8px; align-items:center; }
-  .inline input { width:80px; }
-  .inline select { width:110px; }
-  .card > hr { margin:0; border:none; border-top:1px solid var(--border); }
-  .btn-row { display:flex; gap:12px; margin-top:20px; justify-content:center; }
-  .btn { padding:10px 24px; border:none; border-radius:4px; cursor:pointer; font-size:0.95rem; font-weight:600; }
-  .btn-save { background:var(--accent); color:#fff; }
-  .btn-save:hover { opacity:0.85; }
-  .toast { position:fixed; bottom:20px; right:20px; padding:12px 20px; border-radius:4px; color:#fff; font-size:0.9rem; z-index:99; opacity:0; transition:opacity 0.3s; }
+  .inline input, .inline select {
+    width:69px; height:32px; border-radius:var(--r-stepper); border:none;
+    background:var(--field); color:var(--text-on-field); font-size:var(--fs-base);
+    font-family:inherit; padding:0 10px; text-align:center;
+  }
+  .inline select { width:84px; padding-right:22px; text-align:left; appearance:none;
+    -webkit-appearance:none; -moz-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%231a1a2e'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 8px center; }
+  .inline input:focus, .inline select:focus { outline:2px solid var(--accent); }
+
+  /* Switch: substitui o checkbox nativo em toda a UI (padrao do prototipo).
+     CSS puro sobre o proprio input, entao `checked`, teclado e <label for>
+     continuam funcionando sem JS. */
+  .switch {
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    flex:0 0 auto; width:34px; height:20px; border-radius:10px;
+    background:transparent; border:1px solid var(--line);
+    position:relative; cursor:pointer; transition:background .15s linear;
+  }
+  .switch::after {
+    content:""; position:absolute; top:2px; left:2px; width:14px; height:14px;
+    border-radius:50%; background:var(--line); transition:transform .15s linear;
+  }
+  .switch:checked { background:var(--line); }
+  .switch:checked::after { transform:translateX(14px); background:var(--card); }
+  .switch:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  .card > hr { margin:0; border:none; border-top:1px solid rgba(255,255,255,.25); }
+
+  /* ── Botao salvar ── */
+  .btn-row { display:flex; justify-content:center; margin-top:28px; }
+  .btn-save {
+    width:219px; height:40px; border-radius:var(--r-card);
+    background:var(--card); border:1px solid var(--line); color:var(--text);
+    font-size:var(--fs-btn); font-family:inherit; cursor:pointer;
+  }
+  .btn-save:hover { background:#1d2a4d; }
+  .btn-save:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  /* ── Toast ── */
+  .toast { position:fixed; bottom:20px; right:20px; padding:12px 20px; border-radius:8px;
+           color:#fff; font-size:var(--fs-base); z-index:99; opacity:0; transition:opacity .3s; }
   .toast.show { opacity:1; }
   .toast.ok { background:#2ecc71; }
-  .toast.err { background:#e74c3c; }
+  .toast.err { background:var(--accent); }
 
-  /* ── Help text ── */
-  .help { font-size:0.75rem; color:#888; }
+  /* ── Responsivo ──
+     A grade de 3 colunas e desenhada para 1151px de conteudo. Abaixo disso
+     empilha: espremer 365px em telas menores quebra os rotulos longos. */
+  @media (max-width:1199px) {
+    .grid { grid-template-columns:1fr; }
+    .col > .card { flex:0 0 auto; }
+  }
 </style>
 </head>
 <body>
 <div class="container">
-  <div class="lang-bar" id="lang-bar"></div>
+  <div class="topbar">
+    <!-- Icone de documentacao: tooltip em hover, clique abre os docs do
+         idioma ativo (o href vem do i18n, via data-i18n-href). -->
+    <a class="docs" id="docs-link" href="https://github.com/iHumberto/qbit-guardian/tree/main/docs/pt-BR"
+       data-i18n-href="docs_url" target="_blank" rel="noopener noreferrer">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M8.5 2.687c.654-.689 1.782-.886 3.112-.752 1.234.124 2.503.523 3.388.893v9.923c-.918-.35-2.107-.692-3.287-.81-1.094-.111-2.278-.039-3.213.492V2.687zM8 1.783C7.015.936 5.587.81 4.287.94c-1.514.153-3.042.672-3.994 1.105A.5.5 0 0 0 0 2.5v11a.5.5 0 0 0 .707.455c.882-.4 2.303-.881 3.68-1.02 1.409-.142 2.59.087 3.223.877a.5.5 0 0 0 .78 0c.633-.79 1.814-1.019 3.222-.877 1.378.139 2.8.62 3.681 1.02A.5.5 0 0 0 16 13.5v-11a.5.5 0 0 0-.293-.455c-.952-.433-2.48-.952-3.994-1.105C10.413.809 8.985.936 8 1.783z"/>
+      </svg>
+      <span data-i18n="docs_label">Docs</span>
+      <span class="docs-tip" data-i18n="docs_tooltip">Com dúvidas? Leia a documentação e aprenda a configurar</span>
+    </a>
+    <div class="lang-bar" id="lang-bar"></div>
+  </div>
 
   <h1 data-i18n="title">🛡️ qbit-guardian</h1>
   <p class="subtitle" data-i18n="subtitle">Protege seu qBittorrent contra torrents maliciosos</p>
 
-  <div class="two-col">
+  <div class="grid">
     <div class="col">
       <div class="card">
         <h2 data-i18n="section_qbit">🔗 qBittorrent</h2>
         <div class="field">
-          <label data-i18n="label_url">URL</label>
+          <label for="qbit_url" data-i18n="label_url">URL</label>
           <input id="qbit_url" data-i18n-placeholder="placeholder_qbit_url" placeholder="http://192.168.15.3:8080">
         </div>
         <div class="field">
-          <label data-i18n="label_api_key">API Key</label>
+          <label for="qbit_api_key" data-i18n="label_api_key">API Key</label>
           <input id="qbit_api_key" type="password" data-i18n-placeholder="placeholder_qbit_api_key" placeholder="Cole sua API Key do qBittorrent aqui">
-        </div>
-      </div>
-
-      <div class="card">
-        <h2 data-i18n="section_sonarr">📺 Sonarr</h2>
-        <div class="field">
-          <label data-i18n="label_url">URL</label>
-          <input id="sonarr_url" data-i18n-placeholder="placeholder_sonarr_url" placeholder="http://192.168.15.3:8989">
-        </div>
-        <div class="field">
-          <label data-i18n="label_api_key">API Key</label>
-          <input id="sonarr_api_key" type="password" data-i18n-placeholder="placeholder_sonarr_api_key" placeholder="API Key do Sonarr">
         </div>
       </div>
 
       <div class="card">
         <h2 data-i18n="section_radarr">🎬 Radarr</h2>
         <div class="field">
-          <label data-i18n="label_url">URL</label>
+          <label for="radarr_url" data-i18n="label_url">URL</label>
           <input id="radarr_url" data-i18n-placeholder="placeholder_radarr_url" placeholder="http://192.168.15.3:7878">
         </div>
         <div class="field">
-          <label data-i18n="label_api_key">API Key</label>
+          <label for="radarr_api_key" data-i18n="label_api_key">API Key</label>
           <input id="radarr_api_key" type="password" data-i18n-placeholder="placeholder_radarr_api_key" placeholder="API Key do Radarr">
         </div>
       </div>
 
       <div class="card">
-        <h2 data-i18n="section_notifications">🔔 Notificações</h2>
+        <h2 data-i18n="section_sonarr">📺 Sonarr</h2>
         <div class="field">
-          <label data-i18n="label_apprise_url">Apprise URL (Telegram, Discord, etc.)</label>
-          <input id="apprise_url" data-i18n-placeholder="placeholder_apprise_url" placeholder="tgram://BOT_TOKEN/CHAT_ID">
+          <label for="sonarr_url" data-i18n="label_url">URL</label>
+          <input id="sonarr_url" data-i18n-placeholder="placeholder_sonarr_url" placeholder="http://192.168.15.3:8989">
+        </div>
+        <div class="field">
+          <label for="sonarr_api_key" data-i18n="label_api_key">API Key</label>
+          <input id="sonarr_api_key" type="password" data-i18n-placeholder="placeholder_sonarr_api_key" placeholder="API Key do Sonarr">
         </div>
       </div>
     </div>
@@ -116,29 +236,27 @@
       <div class="card">
         <h2 data-i18n="section_guardian">🛡️ Guardian</h2>
         <div class="field">
-          <label data-i18n="label_check_interval">Intervalo de verificação (segundos, 0 = modo webhook)</label>
+          <label for="check_interval" data-i18n="label_check_interval">Intervalo de verificação (segundos, 0 = modo webhook)</label>
           <input id="check_interval" type="number" min="0" placeholder="300">
           <span class="help" data-i18n="help_check_interval">0 desativa o polling — use com o script de webhook no qBit</span>
         </div>
 
         <div class="field">
-          <label data-i18n="label_valid_extensions">Extensões de mídia válidas (uma por linha)</label>
+          <label for="valid_extensions" data-i18n="label_valid_extensions">Extensões de mídia válidas (uma por linha)</label>
           <textarea id="valid_extensions" placeholder=".mkv&#10;.mp4&#10;.avi"></textarea>
         </div>
 
         <div class="field">
-          <label data-i18n="label_dangerous_extensions">Extensões perigosas (uma por linha)</label>
+          <label for="dangerous_extensions" data-i18n="label_dangerous_extensions">Extensões perigosas (uma por linha)</label>
           <textarea id="dangerous_extensions" placeholder=".exe&#10;.scr&#10;.bat&#10;.sh"></textarea>
         </div>
-
-        <hr>
 
         <!-- Prioridade: a escala do qBittorrent NAO e continua. O filePrio
              aceita apenas 0, 1, 6 e 7 — 2 a 5 devolvem HTTP 400. Por isso os
              tres campos sao listas de selecao, e nao campos numericos: um
              min/max nao expressa um conjunto com buracos. -->
         <div class="field">
-          <label data-i18n="label_priority_media">Prioridade para arquivos de mídia (0, 1, 6 ou 7)</label>
+          <label for="priority_media" data-i18n="label_priority_media">Prioridade para arquivos de mídia (0, 1, 6 ou 7)</label>
           <select id="priority_media">
             <option value="0" data-i18n-option="prio_skip">0 — não baixar</option>
             <option value="1" data-i18n-option="prio_normal">1 — normal</option>
@@ -148,7 +266,7 @@
           <span class="help" data-i18n="help_priority_media">0 = não baixar · 1 = normal · 6 = alta · 7 = máxima</span>
         </div>
         <div class="field">
-          <label data-i18n="label_priority_normal">Prioridade para arquivos auxiliares (.nfo, .srt, .jpg)</label>
+          <label for="priority_normal" data-i18n="label_priority_normal">Prioridade para arquivos auxiliares (.nfo, .srt, .jpg)</label>
           <select id="priority_normal">
             <option value="0" data-i18n-option="prio_skip">0 — não baixar</option>
             <option value="1" selected data-i18n-option="prio_normal">1 — normal</option>
@@ -157,7 +275,7 @@
           </select>
         </div>
         <div class="field">
-          <label data-i18n="label_priority_skip">Prioridade para outros arquivos</label>
+          <label for="priority_skip" data-i18n="label_priority_skip">Prioridade para outros arquivos</label>
           <select id="priority_skip">
             <option value="0" selected data-i18n-option="prio_skip">0 — não baixar</option>
             <option value="1" data-i18n-option="prio_normal">1 — normal</option>
@@ -166,10 +284,7 @@
           </select>
         </div>
 
-        <hr>
-
-        <div class="checkbox-row">
-          <input type="checkbox" id="remove_stalled">
+        <div class="toggle-row">
           <label for="remove_stalled" data-i18n="label_remove_stalled">Remover torrents parados (stalled) há mais de</label>
           <div class="inline">
             <input type="number" id="stalled_time" min="0" max="999" value="0" placeholder="0">
@@ -179,10 +294,10 @@
               <option value="hours" selected data-i18n-option="unit_hours">horas</option>
             </select>
           </div>
+          <input type="checkbox" class="switch" id="remove_stalled">
         </div>
 
-        <div class="checkbox-row">
-          <input type="checkbox" id="remove_no_seeds">
+        <div class="toggle-row">
           <label for="remove_no_seeds" data-i18n="label_remove_no_seeds">Remover torrents sem seeds há mais de</label>
           <div class="inline">
             <input type="number" id="no_seeds_time" min="0" max="999" value="0" placeholder="0">
@@ -192,13 +307,24 @@
               <option value="hours" selected data-i18n-option="unit_hours">horas</option>
             </select>
           </div>
+          <input type="checkbox" class="switch" id="remove_no_seeds">
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <h2 data-i18n="section_notifications">🔔 Notificações</h2>
+        <div class="field">
+          <label for="apprise_url" data-i18n="label_apprise_url">Apprise URL (Telegram, Discord, etc.)</label>
+          <input id="apprise_url" data-i18n-placeholder="placeholder_apprise_url" placeholder="tgram://BOT_TOKEN/CHAT_ID">
         </div>
       </div>
     </div>
   </div>
 
   <div class="btn-row">
-    <button class="btn btn-save" onclick="saveConfig()" data-i18n="btn_save">💾 Salvar Configurações</button>
+    <button class="btn-save" onclick="saveConfig()" data-i18n="btn_save">💾 Salvar Configurações</button>
   </div>
 </div>
 

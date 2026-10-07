@@ -1516,6 +1516,124 @@ class TestWebUIPriorityScale:
                 f"{fonte} ainda anuncia a escala antiga: {proibido!r}"
 
 
+class TestWebUILayout:
+    """Grade de 3 colunas do prototipo Penpot.
+
+    O codigo ficou em 2 colunas (`.two-col`) por meses depois de o prototipo
+    migrar para 3 — ver conceitos/design-system-webui no vault, decisao 5.
+    Estes testes travam a estrutura para a divergencia nao voltar em silencio.
+    """
+
+    def test_grade_tem_tres_colunas(self):
+        html = _read_static("index.html")
+        m = re.search(r'<div class="grid">(.*?)\n  </div>', html, re.S)
+        assert m, "container .grid nao encontrado"
+        assert m.group(1).count('<div class="col">') == 3
+
+    def test_layout_de_duas_colunas_nao_voltou(self):
+        """REGRESSAO: `.two-col` era o layout antigo."""
+        html = _read_static("index.html")
+        assert "two-col" not in html
+
+    def test_ordem_das_secoes_segue_o_prototipo(self):
+        """Col 1: qBittorrent → Radarr → Sonarr. Col 2: Guardian. Col 3: Notificacoes."""
+        html = _read_static("index.html")
+        colunas = re.findall(r'<div class="col">(.*?)\n    </div>', html, re.S)
+        assert len(colunas) == 3
+        secoes = [re.findall(r'<h2 data-i18n="(\w+)"', c) for c in colunas]
+        assert secoes == [
+            ["section_qbit", "section_radarr", "section_sonarr"],
+            ["section_guardian"],
+            ["section_notifications"],
+        ], secoes
+
+    @pytest.mark.parametrize("token,valor", [
+        ("--col", "365px"),
+        ("--gutter", "28px"),
+        ("--r-card", "15px"),
+        ("--r-pill", "13px"),
+        ("--r-stepper", "16px"),
+        ("--bg", "#1a1a2e"),
+        ("--card", "#16213e"),
+    ])
+    def test_tokens_do_design_system(self, token, valor):
+        """Valores medidos no prototipo, declarados como token em :root."""
+        html = _read_static("index.html")
+        m = re.search(r":root\s*\{(.*?)\}", html, re.S)
+        assert m, ":root nao encontrado"
+        assert re.search(re.escape(token) + r":\s*" + re.escape(valor) + r"\s*;", m.group(1)), \
+            f"{token} deveria ser {valor}"
+
+    def test_largura_do_container_deriva_dos_tokens(self):
+        """A largura maxima e 3 colunas + 2 gutters, nao um numero solto."""
+        html = _read_static("index.html")
+        assert re.search(r"\.container\s*\{[^}]*max-width:\s*calc\(var\(--col\)\s*\*\s*3", html)
+
+    def test_todo_campo_tem_label_associado(self):
+        """REGRESSAO: 13 campos ficaram sem `for`, sem leitor de tela conseguir ler."""
+        html = _read_static("index.html")
+        sem_for = [l for l in html.split("\n")
+                   if l.strip().startswith("<label ") and "for=" not in l]
+        assert not sem_for, f"labels sem for: {sem_for}"
+
+    def test_todo_checkbox_e_switch(self):
+        """O switch do prototipo e o unico padrao de liga/desliga da UI."""
+        html = _read_static("index.html")
+        checkboxes = re.findall(r'<input[^>]*type="checkbox"[^>]*>', html)
+        assert checkboxes, "nenhum checkbox encontrado — seletor desatualizado?"
+        for c in checkboxes:
+            assert 'class="switch"' in c, f"checkbox sem a classe switch: {c}"
+
+
+class TestWebUIDocsLink:
+    """Icone de documentacao do prototipo: tooltip em hover + link por idioma."""
+
+    def _docs_urls(self):
+        js = _read_static("i18n.js")
+        urls = {}
+        for lang in ("pt-BR", "en-US"):
+            m = re.search(r"'" + lang + r"':\s*\{(.*?)\n    \}", js, re.S)
+            u = re.search(r"docs_url:\s*'([^']+)'", m.group(1))
+            assert u, f"docs_url ausente em {lang}"
+            urls[lang] = u.group(1)
+        return urls
+
+    def test_link_existe_e_abre_em_nova_aba_com_seguranca(self):
+        html = _read_static("index.html")
+        m = re.search(r'<a class="docs"[^>]*>', html)
+        assert m, "link de documentacao nao encontrado"
+        tag = m.group(0)
+        assert 'target="_blank"' in tag
+        # noopener evita que a pagina aberta acesse window.opener
+        assert "noopener" in tag, tag
+        assert 'data-i18n-href="docs_url"' in tag, tag
+
+    def test_tooltip_so_aparece_no_hover(self):
+        html = _read_static("index.html")
+        assert 'class="docs-tip"' in html
+        m = re.search(r"\.docs-tip\s*\{(.*?)\}", html, re.S)
+        assert m and "visibility:hidden" in m.group(1).replace(" ", ""), \
+            "o tooltip deve comecar escondido"
+        assert re.search(r"\.docs:hover \.docs-tip", html), \
+            "falta a regra de hover que revela o tooltip"
+
+    def test_url_aponta_para_a_pasta_de_docs_do_idioma(self):
+        urls = self._docs_urls()
+        assert urls["pt-BR"].endswith("/docs/pt-BR")
+        assert urls["en-US"].endswith("/docs/en-US")
+        assert urls["pt-BR"] != urls["en-US"]
+
+    @pytest.mark.parametrize("lang", ["pt-BR", "en-US"])
+    def test_pasta_de_docs_existe_no_repo(self, lang):
+        """O link nao pode apontar para uma pasta que nao existe."""
+        urls = self._docs_urls()
+        pasta = urls[lang].rsplit("/tree/main/", 1)[1]
+        caminho = os.path.join(REPO_ROOT, pasta)
+        assert os.path.isdir(caminho), f"{caminho} nao existe"
+        assert [f for f in os.listdir(caminho) if f.endswith(".md")], \
+            f"{caminho} nao tem documentacao"
+
+
 class TestWebUIi18n:
     """Toda chave usada no HTML existe nos DOIS idiomas."""
 

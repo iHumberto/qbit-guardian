@@ -76,12 +76,15 @@ Na primeira execução, o sistema cria a configuração automaticamente — nada
 
 ### Layout da Web UI
 
-A página de configuração é dividida em duas colunas:
+A página de configuração é dividida em três colunas:
 
-- **Coluna esquerda**: conexões com seus serviços externos — qBittorrent, Sonarr, Radarr e notificações via Apprise.
-- **Coluna direita**: todas as configurações do Guardian — intervalo de verificação, extensões de arquivo, prioridades e regras de remoção de stalled/sem seeds.
+- **Coluna esquerda**: conexões com seus serviços externos — qBittorrent, Radarr e Sonarr.
+- **Coluna do meio**: todas as configurações do Guardian — intervalo de verificação, extensões de arquivo, prioridades e regras de remoção de stalled/sem seeds.
+- **Coluna direita**: notificações via Apprise.
 
-Em celulares e tablets (telas com menos de 768 px de largura), as colunas se empilham na vertical para manter tudo fácil de usar.
+No cabeçalho ficam o ícone **Docs** — passe o mouse para a dica, clique para abrir a documentação do projeto no seu idioma — e o seletor de idioma.
+
+Abaixo de 1200 px as três colunas se empilham na vertical, para a página continuar usável em tablets e celulares sem espremer os rótulos mais longos.
 
 ## Instalação Manual (sem Docker)
 
@@ -305,7 +308,7 @@ Deixe os campos `sonarr.url` e `radarr.url` em branco. O guardian funciona perfe
 # Instalar dependências (runtime + ferramentas de teste)
 pip install -r requirements-dev.txt
 
-# Rodar todos os testes (174: 154 funcionais + 20 de segurança)
+# Rodar todos os testes (192: 172 funcionais + 20 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais

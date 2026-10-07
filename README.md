@@ -76,12 +76,15 @@ On first run, the system creates the configuration automatically — no manual J
 
 ### Web UI Layout
 
-The configuration page is split into two columns:
+The configuration page is split into three columns:
 
-- **Left column**: Connections to your external services — qBittorrent, Sonarr, Radarr, and Apprise notifications.
-- **Right column**: All Guardian settings — check interval, file extensions, priorities, and stalled/seedless removal rules.
+- **Left column**: Connections to your external services — qBittorrent, Radarr and Sonarr.
+- **Middle column**: All Guardian settings — check interval, file extensions, file priorities, and stalled/seedless removal rules.
+- **Right column**: Apprise notifications.
 
-On phones and tablets (screens narrower than 768 px), the columns stack vertically so everything remains easy to use.
+The header carries a **Docs** icon — hover it for a hint, click it to open this project's documentation in your language — and the language selector.
+
+Below 1200 px the three columns stack vertically, so the page stays usable on tablets and phones without squeezing the longer labels.
 
 ## Manual Installation (without Docker)
 
@@ -305,7 +308,7 @@ Leave the `sonarr.url` and `radarr.url` fields empty. The guardian works fine wi
 # Install dependencies (runtime + test tooling)
 pip install -r requirements-dev.txt
 
-# Run all tests (174: 154 functional + 20 security)
+# Run all tests (192: 172 functional + 20 security)
 python -m pytest test/ -v
 
 # Functional tests only

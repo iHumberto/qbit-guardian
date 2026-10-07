@@ -22,6 +22,9 @@ const translations = {
         placeholder_radarr_api_key: 'API Key do Radarr',
         section_notifications: '\uD83D\uDD14 Notifica\u00E7\u00F5es',
         label_apprise_url: 'Apprise URL (Telegram, Discord, etc.)',
+        docs_label: 'Docs',
+        docs_tooltip: 'Com d\u00FAvidas? Leia a documenta\u00E7\u00E3o e aprenda a configurar',
+        docs_url: 'https://github.com/iHumberto/qbit-guardian/tree/main/docs/pt-BR',
         placeholder_apprise_url: 'tgram://BOT_TOKEN/CHAT_ID',
         section_guardian: '\uD83D\uDEE1\uFE0F Guardian',
         label_check_interval: 'Intervalo de verifica\u00E7\u00E3o (segundos, 0 = modo webhook)',
@@ -62,6 +65,9 @@ const translations = {
         placeholder_radarr_api_key: 'Radarr API Key',
         section_notifications: '\uD83D\uDD14 Notifications',
         label_apprise_url: 'Apprise URL (Telegram, Discord, etc.)',
+        docs_label: 'Docs',
+        docs_tooltip: 'Questions? Read the documentation and learn how to set it up',
+        docs_url: 'https://github.com/iHumberto/qbit-guardian/tree/main/docs/en-US',
         placeholder_apprise_url: 'tgram://BOT_TOKEN/CHAT_ID',
         section_guardian: '\uD83D\uDEE1\uFE0F Guardian',
         label_check_interval: 'Check interval (seconds, 0 = webhook mode)',
@@ -145,6 +151,14 @@ function applyTranslations() {
         var el = els[i];
         var key = el.getAttribute('data-i18n-placeholder');
         if (key) el.placeholder = t(key);
+    }
+
+    // Href attributes (the docs link points at the active language's folder)
+    els = document.querySelectorAll('[data-i18n-href]');
+    for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        var key = el.getAttribute('data-i18n-href');
+        if (key) el.href = t(key);
     }
 
     // Select options (value stays the same, only display text changes).

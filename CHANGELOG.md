@@ -5,6 +5,27 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.8] — 2026-10-07
+
+Primeira fatia da nova Web UI desenhada no Penpot. Esta entrega e so a camada
+visual — os templates de mensagem de notificacao vem na v2.1.0.
+
+### Alterado
+- Web UI migrada de **2 para 3 colunas**, fechando a divergencia protótipo × codigo que estava aberta desde 2026-09-21. Coluna 1: qBittorrent → Radarr → Sonarr (a ordem anterior trazia Sonarr antes de Radarr). Coluna 2: Guardian. Coluna 3: Notificacoes, que antes dividia espaco com os servicos externos.
+- Grade e formas vindas do design system medido no prototipo: colunas de 365px com gutters de 28px (container 1151px), cards com radius 15 e borda `#ffffff` 1px, padding 14/26, campos curtos em pilula de 26px (radius 13), caixas de texto com radius 15, caixas de valor+unidade com radius 16. Os valores viraram tokens CSS em `:root`, e a largura do container e calculada a partir deles em vez de um numero solto.
+- Paleta fiel ao prototipo: campos com fundo branco e texto escuro, bordas e titulos em branco, botao Salvar com fundo de card e borda branca. O accent `#e94560` passa a aparecer so em `:focus` e no toast de erro. Era a unica divergencia de cor ainda sem decisao no design system.
+- Tipografia do prototipo: titulo 36px, rotulos e titulos de secao 14px, texto de ajuda 11px, botao 16px. A familia Source Sans Pro e usada se estiver instalada, com fallback para a fonte do sistema — um painel de homelab precisa abrir sem internet, entao nenhuma webfont remota e carregada.
+- O checkbox nativo deu lugar ao **switch** do prototipo como padrao unico de liga/desliga. CSS puro sobre o proprio `input[type=checkbox]`, entao estado, teclado e `<label for>` continuam funcionando sem JS.
+- Separadores `<hr>` removidos dos cards: o prototipo nao os tem.
+- Responsivo: abaixo de 1200px as tres colunas empilham. O breakpoint subiu de 768px porque tres colunas de 365px precisam de 1151px de conteudo; espremer antes disso quebra os rotulos longos.
+
+### Adicionado
+- Icone **Docs** no cabecalho, com tooltip em hover e clique abrindo a documentacao do projeto no idioma ativo (`docs/pt-BR` ou `docs/en-US`). Novo mecanismo `data-i18n-href` no i18n para o link acompanhar o idioma, e novas chaves `docs_label`, `docs_tooltip` e `docs_url` nos dois idiomas.
+- Testes: 174 → 192. `TestWebUILayout` trava a grade de 3 colunas, a ordem das secoes, os tokens do design system e a derivacao da largura do container; `TestWebUIDocsLink` trava o link (nova aba com `noopener`, tooltip escondido por padrao, URL por idioma) e verifica que a pasta de docs apontada **existe no repo e tem conteudo**.
+
+### Corrigido
+- Acessibilidade: os 13 campos do formulario nao tinham `<label for>`, entao nenhum leitor de tela associava rotulo e campo (o Chrome reportava "No label associated with a form field"). Todos associados, com teste de regressao.
+
 ## [2.0.7] — 2026-10-07
 
 ### Corrigido
