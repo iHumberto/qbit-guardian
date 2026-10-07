@@ -84,6 +84,10 @@
   .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:var(--gutter); align-items:stretch; }
   .col { display:flex; flex-direction:column; gap:29px; min-width:0; }
   .col > .card { flex:1; }
+  /* A coluna 1 tem tres cards pequenos e acompanha a altura da coluna mais
+     alta (Guardian). Sem isto a sobra se acumula no rodape de cada card —
+     eram 60 px de vazio em cada um. Distribuida, o card fica preenchido. */
+  .col:first-child > .card { justify-content:space-evenly; }
 
   /* ── Card ── */
   .card {
@@ -119,8 +123,9 @@
   .head label, .head h2 { margin:0; }
 
   /* ── Template de mensagem ── */
-  .msg { display:flex; flex-direction:column; gap:5px; }
-  .msg textarea { min-height:110px; font-size:var(--fs-base); }
+  .msg { display:flex; flex-direction:column; gap:5px; flex:1; }
+  /* A caixa cresce com a sobra da coluna: espaco vira area de edicao. */
+  .msg textarea { min-height:110px; font-size:var(--fs-base); flex:1; }
   /* Mensagem desligada: o texto continua legivel, mas nao editavel. */
   .msg textarea:disabled { background:#d9dbe4; color:#4a4f66; cursor:not-allowed; }
   .switch:disabled { opacity:.45; cursor:not-allowed; }
@@ -133,19 +138,24 @@
     background:rgba(255,255,255,.12); border-radius:4px; padding:1px 5px; color:var(--text);
   }
 
-  /* ── Linha com liga/desliga (stalled, sem seeds) ── */
-  .toggle-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-  .toggle-row > label { flex:1; min-width:150px; font-size:var(--fs-base); color:var(--text); }
+  /* ── Bloco de remocao (stalled, sem seeds) ──
+     Mesma anatomia dos blocos de mensagem: rotulo a esquerda e liga/desliga
+     a direita na primeira linha, controles embaixo. Antes o toggle ficava
+     solto depois da unidade, deixando um vazio ate a borda do card. */
+  .toggle-block { display:flex; flex-direction:column; gap:5px; }
   .inline { display:flex; gap:8px; align-items:center; }
   .inline input, .inline select {
-    width:69px; height:32px; border-radius:var(--r-stepper); border:none;
+    height:32px; border-radius:var(--r-stepper); border:none; flex:0 0 auto;
     background:var(--field); color:var(--text-on-field); font-size:var(--fs-base);
-    font-family:inherit; padding:0 10px; text-align:center;
+    font-family:inherit; padding:0 10px;
   }
-  .inline select { width:84px; padding-right:22px; text-align:left; appearance:none;
+  .inline input { width:76px; text-align:center; }
+  /* Largura automatica: "segundos" nao cabia nos 84px fixos e era cortado.
+     O minimo cobre a maior opcao tambem em en-US. */
+  .inline select { width:auto; min-width:104px; padding-right:26px; appearance:none;
     -webkit-appearance:none; -moz-appearance:none;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%231a1a2e'/%3E%3C/svg%3E");
-    background-repeat:no-repeat; background-position:right 8px center; }
+    background-repeat:no-repeat; background-position:right 10px center; }
   .inline input:focus, .inline select:focus { outline:2px solid var(--accent); }
 
   /* Switch: substitui o checkbox nativo em toda a UI (padrao do prototipo).
@@ -303,8 +313,11 @@
           </select>
         </div>
 
-        <div class="toggle-row">
-          <label for="remove_stalled" data-i18n="label_remove_stalled">Remover torrents parados (stalled) há mais de</label>
+        <div class="toggle-block">
+          <div class="head">
+            <label for="remove_stalled" data-i18n="label_remove_stalled">Remover torrents parados (stalled) há mais de</label>
+            <input type="checkbox" class="switch" id="remove_stalled">
+          </div>
           <div class="inline">
             <input type="number" id="stalled_time" min="0" max="999" value="0" placeholder="0">
             <select id="stalled_unit">
@@ -313,11 +326,13 @@
               <option value="hours" selected data-i18n-option="unit_hours">horas</option>
             </select>
           </div>
-          <input type="checkbox" class="switch" id="remove_stalled">
         </div>
 
-        <div class="toggle-row">
-          <label for="remove_no_seeds" data-i18n="label_remove_no_seeds">Remover torrents sem seeds há mais de</label>
+        <div class="toggle-block">
+          <div class="head">
+            <label for="remove_no_seeds" data-i18n="label_remove_no_seeds">Remover torrents sem seeds há mais de</label>
+            <input type="checkbox" class="switch" id="remove_no_seeds">
+          </div>
           <div class="inline">
             <input type="number" id="no_seeds_time" min="0" max="999" value="0" placeholder="0">
             <select id="no_seeds_unit">
@@ -326,7 +341,6 @@
               <option value="hours" selected data-i18n-option="unit_hours">horas</option>
             </select>
           </div>
-          <input type="checkbox" class="switch" id="remove_no_seeds">
         </div>
       </div>
     </div>

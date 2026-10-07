@@ -377,7 +377,7 @@ Deixe os campos `sonarr.url` e `radarr.url` em branco. O guardian funciona perfe
 # Instalar dependências (runtime + ferramentas de teste)
 pip install -r requirements-dev.txt
 
-# Rodar todos os testes (242: 222 funcionais + 20 de segurança)
+# Rodar todos os testes (249: 229 funcionais + 20 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais

@@ -5,6 +5,23 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] — 2026-10-07
+
+Ajustes de layout reportados a partir de uma captura da instalacao em producao.
+
+### Corrigido
+- O seletor de unidade de tempo (stalled e sem seeds) tinha largura fixa de 84px, mas "segundos" precisa de 97px com o padding — o texto era **cortado**. Passou a `width:auto` com `min-width:104px`, que cobre a maior opcao tambem em en-US. Largura fixa ali volta a cortar assim que uma traducao crescer, entao ha teste proibindo.
+- Cada card da coluna 1 (qBittorrent, Radarr, Sonarr) acumulava **~60px de vazio no rodape**. Os tres sao pequenos e esticam ate a altura da coluna Guardian; a sobra agora e distribuida (`space-evenly`), e o vazio cai para ~16px em cima e embaixo.
+- O liga/desliga das linhas de remocao ficava solto depois do campo de unidade, deixando um buraco ate a borda do card. Passou para a linha do rotulo, encostado na direita — mesma anatomia dos blocos de mensagem de notificacao, que ja faziam assim.
+
+### Alterado
+- As caixas de mensagem de notificacao crescem com a sobra da coluna 3 (`flex:1`): espaco que antes ficava vazio no rodape do card vira area de edicao.
+- Campo numerico das linhas de remocao de 69 para 76px, para o valor nao disputar espaco com o stepper nativo.
+- Prototipo Penpot atualizado junto: toggle na linha do rotulo em ΔX 315 e unidade de 84 para 104px.
+
+### Notas
+- Testes: 242 → 249, com as cinco regressoes verificadas por mutacao.
+
 ## [2.1.0] — 2026-10-07
 
 Segunda e ultima fatia da nova Web UI desenhada no Penpot: as mensagens de

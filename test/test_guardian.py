@@ -1853,6 +1853,84 @@ class TestWebUILayout:
             assert 'class="switch"' in c, f"checkbox sem a classe switch: {c}"
 
 
+class TestWebUIEspacamento:
+    """Aproveitamento do espaco: nada cortado, nada de vazio acumulado.
+
+    Reportado em producao numa captura de tela: a unidade de tempo aparecia
+    cortada ("minutos" sem o final), cada card da coluna 1 tinha ~60 px de
+    vazio no rodape, e o toggle das linhas de remocao ficava solto no meio da
+    largura, deixando um buraco ate a borda do card.
+    """
+
+    def _regra(self, seletor):
+        """Corpo da regra cujo seletor abre a linha.
+
+        Ancorado em inicio de linha para nao casar com uma regra agrupada que
+        termine no mesmo seletor (`.inline input, .inline select { ... }`).
+        """
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*" + re.escape(seletor) + r"\s*\{([^}]*)\}", html)
+        assert m, f"regra CSS nao encontrada: {seletor}"
+        return m.group(1).replace(" ", "")
+
+    def test_unidade_de_tempo_tem_largura_automatica(self):
+        """REGRESSAO: width fixo de 84px cortava "segundos" (precisa de 97)."""
+        regra = self._regra(".inline select")
+        assert "width:auto" in regra, regra
+        m = re.search(r"min-width:(\d+)px", regra)
+        assert m, f"falta min-width em .inline select: {regra}"
+        assert int(m.group(1)) >= 100, \
+            f"min-width {m.group(1)}px e curto para a maior unidade"
+
+    def test_unidade_nao_tem_largura_fixa(self):
+        """Largura fixa volta a cortar o texto assim que a traducao crescer."""
+        regra = self._regra(".inline select")
+        assert not re.search(r"(?<!min-)width:\d+px", regra), regra
+
+    def test_coluna_1_distribui_a_sobra(self):
+        """REGRESSAO: a sobra se acumulava no rodape de cada card da coluna 1.
+
+        Os tres cards sao pequenos e esticam ate a altura da coluna Guardian.
+        Sem distribuir, sobravam ~60 px de vazio em cada rodape.
+        """
+        html = _read_static("index.html")
+        m = re.search(r"\.col:first-child > \.card\s*\{([^}]*)\}", html)
+        assert m, "falta a regra que distribui a sobra na coluna 1"
+        assert "space-evenly" in m.group(1) or "space-between" in m.group(1), m.group(1)
+
+    def test_caixa_de_mensagem_absorve_a_sobra(self):
+        """Espaco sobrando na coluna 3 vira area de edicao, nao vazio."""
+        assert "flex:1" in self._regra(".msg textarea")
+
+    @pytest.mark.parametrize("lid", ["remove_stalled", "remove_no_seeds"])
+    def test_toggle_de_remocao_fica_na_linha_do_rotulo(self, lid):
+        """REGRESSAO: o toggle vinha depois da unidade e sobrava espaco a direita.
+
+        Mesma anatomia dos blocos de mensagem — rotulo a esquerda, liga/desliga
+        encostado na borda direita, controles na linha de baixo.
+        """
+        html = _read_static("index.html")
+        bloco = re.search(
+            r'<div class="toggle-block">\s*<div class="head">(.*?)</div>(.*?)</div>\s*</div>',
+            html, re.S)
+        assert bloco, "bloco de remocao nao segue a estrutura head + inline"
+
+        m = re.search(r'<div class="toggle-block">(.*?)\n        </div>', html, re.S)
+        blocos = re.findall(r'<div class="toggle-block">(.*?)\n        </div>', html, re.S)
+        alvo = next((b for b in blocos if f'id="{lid}"' in b), None)
+        assert alvo, f"bloco de {lid} nao encontrado"
+
+        cabeca = re.search(r'<div class="head">(.*?)</div>', alvo, re.S).group(1)
+        assert f'id="{lid}"' in cabeca, "o toggle deve ficar no cabecalho, com o rotulo"
+        assert f'for="{lid}"' in cabeca
+        # os controles ficam depois do cabecalho
+        assert alvo.index('class="inline"') > alvo.index(f'id="{lid}"')
+
+    def test_layout_antigo_de_linha_unica_nao_voltou(self):
+        html = _read_static("index.html")
+        assert "toggle-row" not in html
+
+
 class TestWebUIDocsLink:
     """Icone de documentacao do prototipo: tooltip em hover + link por idioma."""
 
