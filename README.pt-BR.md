@@ -25,7 +25,7 @@ Ele roda como um container Docker leve (ou como um processo Python) com uma inte
 | Interface Web | Flask 3.x                           |
 | Cliente HTTP  | requests 2.x                        |
 | Notificações  | Apprise (Telegram, Discord, Slack e mais de 100 serviços) |
-| Testes        | pytest 8.x (546 testes: 428 funcionais + 118 segurança) |
+| Testes        | pytest 8.x (687 testes: 569 funcionais + 118 segurança) |
 | Licença       | GNU GPL v3                          |
 
 ## Funcionalidades
@@ -444,7 +444,7 @@ Deixe os campos `sonarr.url` e `radarr.url` em branco. O guardian funciona perfe
 # Instalar dependências (runtime + ferramentas de teste)
 pip install -r requirements-dev.txt
 
-# Rodar todos os testes (546: 428 funcionais + 118 de segurança)
+# Rodar todos os testes (687: 569 funcionais + 118 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais
@@ -461,8 +461,16 @@ CI roda a cada push e pull request via GitHub Actions (`.github/workflows/test.y
 
 ## Documentação
 
-- 📖 [Documentação em português](docs/pt-BR/) — guias detalhados e referência
-- 📖 [English docs](docs/en-US/) — detailed guides and reference
+Guias passo a passo para quem está começando, em português e inglês:
+
+| Guia | Para quê |
+|------|----------|
+| [Primeiros Passos](docs/pt-BR/primeiros-passos.md) | Instalar e acessar pela primeira vez |
+| [Instalação](docs/pt-BR/INSTALL.md) | Docker, instalação manual, modo webhook e solução de problemas |
+| [Uso](docs/pt-BR/USAGE.md) | Todos os recursos do painel, em detalhe |
+| [Perguntas Frequentes](docs/pt-BR/FAQ.md) | Dúvidas comuns e erros conhecidos |
+
+- 📖 [English docs](docs/en-US/) — [Getting Started](docs/en-US/getting-started.md) · [Install](docs/en-US/INSTALL.md) · [Usage](docs/en-US/USAGE.md) · [FAQ](docs/en-US/FAQ.md)
 
 ## Licença
 

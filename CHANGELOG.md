@@ -5,6 +5,32 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.1] — 2026-10-07
+
+Reescrita da documentacao de usuario (`docs/`), que estava quatro releases
+atras do codigo. Nenhuma mudanca de comportamento.
+
+### Corrigido
+- **Instalar seguindo a documentacao era impossivel.** O `INSTALL.md` mandava criar um `config.json` com `qbit.host` e `qbit.port`; o codigo usa `qbit.url` desde a v2.0.7, entao o guardian subia e morria com `KeyError: 'url'`. Mesmo erro em `primeiros-passos.md` e nos dois arquivos em ingles.
+- **O volume do Docker apontava para o lugar errado**: `./config.json:/app/config.json`, enquanto a imagem le `/app/config/config.json`. O arquivo do usuario era ignorado, a config nascia dentro do container e **se perdia a cada atualizacao**.
+- **A instalacao manual mandava rodar `python app/app.py`** — arquivo que nunca existiu. O entrypoint e `app/main.py`, e precisa ser chamado como `python -m app.main`: sem o `-m` o Python nao acha o pacote e sai com `ModuleNotFoundError`.
+- **`cp config.json.example config.json`** — esse arquivo nao existe. Nenhum arquivo precisa ser criado: o `config.json` e gerado no primeiro boot.
+- **O healthcheck documentado era o antigo** (`cat /tmp/heartbeat`), que so verificava a existencia do arquivo e reportava `healthy` para sempre com o loop morto. A imagem traz o correto desde a v2.0.5, e nao precisa ser declarado no compose.
+- **A variavel `PORT`** aparecia no guia de problemas como forma de trocar a porta. O codigo nunca a leu — so `CONFIG_PATH` e `LOG_LEVEL`.
+- **`USAGE.md` descrevia a tela em duas colunas** (sao tres desde a v2.0.8), mandava proteger o painel por uma "secao Autenticacao" que **nao existe na Web UI**, e trazia uma tabela de "status dos torrents processados" (`completed`, `dangerous`, `no_media`...) **inteiramente ficticia** — `_processed` e um set de hashes, sem status. Documentava tambem um log `Nenhum torrent novo` que o codigo nao emite.
+- **Links para `forgejo.home.arpa`**, inalcancavel fora da rede do mantenedor, e um link interno para `configuracao.md`, que nao existe.
+
+### Adicionado
+- Documentacao de tudo que entrou entre a v2.0.6 e a v2.3.0 e nao estava em `docs/`: reconexao ao qBittorrent com `retry_interval_seconds`, grade de tres colunas, mensagens de notificacao editaveis com suas variaveis, autenticacao obrigatoria com senha gerada no startup, tela de login, troca de credenciais pelo icone de conta, freio de forca bruta, `chown` da pasta `config` e `QBIT_GUARDIAN_PASS` no hook do webhook.
+- `docs/en-US/getting-started.md`, equivalente ao `primeiros-passos.md` que so existia em portugues.
+- Os dois READMEs passaram a linkar cada guia individualmente, em vez de apontar so para a pasta.
+- **Testes de paridade entre `docs/` e o codigo** (`TestDocsEstrutura`, `TestDocsContraOCodigo`, `TestDocsValoresPadrao`), que e o que impede isso de acontecer de novo. Eles conferem: schema do config, entrypoint, caminho do volume, UID do `chown` contra o Dockerfile, endpoints contra as rotas do Flask, variaveis de ambiente contra os pontos onde o codigo as le, listas de extensoes e escala de prioridade contra os defaults, variaveis de notificacao contra `NOTIFICATION_VARIABLES`, links internos e paridade de paginas entre os dois idiomas.
+
+### Notas
+- Testes: 546 → **687**. 16 mutacoes na documentacao, 16 pegas.
+- Duas das mutacoes expuseram fraqueza nos proprios testes antes de qualquer doc quebrar: o teste de variaveis de ambiente passava um `PORT=` inventado, porque procurava a string no codigo e `TRANSPORT_ERRORS` contem "PORT"; e o teste do intervalo padrao procurava o numero solto no arquivo, entao trocar o padrao de 300 para 600 nao quebrava nada, ja que "300" aparece em outros exemplos. Os dois foram reescritos para ancorar no ponto certo.
+- O teste que proibe variavel de notificacao inexistente pegou a propria prosa nova: eu tinha escrito `{{variavel}}` como exemplo generico, indistinguivel de uma variavel real.
+
 ## [2.3.0] — 2026-10-07
 
 Tela de login propria no lugar do popup nativo do navegador.

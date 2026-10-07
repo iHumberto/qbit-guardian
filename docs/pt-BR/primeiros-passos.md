@@ -12,6 +12,8 @@ O qbit-guardian é um programa que vigia os torrents do seu **qBittorrent** e re
 
 > 💡 **Seed** (ou semeador) é alguém que já baixou o arquivo inteiro e continua enviando para os outros. Se um torrent tem zero seeds, você jamais conseguirá completar o download.
 
+Ele também ajusta a prioridade dos arquivos dentro de cada torrent: o vídeo vem primeiro, os extras depois, e o lixo nem é baixado.
+
 Quando você usa **Sonarr** (séries) ou **Radarr** (filmes), o qbit-guardian bloqueia o torrent ruim e dispara uma nova busca automática, para você não ficar esperando à toa.
 
 ---
@@ -24,9 +26,9 @@ Quando você usa **Sonarr** (séries) ou **Radarr** (filmes), o qbit-guardian bl
 
 - A **API Key** do qBittorrent. Para encontrá-la:
   1. Abra o qBittorrent e vá em **Ferramentas** > **Opções** > aba **Web UI**.
-  2. Copie o valor do campo **Chave da API**. Você vai precisar colar essa chave na configuração do qbit-guardian.
+  2. Copie o valor do campo **Chave da API**.
 
-> 💡 **API Key** é uma senha longa e aleatória que o qBittorrent gera. Ela serve para que outros programas (como o qbit-guardian) conversem com o qBittorrent de forma segura, sem precisar usar seu login e senha.
+> 💡 **API Key** é uma senha longa e aleatória que o qBittorrent gera. Ela serve para que outros programas conversem com o qBittorrent de forma segura, sem precisar do seu login e senha.
 
 ---
 
@@ -34,9 +36,20 @@ Quando você usa **Sonarr** (séries) ou **Radarr** (filmes), o qbit-guardian bl
 
 > 💡 **Docker** é como uma caixa que empacota o programa com tudo que ele precisa para rodar. Funciona igual em qualquer computador, sem instalar dependências extras.
 
-### Passo 1: Adicione ao seu docker-compose.yml
+### Passo 1: Crie a pasta de configuração
 
-Abra o arquivo `docker-compose.yml` onde você já configura seus outros serviços (qBittorrent, Sonarr, Radarr) e adicione:
+Na pasta onde fica o seu `docker-compose.yml`:
+
+```bash
+mkdir -p config
+sudo chown -R 1000:1000 config
+```
+
+> ⚠️ **O `chown` é obrigatório.** Por segurança, o container roda como usuário comum (UID 1000) e não como root. Sem o ajuste de dono, ele não consegue gravar a configuração e sai na hora.
+
+**Nenhum arquivo precisa ser criado.** O `config.json` é gerado sozinho na primeira execução.
+
+### Passo 2: Adicione ao seu docker-compose.yml
 
 ```yaml
 services:
@@ -47,34 +60,37 @@ services:
       - "5000:5000"
     volumes:
       - ./config:/app/config
+    environment:
+      - LOG_LEVEL=ERROR
     restart: unless-stopped
 ```
 
-> 📘 **Volume** é a ponte entre os arquivos do container e os arquivos da sua máquina. O que o programa salvar em `/app/config` dentro do container aparece na pasta `./config` do seu servidor. Assim, mesmo se recriar o container, suas configurações não se perdem.
+> 📘 **Volume** é a ponte entre os arquivos do container e os da sua máquina. O que o programa salvar em `/app/config` dentro do container aparece na pasta `./config` do seu servidor. Assim, mesmo recriando o container, suas configurações não se perdem.
 
-### Passo 2: Inicie o container
-
-Na pasta onde está seu `docker-compose.yml`, execute:
+### Passo 3: Inicie o container
 
 ```bash
-docker compose up -d
+docker compose up -d qbit-guardian
 ```
 
-O programa baixa a imagem e inicia automaticamente. **Nenhum arquivo de configuração precisa ser criado antes** — o sistema gera tudo sozinho na primeira execução.
+### Passo 4: Pegue a senha de acesso
 
-### Passo 3: Configure tudo pela Web UI
+A Web UI exige login, e a senha é gerada na primeira execução:
 
-Abra o navegador e acesse `http://endereco-do-seu-servidor:5000`. Todos os campos aparecem vazios, prontos para você preencher:
+```bash
+docker logs qbit-guardian
+```
 
-- **qBittorrent**: endereço, porta e a API Key do seu cliente de torrents.
-- **Sonarr** e **Radarr**: integração com séries e filmes (opcional — pode deixar em branco).
-- **Guardian**: regras de monitoramento, intervalos, prioridades.
-- **Notificações**: alertas via Telegram, Discord e outros (opcional).
-- **Web UI**: proteção com senha para o painel (opcional).
+```
+====================================================================
+  qbit-guardian — credenciais da Web UI geradas automaticamente
+====================================================================
+  usuario: admin
+  senha:   y7f3CKYTGvYeskf3vEQk
+====================================================================
+```
 
-Preencha os campos que desejar e clique em **Salvar**. Pronto — as configurações são gravadas automaticamente em `./config/config.json` e carregadas nas próximas execuções.
-
-> ⚠️ No Docker, `localhost` dentro do container aponta para o próprio container, não para sua máquina. Se o qBittorrent está em outro container ou na máquina host, use `host.docker.internal` (Windows/Mac) ou o IP real da máquina (Linux, ex: `172.17.0.1`).
+> ⚠️ **Copie agora.** Essa senha aparece uma vez só.
 
 ---
 
@@ -82,51 +98,40 @@ Preencha os campos que desejar e clique em **Salvar**. Pronto — as configuraç
 
 Use esta opção se você não usa Docker ou prefere rodar diretamente no sistema.
 
-### Passo 1: Clone o projeto (opcional)
-
-Você pode baixar os arquivos do projeto pelo git ou manualmente pelo navegador:
+### Passo 1: Baixe o projeto
 
 ```bash
-git clone https://forgejo.home.arpa/Humberto/qbit-guardian.git
+git clone https://github.com/iHumberto/qbit-guardian.git
 cd qbit-guardian
 ```
 
-### Passo 2: Instale as dependências com Python
+### Passo 2: Instale as dependências
 
-> 💡 **Ambiente virtual (venv)** é uma pasta isolada onde o Python instala bibliotecas só para este projeto, sem bagunçar o resto do sistema. Funciona como uma gaveta separada.
+> 💡 **Ambiente virtual (venv)** é uma pasta isolada onde o Python instala bibliotecas só para este projeto, sem bagunçar o resto do sistema.
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Passo 3: Crie e edite o arquivo de configuração
+### Passo 3: Execute o programa
 
 ```bash
-cp config.json.example config.json
+python -m app.main
 ```
 
-Abra o `config.json` em qualquer editor de texto e preencha:
+> ⚠️ Use `python -m app.main`, com o `-m`. Rodar `python app/main.py` falha com `ModuleNotFoundError: No module named 'app'`.
 
-- **qbit.host**: endereço IP ou nome do computador com qBittorrent.
-- **qbit.api_key**: a chave da API que você copiou do qBittorrent.
+O `config.json` é criado sozinho na raiz do projeto, e a senha de acesso aparece no terminal. Deixe-o aberto — o programa roda até você pressionar `Ctrl+C`.
 
-### Passo 4: Execute o programa
-
-```bash
-python app/app.py
-```
-
-Deixe o terminal aberto. O programa fica rodando até você pressionar `Ctrl+C`.
-
-> 💡 Para manter rodando em segundo plano mesmo fechando o terminal, use uma ferramenta como `tmux` ou crie um serviço systemd. Esses tópicos estão fora do escopo deste guia, mas são bem documentados na internet.
+> 💡 Para manter rodando em segundo plano mesmo fechando o terminal, use `tmux` ou crie um serviço systemd.
 
 ---
 
 ## Primeiro acesso à Web UI
 
-Depois que o programa estiver rodando, abra o navegador e acesse:
+Abra o navegador e acesse:
 
 ```
 http://endereco-do-seu-servidor:5000
@@ -137,95 +142,98 @@ Exemplos:
 - Se roda na mesma máquina: `http://localhost:5000`
 - Se roda em outro computador da rede: `http://192.168.1.100:5000`
 
-**Na primeira vez**, todos os campos aparecem vazios — o sistema cria um arquivo de configuração novo. Preencha as seções conforme sua necessidade:
+Você cai na **tela de login**. Entre com o usuário `admin` e a senha que apareceu no log.
 
-- **qBittorrent**: conexão com seu cliente de torrents.
-- **Radarr** e **Sonarr**: integração (opcional, pode deixar em branco).
-- **Guardian**: regras de monitoramento.
-- **Notificações**: alertas via Telegram, Discord, etc.
+### Troque a senha
 
-Depois de preencher, clique em **Salvar**. A configuração fica gravada e carrega automaticamente nas próximas execuções.
+Clique no **ícone de usuário** no canto superior direito. Informe a senha atual, escolha uma nova (mínimo 8 caracteres) e salve. Se quiser, mude o nome de usuário no mesmo popup.
 
-> ⚠️ Na primeira execução, a página **não tem senha**. Qualquer pessoa na sua rede pode acessar. Veja abaixo como proteger.
+Depois de salvar você volta para a tela de login — é esperado, a troca encerra as sessões abertas.
 
 ---
 
 ## Configuração mínima para funcionar
 
-Para o qbit-guardian começar a proteger seus torrents, apenas dois campos são obrigatórios:
+Depois de entrar, apenas dois campos são obrigatórios:
 
 | Campo | O que preencher |
 |-------|----------------|
-| **qBittorrent > Host** | IP ou nome do computador com qBittorrent |
+| **qBittorrent > URL** | Endereço completo, com `http://` e porta. Ex: `http://192.168.1.50:8080` |
 | **qBittorrent > API Key** | A chave que você copiou das opções do qBittorrent |
 
-Com isso, o guardian já começa a verificar torrents a cada **300 segundos (5 minutos)** usando as regras padrão. Clique em **Salvar Configurações**.
+> ⚠️ É a **URL completa**, não host e porta separados.
 
-Para ajustar o comportamento — extensões perigosas, remoção de stalled, prioridades, notificações — veja o **[Guia de Configuração](configuracao.md)**.
+> ⚠️ No Docker, `localhost` dentro do container aponta para o próprio container, não para sua máquina. Se o qBittorrent está em outro container ou na máquina host, use `host.docker.internal` (Windows/Mac) ou o IP real (Linux, ex: `http://172.17.0.1:8080`).
 
----
+Clique em **Salvar Configurações**. O guardião já começa a verificar torrents a cada **300 segundos (5 minutos)** usando as regras padrão.
 
-## Protegendo a Web UI com senha
-
-No arquivo `config.json`, adicione o bloco `webui`:
-
-```json
-{
-  "webui": {
-    "user": "admin",
-    "password": "uma-senha-forte"
-  }
-}
-```
-
-Se preferir, edite pela própria Web UI: a seção de autenticação aparece no final da página.
-
-Depois de salvar, o navegador vai pedir usuário e senha sempre que você acessar a página. Se você esquecer a senha, basta editar o `config.json` diretamente e remover os campos `user` e `password`.
-
-> ⚠️ Se ambos os campos (`user` e `password`) estiverem vazios, a autenticação é desativada e a página fica pública novamente.
+Para ajustar o comportamento — extensões perigosas, remoção de stalled, prioridades, notificações — veja o **[Guia de Uso](USAGE.md)**.
 
 ---
 
 ## O que esperar
 
-- Assim que você salvar a configuração, o guardian começa a trabalhar.
+- Assim que você salvar a configuração, o guardião começa a trabalhar.
 - A cada intervalo definido (padrão: 300 segundos), ele verifica todos os torrents ativos.
-- Se encontrar um `.exe`, `.scr`, `.bat` ou outro arquivo suspeito, o torrent é removido na hora.
+- Se encontrar um `.exe`, `.scr`, `.bat` ou outro arquivo suspeito, o torrent é removido na hora, com os arquivos.
 - Se você configurou Sonarr/Radarr, o programa também bloqueia o lançamento e busca uma versão alternativa.
-- Mensagens de log aparecem no terminal (ou no `docker logs`) mostrando cada ação: `"Arquivos perigosos: ['.exe'] — Removendo e Bloqueando"`.
+- As mensagens aparecem no `docker logs` (ou no terminal).
+
+> 💡 O log vem em `LOG_LEVEL=ERROR` por padrão, que é bem silencioso. Para ver cada ação, mude para `LOG_LEVEL=VERBOSE` no `docker-compose.yml`.
 
 ---
 
 ## Problemas comuns na instalação
 
-### ❌ "Connection refused" ou "Falha ao conectar no qBit"
+### ❌ O container sai logo depois de subir
+
+**Causa:** a pasta `config` pertence ao root e o container roda sem privilégio.
+
+**Solução:** `sudo chown -R 1000:1000 ./config` e suba de novo. O próprio log imprime esse comando.
+
+### ❌ Não sei a senha da Web UI
+
+**Solução:** rode `docker logs qbit-guardian` e procure o bloco de credenciais. Se o log já rolou demais, apague o valor de `webui.password` no `config.json` (deixando `""`) e reinicie o container — uma senha nova é gerada.
+
+### ❌ "Connection refused" ou "qBittorrent indisponivel"
 
 **Causa:** o qbit-guardian não consegue encontrar o qBittorrent.
 
 **Solução:**
 - Verifique se o qBittorrent está rodando.
-- Confira o **host** e a **porta** no `config.json`.
-- Se usa Docker, o `localhost` dentro do container não é o mesmo `localhost` da sua máquina. Use `host.docker.internal` (Windows/Mac) ou o IP real da máquina (Linux).
+- Confira a **URL** no painel: tem que ser completa, com `http://` e porta.
+- Se usa Docker, `localhost` dentro do container não é o mesmo da sua máquina. Use `host.docker.internal` (Windows/Mac) ou o IP real (Linux).
 
-### ❌ "HTTP 403" ou "Unauthorized"
+### ❌ "qBittorrent: HTTP 403"
 
 **Causa:** a API Key está errada ou vazia.
 
 **Solução:**
 - Vá em **Ferramentas** > **Opções** > **Web UI** no qBittorrent.
-- Confirme que a opção "Usar autenticação" está marcada (usuário: `admin`, defina uma senha).
-- Copie a **Chave da API** e cole exatamente como está — não adicione espaços.
+- Confirme que "Usar autenticação" está marcada.
+- Copie a **Chave da API** e cole exatamente — sem espaços.
+
+### ❌ `ModuleNotFoundError: No module named 'app'`
+
+**Causa:** na instalação manual, o programa foi iniciado como `python app/main.py`.
+
+**Solução:** use `python -m app.main`, a partir da pasta do projeto.
 
 ### ❌ A página não abre em http://...:5000
 
-**Causa:** porta 5000 bloqueada ou programa não iniciou.
-
 **Solução:**
-- Verifique se o container Docker está rodando: `docker ps | grep qbit-guardian`.
+- Verifique se o container está rodando: `docker ps | grep qbit-guardian`.
 - Na instalação manual, veja se o terminal mostra "Web UI em http://0.0.0.0:5000".
 - Confira se o firewall da máquina libera a porta 5000.
-- Tente acessar de outra máquina na mesma rede.
 
 ### ❌ Não quero usar Sonarr nem Radarr
 
-Deixe os campos de host do Sonarr e Radarr **em branco**. O guardian funciona perfeitamente sem eles — apenas não fará bloqueio e re-busca automática. Você ainda terá remoção de arquivos perigosos, stalled e sem seeds.
+Deixe os campos de **URL** do Sonarr e Radarr **em branco**. O guardião funciona perfeitamente sem eles — apenas não fará bloqueio e re-busca automática. Você ainda terá remoção de arquivos perigosos, stalled e sem seeds.
+
+---
+
+## Próximos passos
+
+- [Guia de Uso](USAGE.md) — todos os recursos, em detalhe.
+- [Guia de Instalação](INSTALL.md) — modo webhook, instalação manual avançada, solução de problemas.
+- [Perguntas Frequentes](FAQ.md) — dúvidas comuns.

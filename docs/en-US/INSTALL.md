@@ -1,61 +1,46 @@
-# 📦 Installation Guide
+# Installing qbit-guardian
 
-> How to install and run qbit-guardian on your server.
+> Step-by-step guide to installing qbit-guardian. Pick either Docker (recommended) or a manual install.
+
+## What you need before starting
+
+- A computer or server that stays on (qbit-guardian needs to run 24/7).
+- **qBittorrent** already installed and running, with the **Web UI enabled**.
+
+> **📘 qBittorrent Web UI:** The control page that lets you manage qBittorrent from a browser. To enable it, go to **Tools → Options → Web UI** in qBittorrent, tick **Use authentication** and set a username and password.
+
+- qBittorrent's **API Key**. To find it:
+  1. In qBittorrent: **Tools → Options → Web UI**.
+  2. Copy the value of the **API Key** field. You will paste it into qbit-guardian's configuration.
+
+> 💡 Keep that key somewhere safe. It is what the guardian uses to connect to qBittorrent.
+
+Pick your preferred install method below.
 
 ---
 
-## Before you start
+## Option 1: Docker install (recommended)
 
-You need:
+Docker packages the program with everything it needs. It works the same on any system (Windows, Mac, Linux) and is the simplest way to install.
 
-- A computer or home server that stays on (where your qBittorrent also runs, or on the same network).
-- **qBittorrent** already installed and running.
-- Your qBittorrent **API Key** — find it in qBittorrent: **Tools → Options → Web UI → API Key**.
+> **📘 Docker:** Think of it as a box holding the program and all its dependencies. You don't need to install Python, libraries or anything else — the box comes ready. It also makes updating and removing the program easier later.
 
-> 💡 **API Key** is a long random password that qBittorrent creates. Other programs use it to talk to qBittorrent securely. Copy it exactly as shown — no spaces, no extra characters.
+### Step 1: Create the configuration folder
 
-Choose one of the two installation methods below.
-
----
-
-## Option 1: Docker Compose (recommended)
-
-> 💡 **Docker** is a tool that packages programs with everything they need. Once packaged, they run the same way on any computer. You don't need to install Python or other dependencies manually.
-
-### Step 1: Create a configuration folder
-
-Pick a folder on your server for qbit-guardian's files. For example:
+Create a folder for qbit-guardian, for example `/home/user/docker/qbit-guardian/`. Inside it, create a `config` subfolder and fix its ownership:
 
 ```bash
-mkdir -p ~/docker/qbit-guardian
-cd ~/docker/qbit-guardian
+mkdir -p config
+sudo chown -R 1000:1000 config
 ```
 
-### Step 2: Create the config.json file
+> ⚠️ **The `chown` is mandatory.** For security, the container runs as an unprivileged user (UID 1000). Without the ownership fix it cannot write and exits immediately — printing that same command to the log.
 
-Create a file named `config.json` in that folder with this content:
+**You do not need to create any configuration file.** `config.json` is generated automatically on first run, with default values.
 
-```json
-{
-  "qbit": {
-    "host": "192.168.1.100",
-    "port": 8080,
-    "api_key": "PASTE-YOUR-API-KEY-HERE"
-  }
-}
-```
+### Step 2: Add it to docker-compose.yml
 
-> ⚠️ Replace `192.168.1.100` with the real IP address of the computer running qBittorrent.
->
-> **Docker users — important:** `localhost` inside a Docker container means the container itself, not your computer. If qBittorrent runs on the same machine, use:
-> - Windows/Mac: `host.docker.internal`
-> - Linux: your machine's real IP (e.g. `172.17.0.1` or `192.168.1.100`)
->
-> If qBittorrent is in another container, use the container name (e.g. `qbittorrent`).
-
-### Step 3: Add to your docker-compose.yml
-
-Open your existing `docker-compose.yml` file (where you already have qBittorrent, Sonarr, Radarr, etc.) and add this service:
+Open the `docker-compose.yml` where you already manage your other services (qBittorrent, Sonarr, Radarr) and add this block:
 
 ```yaml
 services:
@@ -65,180 +50,194 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./qbit-guardian/config.json:/app/config.json
+      - ./config:/app/config
+    environment:
+      - LOG_LEVEL=ERROR
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "cat", "/tmp/heartbeat"]
-      interval: 60s
-      timeout: 5s
-      retries: 3
 ```
 
-> 💡 **Healthcheck** is a built-in test that Docker runs to check if the program is still working. The guardian writes a heartbeat signal to a file every cycle. If that file gets too old, Docker marks the container as unhealthy — so you can see problems before they affect you.
+What each line does:
 
-### Step 4: Start the container
+| Line | Explanation |
+|------|-------------|
+| `image: ghcr.io/...` | Pulls the ready-to-use program image. |
+| `ports: "5000:5000"` | Makes the control page reachable on port 5000. |
+| `volumes: ./config:/app/config` | Connects your machine's `config` folder to the container's. Configuration survives updates. |
+| `environment: LOG_LEVEL=ERROR` | Log detail level. Options: `ERROR`, `INFO`, `VERBOSE`, `DEBUG`. |
+| `restart: unless-stopped` | If the container stops for any reason, Docker restarts it automatically. |
+
+> 💡 **Healthcheck:** no need to declare one. The image already ships a healthcheck that verifies the guardian loop is still alive, by comparing the heartbeat file's age against the configured interval.
+
+### Step 3: Start the container
+
+Open a terminal in the folder holding `docker-compose.yml` and run:
 
 ```bash
 docker compose up -d qbit-guardian
 ```
 
-Docker downloads the image and starts qbit-guardian in the background.
+The first time, Docker pulls the image (may take a few seconds). After that it starts instantly.
 
-### Step 5: Verify it's working
-
-Check if the container is running:
+To check everything is fine:
 
 ```bash
 docker ps | grep qbit-guardian
 ```
 
-Open the Web UI in your browser:
+If you see a line with `qbit-guardian` and status `Up`, the install worked.
+
+### Step 4: Get your access password
+
+The Web UI requires a login. On first boot the guardian **generates the password itself** and prints it to the log:
+
+```bash
+docker logs qbit-guardian
+```
+
+You will see a block like this:
 
 ```
-http://your-server-address:5000
+====================================================================
+  qbit-guardian — credenciais da Web UI geradas automaticamente
+====================================================================
+  usuario: admin
+  senha:   y7f3CKYTGvYeskf3vEQk
+====================================================================
 ```
 
-If you see the configuration dashboard, the installation is complete! 🎉
+> ⚠️ **That password is shown only once**, at the moment it is created. Copy and store it now.
+
+You can change it later: in the panel, click the **user icon** (top-right corner) and provide the current password plus the new one.
+
+> **Forgot the password?** Open `config.json` in the `config` folder, clear the `webui.password` field (leaving `""`) and restart the container. A new password is generated and announced in the log.
+
+### Updating qbit-guardian
+
+When a new version ships, update with:
+
+```bash
+docker compose pull qbit-guardian
+docker compose up -d qbit-guardian
+```
+
+Your configuration (the `config` folder) is preserved — only the program is updated.
 
 ---
 
-## Option 2: Manual installation (Python)
+## Option 2: Manual install (no Docker)
 
-Use this if you don't use Docker or prefer to run programs directly.
+Use this if you don't use Docker or prefer running the program directly. You will need **Python 3.10 or newer**.
 
 ### Step 1: Download the project
 
 ```bash
-git clone https://forgejo.home.arpa/Humberto/qbit-guardian.git
+git clone https://github.com/iHumberto/qbit-guardian.git
 cd qbit-guardian
 ```
 
-### Step 2: Set up a Python virtual environment
+If you don't have `git`, you can download the project as a `.zip` from the browser and extract it.
 
-> 💡 A **virtual environment** (or `venv`) is an isolated folder where Python installs libraries just for this project. It keeps things tidy — no conflicts with other programs on your computer. Think of it as a separate drawer for this project's tools.
+### Step 2: Prepare the Python environment
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-On Windows, use `.venv\Scripts\activate` instead.
-
-### Step 3: Install dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-This installs everything qbit-guardian needs: Flask (for the web page), requests (to talk to qBittorrent), and their supporting libraries.
+> **📘 Virtual environment (venv):** An isolated folder where Python installs libraries for this project only. Like a separate drawer — it doesn't clutter the rest of the system.
 
-### Step 4: Configure the program
-
-Edit the `config.json` file. At minimum, fill in your qBittorrent details:
-
-```json
-{
-  "qbit": {
-    "host": "192.168.1.100",
-    "port": 8080,
-    "api_key": "PASTE-YOUR-API-KEY-HERE"
-  }
-}
-```
-
-### Step 5: Run the program
+### Step 3: Run the program
 
 ```bash
-python app/app.py
+python -m app.main
 ```
 
-You should see output like this:
+> ⚠️ Use `python -m app.main`, with the `-m`. Running `python app/main.py` fails with `ModuleNotFoundError: No module named 'app'`, because Python cannot find the project folder.
+
+**No configuration file needs to be created beforehand.** `config.json` is generated at the project root on first run.
+
+The terminal will show messages like:
 
 ```
+====================================================================
+  qbit-guardian — credenciais da Web UI geradas automaticamente
+====================================================================
+  usuario: admin
+  senha:   y7f3CKYTGvYeskf3vEQk
+====================================================================
+
 qbit-guardian iniciando...
 Conectado ao qBittorrent v5.0.0
 Guardian iniciado. Intervalo: 300s
 Web UI em http://0.0.0.0:5000
 ```
 
-The program runs in the foreground — leave the terminal open. Press `Ctrl+C` to stop it.
+The program runs in the foreground. Press `Ctrl+C` to stop.
 
-> 💡 To keep it running after you close the terminal, use a tool like `tmux`, `screen`, or create a systemd service. These are well-documented online and outside the scope of this guide.
+> 💡 To keep it running after closing the terminal, use tools like `tmux`, `screen`, or create a systemd service. Those topics are well documented online.
 
-### Step 6: Verify it's working
+### Changing where config.json lives
 
-Open your browser and go to:
-
-```
-http://localhost:5000
-```
-
-If you see the configuration dashboard, everything is working!
-
----
-
-## After installation
-
-Both methods lead to the same result. Now you should:
-
-1. Open the Web UI at `http://your-server-address:5000`.
-2. Fill in the remaining configuration (Sonarr, Radarr, notifications, etc.) if you want.
-3. **[Optional]** Protect the dashboard with a password — see the [Usage Guide](USAGE.md#web-ui-authentication).
-
----
-
-## Checking if it's working
-
-Here is how to make sure qbit-guardian is actually protecting your torrents:
-
-### Health check (Docker)
+By default, a manual install keeps the file at the project root. To choose another location, use the `CONFIG_PATH` variable:
 
 ```bash
-docker ps | grep qbit-guardian
+CONFIG_PATH=/etc/qbit-guardian/config.json python -m app.main
 ```
-
-Look for `(healthy)` in the STATUS column. Docker automatically monitors the heartbeat and shows the health here.
-
-### Logs (Docker)
-
-```bash
-docker logs qbit-guardian
-```
-
-You should see messages like:
-
-```
-Conectado ao qBittorrent v5.0.0
-Guardian iniciado. Intervalo: 300s
-```
-
-When the guardian finds a bad torrent, you'll see lines like:
-
-```
-[Bad.Movie.2024] Arquivos perigosos: ['.exe'] — Removendo e Bloqueando
-```
-
-### Logs (Manual install)
-
-The output appears directly in your terminal. Look for the same messages described above.
-
-### Test it yourself
-
-Want to be absolutely sure? Add a harmless test torrent that contains a `.txt` file renamed to `.exe`. The guardian should detect it as dangerous and remove it within a few minutes (or instantly in webhook mode).
-
-> ⚠️ Don't test with real dangerous files. Create a safe dummy file — rename a `.txt` to `.exe` and create a torrent from it.
 
 ---
 
-## Setting Up Webhook Mode (real-time)
+## Verifying it works
 
-The webhook lets qBittorrent notify the guardian the instant a torrent is added — no waiting for the next check cycle. It's the fastest and most secure option.
+### Test 1: Open the control page
 
-> ⚠️ The webhook script is **non-blocking**: it won't freeze qBittorrent. The main script returns in under 4 milliseconds — qBittorrent keeps running while the guardian checks the torrent in the background.
+Open a browser and go to `http://your-server-address:5000`. You will land on the **login page**. Sign in with `admin` and the password from the log.
+
+### Test 2: Check the healthcheck
+
+This endpoint is public — no password needed:
+
+```bash
+curl http://your-server-address:5000/api/health
+```
+
+The response should be:
+
+```json
+{"status": "ok"}
+```
+
+### Test 3: Look at the logs
+
+- **Docker:** `docker logs qbit-guardian`
+- **Manual:** messages appear directly in the terminal.
+
+You should see something like `Conectado ao qBittorrent v...` — that means the connection to qBittorrent is working.
+
+> 💡 With `LOG_LEVEL=ERROR` (the default) the log is very quiet. To see more, use `LOG_LEVEL=INFO` or `LOG_LEVEL=VERBOSE`.
+
+### Test 4: Force a check
+
+On the control page, click **Force check**. Or from the command line, with your credentials:
+
+```bash
+curl -X POST http://your-server-address:5000/api/trigger \
+  -u admin:your-password
+```
+
+If the response is `{"status": "ok", "checked": ..., "new": ..., "stalled_removed": ...}`, everything works.
+
+---
+
+## Setting up the Webhook (real time)
+
+The webhook lets qBittorrent notify the guardian the moment a torrent is added — no waiting for the next check cycle. It is the fastest option.
+
+> ⚠️ The webhook script is **non-blocking**: it does not stall qBittorrent. The main script returns in under 4 milliseconds — qBittorrent keeps working while the check happens in the background.
 
 ### Step 1: Mount the script in the qBittorrent container
 
-The `qbit-guardian-hook.sh` script lives in the `scripts/` folder of the qbit-guardian repository. Add this volume to your `qbittorrent` service in `docker-compose.yml`:
+The `qbit-guardian-hook.sh` script lives in the repository's `scripts/` folder. Add this volume to the `qbittorrent` service in your `docker-compose.yml`:
 
 ```yaml
 services:
@@ -248,9 +247,30 @@ services:
       - ./qbit-guardian/scripts/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh:ro
 ```
 
-> 💡 The `:ro` at the end means "read-only" — the container can run the script but cannot change it.
+> 💡 The trailing `:ro` means "read-only" — the container can run the script but not modify it.
 
-### Step 2: Configure qBittorrent
+### Step 2: Give the script your credentials
+
+`/api/trigger` requires authentication. Without credentials the guardian answers `401` and the webhook won't work. Add these variables to the qBittorrent service:
+
+```yaml
+services:
+  qbittorrent:
+    environment:
+      - QBIT_GUARDIAN_URL=http://qbit-guardian:5000
+      - QBIT_GUARDIAN_USER=admin
+      - QBIT_GUARDIAN_PASS=your-web-ui-password
+```
+
+| Variable | What it does |
+|----------|--------------|
+| `QBIT_GUARDIAN_URL` | Where the guardian is. The default `http://qbit-guardian:5000` works if both containers share a Docker network. For IP access: `http://192.168.1.100:5000`. |
+| `QBIT_GUARDIAN_USER` | Web UI username. Default: `admin`. |
+| `QBIT_GUARDIAN_PASS` | Web UI password. **Required.** |
+
+> 💡 If you change the password in the panel, remember to update `QBIT_GUARDIAN_PASS` here too.
+
+### Step 3: Configure qBittorrent
 
 1. In qBittorrent, go to **Tools → Options → Downloads**.
 2. Under **Run external program on torrent added**, paste:
@@ -261,68 +281,45 @@ services:
 
 3. Click **Save**.
 
-### Step 3: Set the environment variable (if needed)
-
-The script uses the `QBIT_GUARDIAN_URL` variable to know where the guardian is. The default value is `http://qbit-guardian:5000`, which works when both containers are on the same Docker network.
-
-If you need a different address (e.g., your server's IP), add the variable to the qBittorrent service:
-
-```yaml
-services:
-  qbittorrent:
-    environment:
-      - QBIT_GUARDIAN_URL=http://192.168.1.100:5000
-```
-
 ### Step 4: Set the interval to zero
 
-In the qbit-guardian Web UI, set **Check Interval** to `0`. This disables polling mode and enables webhook mode.
+On the qbit-guardian control page, set **Check interval** to `0`. That turns off polling mode and turns on webhook mode.
 
-That's it. From now on, every new torrent is checked instantly.
+Done. From now on, every torrent added is checked instantly.
 
-### How the script prevents freezes
+### How the script avoids stalls
 
-The script is designed to be safe in every scenario:
-
-- **10-second sleep:** prevents the guardian from checking a torrent before qBittorrent has finished registering it (race condition).
-- **Curl timeouts:** connection timeout is 5 seconds, total operation timeout is 10 seconds. If the guardian doesn't respond, the script won't hang.
-- **Background execution:** the main script finishes in ~4 ms. qBittorrent doesn't wait for the check to complete — everything happens in a separate process.
-- **Automatic retry:** if the first call fails, the script tries again after 5 seconds.
-
----
-
-## Updating
-
-### Docker
-
-```bash
-docker compose pull qbit-guardian
-docker compose up -d qbit-guardian
-```
-
-### Manual
-
-```bash
-cd qbit-guardian
-git pull
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Then restart the program.
+- **10-second sleep:** prevents the guardian from checking the torrent before qBittorrent has registered it (race condition).
+- **curl timeouts:** 5 seconds to connect, 10 seconds total. If the guardian doesn't answer, the script doesn't hang.
+- **Background execution:** the main script finishes in ~4 ms. qBittorrent doesn't wait for the check.
+- **Extra attempt:** if the first call fails, the script tries again after 5 seconds.
+- **Failures are reported:** if both attempts fail, the script writes to qBittorrent's stderr instead of giving up silently. If the cause is a missing password, it says so.
 
 ---
 
-## Uninstalling
+## Next steps
 
-### Docker
+Once installed and running:
 
-```bash
-docker compose down qbit-guardian
-```
+1. Open `http://your-server:5000`, sign in with the password from the log and review the settings.
+2. Change the password via the **user icon** in the top-right corner.
+3. If you want, enable [notifications](USAGE.md#notifications).
+4. Read the [Usage Guide](USAGE.md) to understand every feature.
 
-Delete the folder with `config.json` if you no longer need it.
+---
 
-### Manual
+## Installation problems?
 
-Press `Ctrl+C` to stop, then delete the `qbit-guardian` folder.
+| Problem | Solution |
+|---------|----------|
+| Container exits right after starting, with a permission message | The `config` folder belongs to root. Run `sudo chown -R 1000:1000 ./config` and start again. The log prints that exact command. |
+| "Connection refused" or "qBittorrent indisponivel" | Check that qBittorrent is running and the URL is correct. In Docker, `localhost` inside the container is NOT your machine — use `host.docker.internal` (Windows/Mac) or the real IP (Linux). |
+| "qBittorrent: HTTP 403" | The API Key is wrong. Check it under **Tools → Options → Web UI** in qBittorrent and paste it exactly. |
+| I don't know the Web UI password | Run `docker logs qbit-guardian` and look for the credentials block. If the log has scrolled too far, clear `webui.password` in `config.json` and restart — a new password is generated. |
+| Login says "too many attempts" | That's 5 wrong attempts in 5 minutes. Wait a few minutes — the block applies even to the correct password. |
+| `ModuleNotFoundError: No module named 'app'` | On a manual install, use `python -m app.main` (with `-m`), from the project folder. |
+| The page doesn't open on port 5000 | Check the container is running (`docker ps`). On a manual install, see whether the terminal shows "Web UI em http://...". Check that your firewall allows port 5000. |
+| Port 5000 is already in use | Change the mapping in docker-compose (e.g. `"5001:5000"`). On a manual install the port is fixed at 5000 — use a reverse proxy if you need another. |
+| The webhook stopped working | `/api/trigger` requires authentication. Check `QBIT_GUARDIAN_PASS` on the qBittorrent service; the script reports the problem on stderr. |
+
+If the problem persists, check the [FAQ](FAQ.md).

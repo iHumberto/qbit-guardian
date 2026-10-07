@@ -4398,3 +4398,271 @@ class TestChaveDeSessao:
         assert chave != senha_hash
         assert senha_hash not in chave
         assert cfg["webui"]["password"] not in chave
+
+
+# ── Documentacao de usuario (docs/) ────────────────────────────────────
+
+DOCS_DIR = os.path.join(REPO_ROOT, "docs")
+
+# pt-BR e en-US tem o mesmo conteudo com nomes diferentes no guia inicial.
+PAGINAS = [
+    ("INSTALL.md", "INSTALL.md"),
+    ("USAGE.md", "USAGE.md"),
+    ("FAQ.md", "FAQ.md"),
+    ("primeiros-passos.md", "getting-started.md"),
+]
+
+
+def _docs(*nomes):
+    """Caminhos de todos os arquivos de docs/, ou so os nomeados."""
+    caminhos = []
+    for idioma, indice in (("pt-BR", 0), ("en-US", 1)):
+        for par in PAGINAS:
+            if nomes and par[indice] not in nomes and par[0] not in nomes:
+                continue
+            caminhos.append(os.path.join(DOCS_DIR, idioma, par[indice]))
+    return caminhos
+
+
+def _ler_doc(caminho):
+    with open(caminho, encoding="utf-8") as f:
+        return f.read()
+
+
+TODOS_OS_DOCS = _docs()
+
+
+class TestDocsEstrutura:
+    """Os dois idiomas cobrem as mesmas paginas."""
+
+    @pytest.mark.parametrize("caminho", TODOS_OS_DOCS)
+    def test_pagina_existe(self, caminho):
+        assert os.path.isfile(caminho), f"faltando: {caminho}"
+
+    def test_nenhuma_pagina_orfa(self):
+        """Arquivo solto em docs/ que a lista nao conhece passaria sem teste."""
+        esperados = {os.path.abspath(c) for c in TODOS_OS_DOCS}
+        encontrados = set()
+        for raiz, _, arquivos in os.walk(DOCS_DIR):
+            for nome in arquivos:
+                if nome.endswith(".md"):
+                    encontrados.add(os.path.abspath(os.path.join(raiz, nome)))
+        assert encontrados == esperados, \
+            f"fora da lista: {sorted(encontrados - esperados)}"
+
+    @pytest.mark.parametrize("caminho", TODOS_OS_DOCS)
+    def test_links_internos_resolvem(self, caminho):
+        """Link para arquivo inexistente e beco sem saida para o usuario."""
+        pasta = os.path.dirname(caminho)
+        alvos = re.findall(r"\]\(([A-Za-z0-9_.-]+\.md)(?:#[^)]*)?\)", _ler_doc(caminho))
+        quebrados = [a for a in alvos if not os.path.isfile(os.path.join(pasta, a))]
+        assert quebrados == [], f"{os.path.basename(caminho)}: {quebrados}"
+
+
+class TestDocsContraOCodigo:
+    """Instrucoes dos docs conferidas contra o que o codigo de fato faz.
+
+    O `docs/` ficou quatro releases atras sem ninguem perceber: ensinava
+    `qbit.host`/`port` (que hoje levanta KeyError), `python app/app.py` (arquivo
+    que nunca existiu) e um `config.json.example` inexistente. Instalar
+    seguindo a documentacao era impossivel.
+    """
+
+    @pytest.mark.parametrize("caminho", TODOS_OS_DOCS)
+    @pytest.mark.parametrize("chave", ["qbit.host", "qbit.port", '"host"', '"port"'])
+    def test_nao_ensina_schema_antigo(self, caminho, chave):
+        """A conexao com o qBit e `qbit.url`, uma URL completa."""
+        assert chave not in _ler_doc(caminho), \
+            f"{os.path.basename(caminho)} ainda cita {chave}"
+
+    @pytest.mark.parametrize("caminho", TODOS_OS_DOCS)
+    @pytest.mark.parametrize("inexistente", ["app/app.py", "config.json.example",
+                                             "configuracao.md"])
+    def test_nao_cita_arquivo_inexistente(self, caminho, inexistente):
+        texto = _ler_doc(caminho)
+        if inexistente not in texto:
+            return
+        # So vale como erro se nao estiver num aviso de "isto falha".
+        assert os.path.exists(os.path.join(REPO_ROOT, inexistente)), \
+            f"{os.path.basename(caminho)} cita {inexistente}, que nao existe"
+
+    def test_entrypoint_manual_e_o_que_funciona(self):
+        """`python app/main.py` levanta ModuleNotFoundError."""
+        for caminho in _docs("INSTALL.md", "primeiros-passos.md", "getting-started.md"):
+            texto = _ler_doc(caminho)
+            assert "python -m app.main" in texto, os.path.basename(caminho)
+
+    @pytest.mark.parametrize("caminho", TODOS_OS_DOCS)
+    def test_volume_bate_com_o_config_path_da_imagem(self, caminho):
+        """O Dockerfile fixa CONFIG_PATH=/app/config/config.json.
+
+        Montar em `/app/config.json` faz o arquivo do usuario ser ignorado — e
+        a config viver dentro do container, perdida a cada atualizacao.
+        """
+        texto = _ler_doc(caminho)
+        assert ":/app/config.json" not in texto, \
+            f"{os.path.basename(caminho)}: volume no caminho errado"
+
+    def test_docker_compose_dos_docs_bate_com_o_do_repositorio(self):
+        with open(os.path.join(REPO_ROOT, "docker-compose.yaml"), encoding="utf-8") as f:
+            compose = f.read()
+        assert "./config:/app/config" in compose
+        for caminho in _docs("INSTALL.md", "primeiros-passos.md", "getting-started.md"):
+            assert "./config:/app/config" in _ler_doc(caminho), os.path.basename(caminho)
+
+    @pytest.mark.parametrize("caminho", TODOS_OS_DOCS)
+    def test_nao_ensina_o_healthcheck_antigo(self, caminho):
+        """`cat /tmp/heartbeat` so verificava a existencia do arquivo.
+
+        Como o heartbeat nunca e apagado, um loop morto reportava `healthy`
+        para sempre. A imagem traz o healthcheck correto desde a v2.0.5.
+        """
+        assert "cat\", \"/tmp/heartbeat" not in _ler_doc(caminho)
+        assert 'cat /tmp/heartbeat' not in _ler_doc(caminho)
+
+    @pytest.mark.parametrize("caminho", TODOS_OS_DOCS)
+    def test_repositorio_citado_e_alcancavel_de_fora(self, caminho):
+        """`forgejo.home.arpa` so existe na rede do mantenedor."""
+        assert "forgejo.home.arpa" not in _ler_doc(caminho)
+
+    def test_uid_do_chown_bate_com_o_dockerfile(self):
+        with open(os.path.join(REPO_ROOT, "Dockerfile"), encoding="utf-8") as f:
+            dockerfile = f.read()
+        uid = re.search(r"--uid (\d+)", dockerfile).group(1)
+        for caminho in _docs("INSTALL.md", "primeiros-passos.md", "getting-started.md", "FAQ.md"):
+            texto = _ler_doc(caminho)
+            assert f"chown -R {uid}:{uid}" in texto, \
+                f"{os.path.basename(caminho)}: chown com UID diferente do Dockerfile"
+
+    @staticmethod
+    def _variaveis_lidas():
+        """Variaveis de ambiente que o codigo DE FATO consulta.
+
+        Busca pelo ponto de leitura, nao por substring: `TRANSPORT_ERRORS` no
+        guardian contem "PORT" e fazia um `PORT=` inventado passar no teste.
+        """
+        lidas = set()
+        for modulo in ("logger.py", "guardian.py", "web.py", "healthcheck.py"):
+            with open(os.path.join(REPO_ROOT, "app", modulo), encoding="utf-8") as f:
+                lidas |= set(re.findall(r"os\.environ\.get\(\s*[\"']([A-Z0-9_]+)", f.read()))
+        with open(os.path.join(REPO_ROOT, "scripts", "qbit-guardian-hook.sh"),
+                  encoding="utf-8") as f:
+            lidas |= set(re.findall(r"\$\{([A-Z0-9_]+)", f.read()))
+        return lidas
+
+    @pytest.mark.parametrize("caminho", TODOS_OS_DOCS)
+    def test_variaveis_de_ambiente_citadas_existem(self, caminho):
+        """Doc que ensina uma variavel que o codigo nao le engana o usuario.
+
+        `PORT` ja foi documentada assim por versoes, e nunca foi lida.
+        """
+        lidas = self._variaveis_lidas()
+        texto = _ler_doc(caminho)
+        citadas = set(re.findall(r"\b([A-Z][A-Z0-9_]{2,})=", texto))
+        # Nomes de exemplos de outros programas, nao do guardian.
+        citadas -= {"PUID", "PGID", "TZ"}
+        faltando = citadas - lidas
+        assert not faltando, \
+            f"{os.path.basename(caminho)}: {sorted(faltando)} nao e lida pelo codigo"
+
+    def test_o_extrator_de_variaveis_funciona(self):
+        """Contraprova: se este conjunto vier vazio, o teste acima nao testa nada."""
+        lidas = self._variaveis_lidas()
+        assert {"LOG_LEVEL", "CONFIG_PATH", "QBIT_GUARDIAN_URL",
+                "QBIT_GUARDIAN_USER", "QBIT_GUARDIAN_PASS"} <= lidas
+        assert "PORT" not in lidas
+
+    @pytest.mark.parametrize("caminho", TODOS_OS_DOCS)
+    def test_endpoints_citados_existem(self, caminho):
+        import app.web as w
+        rotas = {str(r.rule) for r in w.app.url_map.iter_rules()}
+        citados = set(re.findall(r"(/api/[a-z]+)", _ler_doc(caminho)))
+        for rota in citados:
+            assert rota in rotas, f"{os.path.basename(caminho)}: {rota} nao existe"
+
+
+class TestDocsValoresPadrao:
+    """Listas e escalas documentadas conferem com os defaults do codigo."""
+
+    def _default(self, chave):
+        import tempfile as _tmp
+        antigo, g._config = g.CONFIG_PATH, None
+        pasta = _tmp.mkdtemp()
+        g.CONFIG_PATH = os.path.join(pasta, "config.json")
+        try:
+            return g.load_config()["guardian"][chave]
+        finally:
+            g.CONFIG_PATH = antigo
+            g._config = None
+
+    @pytest.mark.parametrize("caminho", _docs("USAGE.md", "FAQ.md"))
+    def test_extensoes_perigosas_batem(self, caminho):
+        texto = _ler_doc(caminho)
+        if "`.exe`" not in texto:
+            return
+        for ext in self._default("dangerous_extensions"):
+            assert f"`{ext}`" in texto, f"{os.path.basename(caminho)}: falta {ext}"
+
+    @pytest.mark.parametrize("caminho", _docs("USAGE.md"))
+    def test_extensoes_de_midia_batem(self, caminho):
+        texto = _ler_doc(caminho)
+        for ext in self._default("valid_media_extensions"):
+            assert f"`{ext}`" in texto, f"{os.path.basename(caminho)}: falta {ext}"
+
+    @pytest.mark.parametrize("caminho", _docs("USAGE.md"))
+    def test_escala_de_prioridade_bate(self, caminho):
+        """A escala do qBittorrent nao e continua: 2 a 5 devolvem HTTP 400."""
+        texto = _ler_doc(caminho)
+        for valido in sorted(g.VALID_FILE_PRIORITIES - {-1}):
+            assert f"`{valido}`" in texto, f"falta prioridade {valido}"
+        assert "`2`, `3`, `4`" in texto or "`2`, `3`, `4` ou `5`" in texto or \
+               "2`, `3`, `4` or `5" in texto, "docs precisam avisar sobre 2-5"
+
+    @pytest.mark.parametrize("caminho", _docs("USAGE.md"))
+    def test_variaveis_de_notificacao_batem(self, caminho):
+        texto = _ler_doc(caminho)
+        for evento, variaveis in g.NOTIFICATION_VARIABLES.items():
+            for v in variaveis:
+                assert "{{%s}}" % v in texto, \
+                    f"{os.path.basename(caminho)}: falta {{{{{v}}}}} ({evento})"
+
+    @pytest.mark.parametrize("caminho", _docs("USAGE.md"))
+    def test_nao_inventa_variavel_de_notificacao(self, caminho):
+        declaradas = {v for vs in g.NOTIFICATION_VARIABLES.values() for v in vs}
+        citadas = set(re.findall(r"\{\{(\w+)\}\}", _ler_doc(caminho)))
+        assert citadas <= declaradas, f"variavel inexistente: {sorted(citadas - declaradas)}"
+
+    @pytest.mark.parametrize("caminho", _docs("USAGE.md"))
+    def test_intervalo_padrao_bate(self, caminho):
+        """Ancorado na linha que anuncia o padrao.
+
+        Procurar o numero solto no arquivo inteiro nao prova nada: "300"
+        aparece em varios exemplos, entao trocar o padrao para 600 passava.
+        """
+        padrao = self._default("check_interval_seconds")
+        linha = re.search(r"(?m)^-?\s*\*\*(?:Padr[ãa]o|Default):\*\*\s*(\d+)",
+                          _ler_doc(caminho))
+        assert linha, f"{os.path.basename(caminho)}: sem linha de padrao"
+        assert int(linha.group(1)) == padrao
+
+    @pytest.mark.parametrize("caminho", _docs("USAGE.md"))
+    def test_retry_padrao_bate(self, caminho):
+        texto = _ler_doc(caminho)
+        achado = re.search(r"retry_interval_seconds`?\s*\((?:padr[ãa]o|default):\s*(\d+)",
+                           texto)
+        assert achado, f"{os.path.basename(caminho)}: sem o padrao do retry"
+        assert int(achado.group(1)) == g.DEFAULT_RETRY_INTERVAL
+
+    @pytest.mark.parametrize("caminho", _docs("USAGE.md", "FAQ.md"))
+    def test_tamanho_minimo_de_senha_bate(self, caminho):
+        texto = _ler_doc(caminho)
+        if "8 caracteres" in texto or "8 characters" in texto:
+            assert a.TAMANHO_MINIMO_SENHA == 8
+
+    @pytest.mark.parametrize("caminho", _docs("USAGE.md", "FAQ.md"))
+    def test_estados_up_documentados_batem(self, caminho):
+        texto = _ler_doc(caminho)
+        if "stalledUP" not in texto:
+            return
+        for estado in ("uploading", "stalledUP", "pausedUP", "checkingUP", "queuedUP"):
+            assert f"`{estado}`" in texto, f"{os.path.basename(caminho)}: falta {estado}"

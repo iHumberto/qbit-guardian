@@ -1,306 +1,333 @@
-# 🛡️ Usage Guide
+# qbit-guardian Usage Guide
 
-> How to set up and use qbit-guardian to keep your torrents safe.
+> Learn how to use qbit-guardian day to day: configuring it, understanding the operating modes and reading what it is doing.
 
----
+## What it is
 
-## What is qbit-guardian?
-
-qbit-guardian watches the torrents in your qBittorrent and removes the bad ones — automatically. No need to check each file yourself.
-
-It protects you in three ways:
-
-- **Dangerous files** — torrents containing `.exe`, `.scr`, `.bat`, and other executable or script files are removed right away. These files can hide viruses.
-- **Stalled downloads** — torrents that have been stuck for too long (no progress) are cleaned up.
-- **No seeds** — if nobody is sharing the complete file anymore, the torrent is deleted because you'll never finish it.
-
-> 💡 **Seed** (or seeder) is someone who already has the whole file and keeps sharing it. Zero seeds = no way to finish the download.
-
-If you use **Sonarr** (TV series) or **Radarr** (movies), qbit-guardian also blocks the bad release and tells Sonarr/Radarr to search for a better copy. Your library keeps growing without you lifting a finger.
+qbit-guardian is an automatic watchdog for your torrents. Once installed and configured it works on its own in the background. You only need to visit the configuration page now and then to adjust something.
 
 ---
 
-## Accessing the Web UI
+## Signing in
 
-Once qbit-guardian is running, open your browser and go to:
+Open a browser and type the address of the server running qbit-guardian, always on port **5000**:
 
 ```
 http://your-server-address:5000
 ```
 
-Examples:
+Practical examples:
 
-| Your setup                  | Address to type               |
-|-----------------------------|-------------------------------|
-| Same computer               | `http://localhost:5000`       |
-| Another computer on your network | `http://192.168.1.100:5000`  |
+- **Same computer:** `http://localhost:5000`
+- **Another computer on the network:** `http://192.168.1.100:5000`
+- **Server with a network name:** `http://my-server:5000`
 
-You will see a dark dashboard with two columns: **external services** (qBittorrent, Sonarr, Radarr, Notifications) on the left and **Guardian** on the right, with a centered **Save Configuration** button below.
+You land on the **login page**. The default username is `admin`, and the password was generated on first run and printed to the container log — see [First access](#first-access-and-changing-your-password).
+
+Once signed in you see the panel in **three columns**:
+
+| Column | What's in it |
+|--------|--------------|
+| **Left** | qBittorrent, Radarr and Sonarr — the external services |
+| **Center** | Guardian — interval, extensions, removal rules and priorities |
+| **Right** | Notifications — Apprise and each event's message |
+
+The **Save Configuration** button sits centered below the three columns.
 
 ### Language
 
-Every page of the Web UI has a language dropdown in the top-right corner:
+There is a language selector in the top-right corner:
 
-- 🇧🇷 **PT-BR (default):** The interface opens in Brazilian Portuguese the first time you visit.
-- 🇺🇸 **EN-US:** Switches the entire interface to American English.
+- 🇧🇷 **PT-BR (default):** the interface opens in Brazilian Portuguese the first time.
+- 🇺🇸 **EN-US:** switches the whole interface to American English.
 
-Switching is instant — no page reload needed. Your browser remembers your choice: switch to English, close the page, and when you come back it opens in English automatically.
+The switch is instant — no reload needed. The browser remembers your choice.
 
-> 💡 The selector works offline. All translations are built right into the application — no external translation services are used. Your language preference is saved in your browser (localStorage).
+> 💡 The selector works offline. All translations ship inside the application — no external service is used. Your preference is saved in the browser itself (localStorage).
 
 ---
 
-## Configuration
+## First access and changing your password
 
-### Required: qBittorrent connection
+The Web UI **always** requires a login. There is no sign-up screen: on first run the guardian generates the password itself and prints it to the log.
 
-These two fields are the only ones you **must** fill in for qbit-guardian to work:
-
-| Field                | What to enter                                                                 |
-|----------------------|-------------------------------------------------------------------------------|
-| **URL**              | The full address where qBittorrent is running (e.g. `http://192.168.1.50:8080`) |
-| **API Key**          | The long random password from qBittorrent's settings                          |
-
-> 💡 **API Key** is a secret code that qBittorrent creates so other programs (like qbit-guardian) can talk to it safely. Find yours in qBittorrent: **Tools → Options → Web UI → API Key**. Copy it exactly — no extra spaces.
-
-The URL defaults to `http://localhost:8080`, which is qBittorrent's standard port on your local machine. Change it only if qBittorrent runs on a different machine or port.
-
-Click **Save Configuration** and the guardian starts watching. By default it checks every 5 minutes (300 seconds).
-
-### Optional: Sonarr and Radarr
-
-If you use Sonarr (TV series) or Radarr (movies), fill in their URL and API key. This lets qbit-guardian automatically block bad releases and trigger a new search.
-
-If you don't use Sonarr or Radarr, just leave those fields blank. The guardian still removes dangerous files, stalled torrents, and seedless torrents — only the blocklist and re-search steps are skipped.
-
-### Optional: Apprise notifications
-
-qbit-guardian can send you alerts when it takes action. It uses **Apprise**, a tool that connects to over 100 notification services: Telegram, Discord, Slack, Pushover, email, and many more.
-
-1. Go to the [Apprise documentation](https://github.com/caronc/apprise) and build a notification URL for your service.
-2. Paste that URL into the **Apprise URL** field.
-3. Save the configuration.
-
-Examples of Apprise URLs:
-
-| Service    | URL format                                               |
-|------------|----------------------------------------------------------|
-| Telegram   | `tgram://BOT_TOKEN/CHAT_ID`                              |
-| Discord    | `discord://WEBHOOK_ID/WEBHOOK_TOKEN`                      |
-| Slack      | `slack://TOKENA/TOKENB/TOKENC/CHANNEL`                   |
-| Gotify     | `gotify://hostname/token`                                |
-
-Events that trigger a notification:
-
-- ⚠️ **Dangerous file removed** — torrent deleted because it contained `.exe`, `.scr`, etc.
-- 🗑️ **Stalled torrent removed** — torrent stuck for longer than your time limit.
-- ⚡ **Torrent optimized** — media files were prioritized, junk files were lowered or skipped.
-
-> 💡 **Apprise** is like a universal adapter for notifications. Instead of learning how to send messages to each service, you build one URL and Apprise handles the rest.
-
-### Connecting to a self-signed Apprise (homelab)
-
-If your Apprise server uses a self-signed SSL certificate (common in home networks with addresses like `apprise.home.arpa` or `apprise.local`), the guardian is already configured to work without SSL verification.
-
-> **📘 Self-signed SSL certificate:** A security certificate you create yourself, without paying for a commercial one. Your browser and other programs don't trust it automatically.
-
-qbit-guardian **always** disables SSL verification for Apprise calls (`verify=False`), since this project is designed for homelab/local networks where self-signed certificates are normal. No additional configuration is needed.
-
-Just set the Apprise URL in `config.json`:
-
-```json
-{
-  "notifications": {
-    "apprise_url": "https://apprise.home.arpa/notify/guardian"
-  }
-}
+```bash
+docker logs qbit-guardian
 ```
 
+```
+====================================================================
+  qbit-guardian — credenciais da Web UI geradas automaticamente
+====================================================================
+  usuario: admin
+  senha:   y7f3CKYTGvYeskf3vEQk
+====================================================================
+```
+
+> ⚠️ That password is shown **only once**. Copy and store it.
+
+### Changing username or password
+
+In the panel, click the **user icon** in the top-right corner. A popup opens with three fields:
+
+| Field | When to fill it in |
+|-------|-------------------|
+| **Username** | If you want to change the username |
+| **Current password** | **Always** — it proves it's you |
+| **New password** | Only if you want to change the password (minimum 8 characters) |
+
+Want to change only the name? Fill in username + current password and leave the new password blank. Only the password? Fill in current + new password.
+
+After saving you are returned to the login page — the change ends every open session, including yours.
+
+> **📘 Why the current password is always required:** without it, anyone who found a browser of yours already signed in could take over the account in two clicks.
+
+### Signing out
+
+The same popup has a **Sign out** button, on the left side.
+
+### How the password is stored
+
+As a **PBKDF2-SHA256 hash** with its own salt. It is never kept in plain text in `config.json` and never returned by the API. Even someone reading the file cannot recover the password.
+
+### I forgot the password
+
+Open `config.json` in the `config` folder, leave `webui.password` empty (`""`) and restart the container. A new password is generated and announced in the log.
+
+### Too many attempts
+
+After **5 wrong attempts in 5 minutes**, login answers "too many attempts" for that client — even if the next password is correct. It protects against someone brute-forcing the password. Wait a few minutes.
+
 ---
 
-## Dangerous and media extensions
+## Essential configuration
 
-### Dangerous extensions
+For qbit-guardian to start working, only two fields are required:
 
-These are file types that often carry viruses or malware. By default, qbit-guardian removes any torrent that contains:
+| Field | Where to find it |
+|-------|-----------------|
+| **qBittorrent URL** | Full address with `http://` and port (e.g. `http://192.168.1.50:8080`) |
+| **qBittorrent API Key** | In qBittorrent: **Tools → Options → Web UI → API Key** |
 
-`.exe` `.scr` `.bat` `.cmd` `.vbs` `.js` `.com` `.pif` `.msi` `.dll` `.ps1` `.sh` `.bin`
+> ⚠️ It is a **full URL**, not separate host and port. Write `http://192.168.1.50:8080`, not just `192.168.1.50`.
 
-You can change this list in the Web UI by editing the **Dangerous Extensions** field. Add or remove entries as needed — each one starts with a dot (e.g. `.scr`).
+> **📘 API Key:** A long random password qBittorrent generates. It lets other programs talk to qBittorrent securely. Think of it as an access key you hand to a trusted application.
 
-> ⚠️ **Be careful.** Removing entries from this list makes the guardian less strict. Only do it if you're sure those file types are safe in your setup.
+Fill in those two fields, click **Save Configuration**, and that's it — the guardian is working.
 
-### Valid media extensions
+### Sonarr and Radarr integration (optional)
 
-The guardian also checks if a torrent has at least one media file. The default list includes common video formats:
+If you use Sonarr (TV shows) or Radarr (movies), also fill in their **URL** and **API Key** fields.
 
-`.mkv` `.mp4` `.avi` `.mov` `.m4v` `.ts` `.wmv` `.flv` `.webm`
+With the integration active, whenever qbit-guardian removes a problematic torrent it also:
 
-If a torrent has no dangerous files but also no valid media file, it's still removed — it's likely junk.
+1. Blocklists that release in Sonarr/Radarr (so it isn't downloaded again).
+2. Triggers an automatic search for an alternative version.
 
-You can customize this list too, for example if you want to include `.ogv`, `.divx`, or other video formats.
+> 💡 If you don't use Sonarr or Radarr, leave the fields blank. The guardian works normally — only the blocklist-and-research part is skipped.
 
 ---
 
-## Operating Modes
+## Notifications
 
-qbit-guardian can run in two modes. Choose the one that fits your needs.
+qbit-guardian can alert you on your phone or computer whenever something important happens. It uses **Apprise** — a system that delivers messages to 100+ different services (Telegram, Discord, Slack, Pushover, email and many more).
+
+> **📘 Apprise:** Like a universal postal worker. You hand it a single URL and it takes care of delivering the message to the service you picked. You don't need to install anything extra, just generate the right URL.
+
+### Turning notifications on
+
+Fill in the **Apprise URL** field with the address generated for your service and flip the switch in the **Notifications** card header. Example Apprise URLs:
+
+| Service | URL format |
+|---------|-----------|
+| Telegram | `tgram://BOT_TOKEN/CHAT_ID` |
+| Discord | `discord://WEBHOOK_ID/TOKEN` |
+| Pushover | `pover://USER_KEY/APP_TOKEN` |
+| Self-hosted Apprise | `https://apprise.my-network/notify/guardian` |
+
+> See the [full list of formats](https://github.com/caronc/apprise#supported-notifications) in Apprise's official documentation.
+
+### The three events
+
+| Event | When it fires |
+|-------|--------------|
+| ⚡ **Torrent Optimized** | File priorities were adjusted |
+| ⚠️ **Torrent Removed (Dangerous)** | Removed for a dangerous file, or for having no valid media |
+| 🗑️ **Torrent Removed (Stalled)** | Removed for being stalled too long, or for having no seeds |
+
+Each one has its own **switch** and its own **text box**.
+
+### Editing the messages
+
+Each text box is the message that will be sent. Inside it, each `{{...}}` is replaced with the torrent's real value.
+
+The available variables are listed right under each box:
+
+| Event | Variables |
+|-------|-----------|
+| Optimized | `{{torrentName}}` `{{priorityMedia}}` `{{priorityAux}}` `{{mediaCount}}` |
+| Removed (dangerous) | `{{torrentName}}` `{{reason}}` `{{extensions}}` |
+| Removed (stalled) | `{{torrentName}}` `{{reason}}` `{{state}}` `{{stalledTime}}` |
+
+> 💡 If you write a variable that doesn't exist, it shows up **literally** in the message — so a typo is visible instead of silently vanishing.
+
+**Two levels of on/off.** A notification is only sent with **both** switches on: the master one (in the card header) and the event's own. With a message switched off, the text stays visible but cannot be edited — you can see what would be sent without changing it by accident.
+
+Cleared the text by mistake? An empty box falls back to the default instead of sending a blank message.
+
+> Each notification's **title** is not exposed in the panel, but remains editable in `config.json`, under `notifications.events.<event>.title`.
+
+### Apprise with a self-signed certificate
+
+If your Apprise server uses a self-signed SSL certificate (common on home networks with addresses like `apprise.home.arpa`), the guardian already works without SSL verification. No extra configuration is needed.
+
+> **📘 Self-signed SSL certificate:** A certificate you generated yourself, without validation from an external authority. On home networks it's a free alternative to paid certificates — browsers and other programs don't trust it automatically.
+
+---
+
+## Operating modes
+
+qbit-guardian has two ways of working. You pick it in the **Check interval** field of the Guardian section.
 
 ### Polling mode (default)
 
-The guardian checks all your torrents every N seconds. Set **Check Interval** to any number above 0.
+In this mode the guardian checks torrents every so often. You set the interval in seconds.
 
-| Setting   | Behavior                                                       |
-|-----------|----------------------------------------------------------------|
-| `300`     | Check every 5 minutes (default)                                |
-| `60`      | Check every minute — more responsive, uses a bit more CPU      |
-| `600`     | Check every 10 minutes — less frequent, lighter on resources   |
-| `3600`    | Check every hour                                               |
+- **Default:** 300 seconds (5 minutes).
+- **Fast example:** 60 seconds (1 minute).
+- **Frugal example:** 1800 seconds (30 minutes).
 
-This is the simplest mode. It works without any extra setup on qBittorrent's side.
+The shorter the interval, the faster a dangerous torrent is caught. The longer it is, the fewer server resources are used.
 
-### Webhook mode (real-time)
+We recommend **300 seconds** for general use — fast enough and not taxing.
 
-Set **Check Interval** to `0` and the guardian stops polling. Instead, it waits for qBittorrent to call it directly whenever a new torrent is added.
+### Webhook mode (real time)
 
-This mode reacts instantly — no waiting for the next poll cycle.
+In this mode, qBittorrent notifies the guardian **the moment** a torrent is added. Put `0` in the check interval and follow the steps in [Setting up the Webhook](INSTALL.md#setting-up-the-webhook-real-time).
 
-#### How to set up webhook mode
+> ⚠️ The webhook needs `QBIT_GUARDIAN_USER` and `QBIT_GUARDIAN_PASS` on the qBittorrent service, because `/api/trigger` requires authentication.
 
-**Step 1: Change the interval to 0**
+### If qBittorrent goes down
 
-In the Web UI, set **Check Interval** to `0` and save.
+The guardian **doesn't give up**. It logs a warning and retries every `retry_interval_seconds` (default: 120 seconds) until qBittorrent comes back. That applies both at startup — when the server reboots and the guardian comes up first — and during normal operation.
 
-**Step 2: Configure qBittorrent**
-
-Open qBittorrent and go to **Settings → Downloads**. At the bottom, find **Run external program on torrent added** and enter:
-
-```
-/scripts/qbit-guardian-hook.sh
-```
-
-**Step 3: Mount the hook script into qBittorrent**
-
-If you use Docker for qBittorrent, add this volume to your qBittorrent service in `docker-compose.yml`:
-
-```yaml
-services:
-  qbittorrent:
-    # ... your existing qBittorrent config ...
-    volumes:
-      - ./scripts/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh
-```
-
-The script is located in the `scripts/` folder of the qbit-guardian repository. Download it from there or copy the content below:
-
-```bash
-#!/bin/bash
-QBIT_GUARDIAN_URL="${QBIT_GUARDIAN_URL:-http://qbit-guardian:5000}"
-curl -s -X POST "${QBIT_GUARDIAN_URL}/api/trigger" > /dev/null 2>&1
-```
-
-> 💡 The script uses a variable `QBIT_GUARDIAN_URL` so you can adjust the guardian's address without editing the script. The default (`http://qbit-guardian:5000`) works when both containers are on the same Docker network and the guardian container is named `qbit-guardian`.
-
-Now, every time qBittorrent adds a new torrent, it calls the script, which instantly tells qbit-guardian to check it. No waiting.
+While retrying, the container stays `healthy`: the healthcheck measures the health of the **guardian process**, not of qBittorrent, which is an external and transient dependency. Watch the log to see the outage.
 
 ---
 
-## Web UI Authentication
+## Customizing the rules
 
-By default, the dashboard is open — anyone on your network can access it. To protect it with a password:
+### Dangerous extensions
 
-1. In the Web UI, scroll to the **Web UI Authentication** section.
-2. Enter a **Username** (e.g. `admin`) and a **Password**.
-3. Save the configuration.
+File endings that, if found inside a torrent, make the guardian remove everything immediately. The default list:
 
-Your browser will now ask for credentials before showing the page.
+`.exe` `.scr` `.bat` `.cmd` `.vbs` `.js` `.com` `.pif` `.msi` `.dll` `.ps1` `.sh` `.bin`
 
-You can also set this directly in `config.json`:
+You can add or remove extensions in the **Guardian** section, one per line.
 
-```json
-{
-  "webui": {
-    "user": "admin",
-    "password": "your-strong-password-here"
-  }
-}
-```
+> ⚠️ Only do it if you're sure. `.exe` files are the main vector for viruses in torrents. Remove it and you lose the guardian's main protection.
 
-> ⚠️ **Forgot the password?** Edit `config.json` directly and clear both `user` and `password` (set them to `""`). The page becomes public again and you can set a new password through the Web UI.
+### Valid media extensions
 
-When both fields are empty, authentication is off and the page is public.
+The list of formats the guardian treats as "legitimate content". If a torrent has **no** file with these extensions, it is treated as suspicious and removed.
 
----
+Default list: `.mkv` `.mp4` `.avi` `.mov` `.m4v` `.ts` `.wmv` `.flv` `.webm`
 
-## Understanding torrent statuses
+Add or remove formats as you prefer. For example, if you download Blu-ray ISOs, add `.iso` and `.m2ts`.
 
-When qbit-guardian processes a torrent, here is what each status means:
+> 💡 Leaving the list **empty** disables this criterion: no torrent is removed for "no valid media". Dangerous-extension detection keeps working normally.
 
-| Status        | Meaning                                                                                            |
-|---------------|----------------------------------------------------------------------------------------------------|
-| **completed** | The torrent finished downloading. The guardian skips it — the file is already on your disk.       |
-| **dangerous** | The torrent contains at least one file with a dangerous extension (`.exe`, `.bat`, etc.). It gets removed immediately. |
-| **stalled**   | The torrent has made no progress for longer than your time limit. It gets removed.                 |
-| **no_seeds**  | The torrent has zero seeds and has been in that state longer than your time limit. It gets removed. |
-| **no_media**  | The torrent has no dangerous files, but also no valid media files (`.mkv`, `.mp4`, etc.). It gets removed as junk. |
+### Removing stalled torrents
 
-### Configuring stalled and seedless removal
+A "stalled" torrent is one that cannot download — either because the sources are gone or because of a connection problem.
 
-Both are **off by default**. To enable them:
+To enable it, flip the **Remove torrents stalled for more than** switch and set the time and unit (seconds, minutes or hours).
 
-| Setting                | What it does                                                       |
-|------------------------|--------------------------------------------------------------------|
-| **Remove Stalled**     | Turn ON to delete torrents stuck with no progress.                 |
-| **Stalled Time**       | How long the torrent must be stuck before removal (e.g. `24`).     |
-| **Stalled Unit**       | Unit for the time: `seconds`, `minutes`, or `hours`.              |
-| **Remove No Seeds**    | Turn ON to delete torrents that lost all their seeds.              |
-| **No Seeds Time**      | How long the torrent must have zero seeds before removal (e.g. `48`). |
-| **No Seeds Unit**      | Unit for the time: `seconds`, `minutes`, or `hours`.              |
+Example: `6 hours` — the guardian removes torrents stalled for over 6 hours.
 
-Example: set **Remove No Seeds** ON, **No Seeds Time** to `48`, and **No Seeds Unit** to `hours`. After two days with nobody sharing the file, the torrent is automatically removed.
+> ⚠️ A time of `0` means **off**, never "remove now".
+
+### Removing seedless torrents
+
+A "seedless" torrent is one where nobody is sharing the complete file. Without seeds, finishing the download is impossible.
+
+Flip the **Remove seedless torrents older than** switch and set the waiting time (e.g. `24 hours`).
+
+> 💡 A **seed** is someone who already downloaded the whole file and keeps uploading it. If a torrent has zero seeds you will never complete the download — like trying to copy a book nobody has any more.
+
+### Completed torrents are never touched
+
+Torrents that finished downloading and are seeding (states `uploading`, `stalledUP`, `pausedUP`, `checkingUP`, `queuedUP`) are out of the guardian's scope. It neither removes nor reprioritizes anything in them.
+
+### File priorities
+
+When a torrent has several kinds of file, the guardian adjusts download priority automatically:
+
+| File type | Default priority | What happens |
+|-----------|-----------------|--------------|
+| Media files (`.mkv`, `.mp4`, etc.) | **7 — maximum** | Downloaded first |
+| Auxiliary files (`.nfo`, `.srt`, `.jpg`, `.png`, `.txt`, `.sub`, `.idx`) | **1 — normal** | Downloaded afterwards |
+| Any other file | **0 — do not download** | Never reach the disk |
+
+This makes the movie or episode start downloading sooner and avoids useless files — including unwanted attachments like `.url` and `.lnk`, which aren't on the dangerous list but aren't wanted either.
+
+The scale qBittorrent accepts is **not continuous**. The valid values are:
+
+| Value | Meaning |
+|-------|---------|
+| `0` | Do not download |
+| `1` | Normal |
+| `6` | High |
+| `7` | Maximum |
+
+> ⚠️ Values like `2`, `3`, `4` or `5` are rejected by qBittorrent with an HTTP 400 error. The three priority fields in the panel are dropdowns, so you can only pick valid values.
 
 ---
 
 ## Understanding the logs
 
-qbit-guardian logs everything it does. You can see the logs in two ways:
+qbit-guardian records what it does. You can read the logs in two ways:
 
 - **Docker:** `docker logs qbit-guardian`
-- **Manual install:** directly in the terminal where the program is running
+- **Manual install:** directly in the terminal running the program
 
-Here's what each message means:
+### Log levels
+
+Controlled by the `LOG_LEVEL` environment variable:
+
+| Level | What it shows |
+|-------|--------------|
+| `ERROR` (default) | Errors and removals only |
+| `INFO` | A summary of each check |
+| `VERBOSE` | Every action, per torrent |
+| `DEBUG` | Everything, including HTTP calls |
+
+> 💡 The default is quiet on purpose. If you are investigating a behaviour, raise it to `INFO` or `VERBOSE` temporarily.
+
+### Common messages
+
+Log messages are in Portuguese:
 
 | Log message | What happened |
 |-------------|---------------|
-| `Dangerous files: ['.exe'] — Removing and Blocking` | The torrent contained an `.exe` and was removed. If Sonarr/Radarr are configured, the release was blocked and a new search started. |
-| `No valid media files — Removing and Blocking` | The torrent had no files matching the configured media extensions. It was removed. |
-| `stalled (stalledDL) for >6h — Removing` | The torrent was stuck for more than 6 hours. Removed. |
-| `0 seeds — Removing` | The torrent had no seeds for longer than the configured time. Removed. |
-| `Disabled → filename.exe` | A file inside the torrent was set to priority zero — it won't be downloaded. |
-| `Media files prioritized` | Download priorities were adjusted. Video files were moved to the top of the queue. |
-| `No new torrents` | The guardian checked and found no unprocessed torrents. Everything is fine. |
-| `qBittorrent unreachable, reconnecting...` | The guardian lost contact with qBittorrent. It retries automatically on each cycle. |
-
-### Processed torrent statuses
-
-The guardian keeps an internal list of torrents it has already processed. This prevents the same torrent from being checked multiple times. Possible statuses:
-
-| Status | Description |
-|--------|-------------|
-| **completed** | Torrents that finished downloading and are now uploading/seeding. The guardian **does not touch** them — they're already done. |
-| **dangerous** | Torrents that contained dangerous files. Already removed. |
-| **stalled** | Torrents that were removed for being stuck too long. |
-| **no_seeds** | Torrents removed for lack of seeds. |
-| **no_media** | Torrents removed for having no valid media files. |
-| **optimized** | Torrents where file priorities were adjusted. They continue downloading normally. |
+| `Verificacao #12: 30 torrents, 2 novos, 1 stalled removidos, 0 removidos do historico` | Summary of one cycle (`INFO` level). |
+| `Arquivos perigosos: ['.exe'] — Removendo e Bloqueando` | The torrent contained an `.exe` and was removed. If Sonarr/Radarr are configured, the release was blocklisted and a new search started. |
+| `Nenhum arquivo de midia valido — Removendo e Bloqueando` | The torrent had no file with the configured media extensions. |
+| `stalled (stalledDL) por >6h — REMOVIDO` | The torrent had been stalled for over 6 hours. |
+| `0 seeds — REMOVIDO` | The torrent had no seeds for the configured time. |
+| `sem metadados — sera reavaliado no proximo ciclo` | A magnet still fetching its file list. It comes back next cycle instead of being marked processed. |
+| `otimizado (3 arquivos de midia priorizados)` | Download priorities were adjusted. |
+| `qBittorrent indisponivel (...) — nova tentativa em 120s` | Lost contact with qBittorrent. Retrying. |
+| `qBittorrent inacessivel, reconectando...` | Transport error during operation. Entering retry. |
+| `prioridade de arquivo invalida: 4` | One of the priority fields has a value outside the accepted scale. Fix it in the panel. |
 
 ---
 
 ## Forcing a manual check
 
-If you want the guardian to check torrents right now, without waiting for the interval, use the **Force Check** button on the configuration page.
+If you want the guardian to check torrents right now, without waiting for the interval, use the **Force check** button on the configuration page.
 
-Or, from the command line:
+Or from the command line:
 
 ```bash
 curl -X POST http://your-server:5000/api/trigger -u username:password
@@ -310,17 +337,19 @@ This is useful for testing that everything works after configuring.
 
 ---
 
-## Tips and best practices
+## Tips and good practices
 
-- **Test without notifications first.** Let the guardian run silently for a few days. Once you're confident in its behavior, enable notifications.
-- **A 5-minute interval is enough.** For home use, checking every 300 seconds is fast enough. You don't need 10 seconds — you won't notice the difference and it only wastes resources.
-- **Keep dangerous extensions up to date.** New file types used to spread malware appear from time to time. Stay alert.
-- **If you use Sonarr/Radarr, take advantage of the integration.** Filling in the integration fields lets the guardian block bad releases and search for alternatives automatically. Your library grows without you lifting a finger.
+- **Change the generated password.** The one from the log is for first access; pick your own via the user icon.
+- **Test without notifications first.** Let the guardian run quietly for a few days. Once you trust its behaviour, turn notifications on.
+- **A 5-minute interval is plenty.** For home use, checking every 300 seconds is fast enough. You don't need 10 seconds — you won't notice a difference and it just burns resources.
+- **Keep the dangerous extensions up to date.** New file types used to spread viruses show up from time to time.
+- **If you use Sonarr/Radarr, take advantage of the integration.** Filling in the fields lets the guardian blocklist bad releases and find alternatives automatically.
+- **Back up the `config` folder.** It's a single JSON file — copying it is enough.
 
 ---
 
 ## Need help?
 
-- Read the [Frequently Asked Questions](FAQ.md) for common questions.
+- Read the [FAQ](FAQ.md) for common questions.
 - See the [Installation Guide](INSTALL.md) if you need to install from scratch.
-- Issues, suggestions, and contributions: [project repository](https://forgejo.home.arpa/Humberto/qbit-guardian).
+- Problems, suggestions and contributions: [project repository](https://github.com/iHumberto/qbit-guardian).

@@ -25,7 +25,7 @@ It runs as a lightweight Docker container (or a Python process) with a built-in 
 | Web UI      | Flask 3.x                           |
 | HTTP client | requests 2.x                        |
 | Notifications | Apprise (Telegram, Discord, Slack, and 100+ services) |
-| Testing     | pytest 8.x (546 tests: 428 functional + 118 security) |
+| Testing     | pytest 8.x (687 tests: 569 functional + 118 security) |
 | License     | GNU GPL v3                          |
 
 ## Features
@@ -444,7 +444,7 @@ Leave the `sonarr.url` and `radarr.url` fields empty. The guardian works fine wi
 # Install dependencies (runtime + test tooling)
 pip install -r requirements-dev.txt
 
-# Run all tests (546: 428 functional + 118 security)
+# Run all tests (687: 569 functional + 118 security)
 python -m pytest test/ -v
 
 # Functional tests only
@@ -461,8 +461,16 @@ CI runs on every push and pull request via GitHub Actions (`.github/workflows/te
 
 ## Documentation
 
-- 📖 [English docs](docs/en-US/) — detailed guides and reference
-- 📖 [Documentação em português](docs/pt-BR/) — guias detalhados e referência
+Step-by-step guides for newcomers, in English and Portuguese:
+
+| Guide | What for |
+|-------|----------|
+| [Getting Started](docs/en-US/getting-started.md) | Install and sign in for the first time |
+| [Install](docs/en-US/INSTALL.md) | Docker, manual install, webhook mode and troubleshooting |
+| [Usage](docs/en-US/USAGE.md) | Every panel feature, in detail |
+| [FAQ](docs/en-US/FAQ.md) | Common questions and known errors |
+
+- 📖 [Documentação em português](docs/pt-BR/) — [Primeiros Passos](docs/pt-BR/primeiros-passos.md) · [Instalação](docs/pt-BR/INSTALL.md) · [Uso](docs/pt-BR/USAGE.md) · [FAQ](docs/pt-BR/FAQ.md)
 
 ## License
 
