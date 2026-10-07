@@ -114,6 +114,25 @@
 
   .help { font-size:var(--fs-help); color:var(--text); margin-top:4px; display:block; }
 
+  /* ── Cabecalho com liga/desliga a direita (secao e cada mensagem) ── */
+  .head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .head label, .head h2 { margin:0; }
+
+  /* ── Template de mensagem ── */
+  .msg { display:flex; flex-direction:column; gap:5px; }
+  .msg textarea { min-height:110px; font-size:var(--fs-base); }
+  /* Mensagem desligada: o texto continua legivel, mas nao editavel. */
+  .msg textarea:disabled { background:#d9dbe4; color:#4a4f66; cursor:not-allowed; }
+  .switch:disabled { opacity:.45; cursor:not-allowed; }
+  .msg.off > .head > label { opacity:.55; }
+
+  /* Variaveis que o template aceita */
+  .vars { display:flex; flex-wrap:wrap; gap:6px; align-items:baseline; }
+  .vars code {
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:var(--fs-help);
+    background:rgba(255,255,255,.12); border-radius:4px; padding:1px 5px; color:var(--text);
+  }
+
   /* ── Linha com liga/desliga (stalled, sem seeds) ── */
   .toggle-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .toggle-row > label { flex:1; min-width:150px; font-size:var(--fs-base); color:var(--text); }
@@ -314,10 +333,40 @@
 
     <div class="col">
       <div class="card">
-        <h2 data-i18n="section_notifications">🔔 Notificações</h2>
+        <div class="head">
+          <h2 data-i18n="section_notifications">🔔 Notificações</h2>
+          <input type="checkbox" class="switch" id="notifications_enabled">
+        </div>
         <div class="field">
           <label for="apprise_url" data-i18n="label_apprise_url">Apprise URL (Telegram, Discord, etc.)</label>
           <input id="apprise_url" data-i18n-placeholder="placeholder_apprise_url" placeholder="tgram://BOT_TOKEN/CHAT_ID">
+        </div>
+
+        <div class="msg" id="msg_optimized_wrap">
+          <div class="head">
+            <label for="msg_optimized" data-i18n="label_msg_optimized">Mensagem para Torrent Otimizado</label>
+            <input type="checkbox" class="switch" id="msg_optimized_enabled">
+          </div>
+          <textarea id="msg_optimized" rows="4" spellcheck="false"></textarea>
+          <span class="help vars" id="vars_optimized"></span>
+        </div>
+
+        <div class="msg" id="msg_removed_wrap">
+          <div class="head">
+            <label for="msg_removed" data-i18n="label_msg_removed">Mensagem para Torrent Excluído (Perigoso)</label>
+            <input type="checkbox" class="switch" id="msg_removed_enabled">
+          </div>
+          <textarea id="msg_removed" rows="4" spellcheck="false"></textarea>
+          <span class="help vars" id="vars_removed"></span>
+        </div>
+
+        <div class="msg" id="msg_stalled_wrap">
+          <div class="head">
+            <label for="msg_stalled" data-i18n="label_msg_stalled">Mensagem para Torrent Excluído (Stalled)</label>
+            <input type="checkbox" class="switch" id="msg_stalled_enabled">
+          </div>
+          <textarea id="msg_stalled" rows="4" spellcheck="false"></textarea>
+          <span class="help vars" id="vars_stalled"></span>
         </div>
       </div>
     </div>
@@ -333,11 +382,59 @@
 <script src="/i18n.js"></script>
 <script>
 const API = '/api/config';
+const DEFAULTS_API = '/api/defaults';
+
+// Titulos/templates padrao e variaveis por evento, servidos pelo backend.
+// Nao duplicamos as strings aqui: a tela tem que mostrar exatamente o texto
+// que o guardian enviaria.
+let DEFAULTS = { notifications: {}, notification_variables: {} };
+
+const MSG_EVENTS = ['optimized', 'removed', 'stalled'];
+
+/**
+ * Liga/desliga a edicao conforme os dois niveis de toggle.
+ * Mensagem desligada continua visivel — so nao pode ser alterada.
+ */
+function syncNotifications() {
+  const geral = getCheck('notifications_enabled');
+  for (const ev of MSG_EVENTS) {
+    const chave = document.getElementById('msg_' + ev + '_enabled');
+    const caixa = document.getElementById('msg_' + ev);
+    // Com o geral desligado nenhuma mensagem sai: os toggles de tipo perdem
+    // o sentido, mas o estado deles e preservado para quando religar.
+    chave.disabled = !geral;
+    caixa.disabled = !geral || !chave.checked;
+    document.getElementById('msg_' + ev + '_wrap')
+            .classList.toggle('off', caixa.disabled);
+  }
+}
+
+/** Mostra, sob cada caixa, as variaveis que aquele evento aceita. */
+function renderVars() {
+  for (const ev of MSG_EVENTS) {
+    const alvo = document.getElementById('vars_' + ev);
+    const vars = DEFAULTS.notification_variables[ev] || [];
+    alvo.innerHTML = '';
+    const rotulo = document.createElement('span');
+    // data-i18n em vez de so textContent: assim o applyTranslations() cuida
+    // deste rotulo nas trocas de idioma seguintes, sem re-renderizar os chips.
+    rotulo.setAttribute('data-i18n', 'vars_label');
+    rotulo.textContent = t('vars_label');
+    alvo.appendChild(rotulo);
+    for (const v of vars) {
+      const chip = document.createElement('code');
+      chip.textContent = '{{' + v + '}}';
+      alvo.appendChild(chip);
+    }
+  }
+}
 
 async function loadConfig() {
   try {
-    const r = await fetch(API);
+    const [r, rd] = await Promise.all([fetch(API), fetch(DEFAULTS_API)]);
     const c = await r.json();
+    DEFAULTS = await rd.json();
+    renderVars();
     setVal('qbit_url', c.qbit.url);
     setVal('qbit_api_key', c.qbit.api_key);
     setVal('radarr_url', c.radarr.url);
@@ -357,6 +454,19 @@ async function loadConfig() {
     setVal('priority_normal', prioOrDefault(c.guardian.priority_normal, 1));
     setVal('priority_skip', prioOrDefault(c.guardian.priority_skip, 0));
     setVal('apprise_url', c.notifications.apprise_url);
+
+    // Notificacoes: ausencia de chave significa LIGADO (default do backend),
+    // e template vazio cai no padrao — e o que o guardian de fato enviaria.
+    const n = c.notifications || {};
+    const evs = n.events || {};
+    setVal('notifications_enabled', n.enabled !== false);
+    for (const ev of MSG_EVENTS) {
+      const atual = evs[ev] || {};
+      const padrao = (DEFAULTS.notifications[ev] || {}).template || '';
+      setVal('msg_' + ev + '_enabled', atual.enabled !== false);
+      setVal('msg_' + ev, (atual.template || '').trim() ? atual.template : padrao);
+    }
+    syncNotifications();
   } catch(e) {
     toast(t('toast_load_error') + e.message, 'err');
   }
@@ -391,7 +501,14 @@ async function saveConfig() {
       priority_skip: (v => isNaN(v = parseInt(getVal('priority_skip'))) ? 0 : v)()
     },
     notifications: {
-      apprise_url: getVal('apprise_url')
+      apprise_url: getVal('apprise_url'),
+      enabled: getCheck('notifications_enabled'),
+      // `title` nao e enviado de proposito: o deep_merge do backend preserva o
+      // que esta no config.json, onde ele continua editavel.
+      events: Object.fromEntries(MSG_EVENTS.map(ev => [ev, {
+        enabled: getCheck('msg_' + ev + '_enabled'),
+        template: getVal('msg_' + ev)
+      }]))
     }
   };
 
@@ -412,6 +529,14 @@ const VALID_PRIORITIES = [0, 1, 6, 7];
 function prioOrDefault(val, fallback) {
   const n = parseInt(val);
   return VALID_PRIORITIES.includes(n) ? n : fallback;
+}
+
+// Os toggles mudam o que pode ser editado — religa a cada clique.
+document.getElementById('notifications_enabled')
+        .addEventListener('change', syncNotifications);
+for (const ev of MSG_EVENTS) {
+  document.getElementById('msg_' + ev + '_enabled')
+          .addEventListener('change', syncNotifications);
 }
 
 function getVal(id) { const el = document.getElementById(id); return el.type==='checkbox' ? el.checked : el.value; }

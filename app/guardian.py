@@ -46,6 +46,32 @@ TRANSPORT_ERRORS = (
     requests.exceptions.ReadTimeout,
 )
 
+# Eventos de notificacao: titulo e template padrao de cada um. Os templates
+# reproduzem exatamente as mensagens que eram hardcoded ate a v2.0.8 — quem
+# nao mexer na config continua recebendo o mesmo texto de sempre.
+DEFAULT_NOTIFICATIONS = {
+    "optimized": {
+        "title": "⚡ Torrent Otimizado",
+        "template": "Nome: {{torrentName}}\nArquivos de midia priorizados.",
+    },
+    "removed": {
+        "title": "⚠️ Torrent Removido",
+        "template": "Nome: {{torrentName}}\nMotivo: {{reason}}",
+    },
+    "stalled": {
+        "title": "🗑️ Torrent Removido (stalled)",
+        "template": "Nome: {{torrentName}}\nMotivo: {{reason}}",
+    },
+}
+
+# Variaveis que cada evento disponibiliza no template. A Web UI le esta mesma
+# lista para mostrar ao usuario o que ele pode usar em cada caixa.
+NOTIFICATION_VARIABLES = {
+    "optimized": ["torrentName", "priorityMedia", "priorityAux", "mediaCount"],
+    "removed": ["torrentName", "reason", "extensions"],
+    "stalled": ["torrentName", "reason", "state", "stalledTime"],
+}
+
 # ── Config loader ──────────────────────────────────────────────────────
 _config = None
 _config_lock = threading.Lock()
@@ -82,7 +108,14 @@ def load_config():
                     "priority_normal": 1,
                     "priority_skip": 0
                 },
-                "notifications": {"apprise_url": ""},
+                "notifications": {
+                    "apprise_url": "",
+                    "enabled": True,
+                    "events": {
+                        ev: {"enabled": True, **spec}
+                        for ev, spec in DEFAULT_NOTIFICATIONS.items()
+                    },
+                },
                 "webui": {"user": "", "password": ""}
             }
             os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
@@ -194,6 +227,70 @@ def set_file_priority(torrent_hash, file_id, priority):
 
 
 # ── Notificacoes ───────────────────────────────────────────────────────
+
+def _notification_event(cfg, event):
+    """Resolve titulo/template/enabled de um evento, com fallback seguro.
+
+    Config gravada antes da v2.1.0 nao tem a chave `events` — e `load_config()`
+    nao faz merge com os defaults quando o arquivo existe. Entao cada campo cai
+    no default individualmente: titulo ou template vazio/nao-string tambem
+    voltam ao padrao, para uma caixa apagada na Web UI nao virar notificacao em
+    branco.
+    """
+    spec = DEFAULT_NOTIFICATIONS[event]
+    cfgev = ((cfg.get("notifications") or {}).get("events") or {}).get(event) or {}
+
+    titulo = cfgev.get("title")
+    if not isinstance(titulo, str) or not titulo.strip():
+        titulo = spec["title"]
+
+    template = cfgev.get("template")
+    if not isinstance(template, str) or not template.strip():
+        template = spec["template"]
+
+    return {
+        "enabled": cfgev.get("enabled", True) is not False,
+        "title": titulo,
+        "template": template,
+    }
+
+
+def _render_template(template, variaveis):
+    """Substitui {{nome}} pelos valores informados.
+
+    Placeholder desconhecido fica literal no texto: um erro de digitacao na
+    Web UI aparece na notificacao em vez de sumir em silencio.
+    """
+    def troca(m):
+        nome = m.group(1).strip()
+        if nome in variaveis:
+            return str(variaveis[nome])
+        return m.group(0)
+
+    return re.sub(r"\{\{\s*(\w+)\s*\}\}", troca, template)
+
+
+def notify(event, **variaveis):
+    """Envia a notificacao de um evento, se ela estiver habilitada.
+
+    Dois niveis de liga/desliga, como no prototipo: o geral
+    (`notifications.enabled`) e o do tipo (`events.<nome>.enabled`). O envio so
+    acontece com os dois ligados.
+    """
+    cfg = get_config()
+    notif = cfg.get("notifications") or {}
+
+    if notif.get("enabled", True) is False:
+        log.debug(f"notificacao '{event}' suprimida: desligada no geral")
+        return
+
+    ev = _notification_event(cfg, event)
+    if not ev["enabled"]:
+        log.debug(f"notificacao '{event}' suprimida: tipo desligado")
+        return
+
+    send_notification(ev["title"], _render_template(ev["template"], variaveis))
+
 
 def send_notification(title, message):
     cfg = get_config()
@@ -401,6 +498,18 @@ def _time_to_seconds(value, unit):
         return int(value) * 3600
 
 
+def _stalled_threshold(cfg):
+    """Limiar configurado de stalled, como texto ("15 minutes").
+
+    Vazio quando a remocao por stalled esta desligada — o evento pode ter sido
+    disparado pelo ramo de "0 seeds", onde esse limiar nao se aplica.
+    """
+    g = cfg.get("guardian") or {}
+    if not g.get("remove_stalled"):
+        return ""
+    return f"{g.get('stalled_time', 0)} {g.get('stalled_unit', 'hours')}"
+
+
 def check_stalled_and_remove(torrent):
     """Verifica stalled/sem seeds e remove se necessario.
 
@@ -423,8 +532,11 @@ def check_stalled_and_remove(torrent):
         log.verbose(f"[{name}] {stalled_reason} — REMOVIDO")
         block_and_search(hash_, name)
         remove_torrent(hash_)
-        send_notification("🗑️ Torrent Removido (stalled)",
-                          f"Nome: {name}\nMotivo: {stalled_reason}")
+        notify("stalled",
+               torrentName=name,
+               reason=stalled_reason,
+               state=state,
+               stalledTime=_stalled_threshold(cfg))
         return True
     return False
 
@@ -481,8 +593,10 @@ def analyze_torrent(torrent):
         log.warning(f"[{name}] {reason} — Removendo e Bloqueando")
         block_and_search(hash_, name)
         remove_torrent(hash_)
-        send_notification("⚠️ Torrent Removido",
-                          f"Nome: {name}\nMotivo: {reason}")
+        notify("removed",
+               torrentName=name,
+               reason=reason,
+               extensions=", ".join(dangerous_found))
         return True
 
     # Otimizar prioridades
@@ -505,8 +619,11 @@ def analyze_torrent(torrent):
                 log.debug(f"[{name}] Desativado → {f['name']}")
     if optimized:
         log.verbose(f"[{name}] otimizado ({media_count} arquivos de midia priorizados)")
-        send_notification("⚡ Torrent Otimizado",
-                          f"Nome: {name}\nArquivos de midia priorizados.")
+        notify("optimized",
+               torrentName=name,
+               priorityMedia=prio_media,
+               priorityAux=prio_norm,
+               mediaCount=media_count)
 
     return True
 

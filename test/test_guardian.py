@@ -742,6 +742,274 @@ class TestSendNotification:
             assert "Apprise" in m_log.call_args[0][0]
 
 
+# ── Templates de notificacao ────────────────────────────────────────────
+
+class TestRenderTemplate:
+    """Substituicao de {{variavel}} no texto da notificacao."""
+
+    def test_substitui_variaveis(self):
+        assert g._render_template(
+            "Nome: {{torrentName}} / {{reason}}",
+            {"torrentName": "Show.S01E01", "reason": "0 seeds"}
+        ) == "Nome: Show.S01E01 / 0 seeds"
+
+    def test_aceita_espacos_dentro_das_chaves(self):
+        assert g._render_template("{{ torrentName }}", {"torrentName": "X"}) == "X"
+
+    def test_placeholder_desconhecido_fica_literal(self):
+        """Erro de digitacao tem que aparecer, nao sumir em silencio."""
+        assert g._render_template("{{naoExiste}}", {"torrentName": "X"}) == "{{naoExiste}}"
+
+    def test_converte_valores_nao_string(self):
+        assert g._render_template("{{mediaCount}}", {"mediaCount": 3}) == "3"
+
+    def test_variavel_repetida(self):
+        assert g._render_template("{{a}}-{{a}}", {"a": "x"}) == "x-x"
+
+    def test_texto_sem_variavel_passa_intacto(self):
+        assert g._render_template("sem variaveis", {"a": 1}) == "sem variaveis"
+
+
+class TestNotifyToggles:
+    """Dois niveis de liga/desliga: o geral e o do tipo de mensagem."""
+
+    def _cfg(self, geral=True, **tipos):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"] = {
+            "apprise_url": "http://apprise:8000/notify",
+            "enabled": geral,
+            "events": {ev: {"enabled": on, **g.DEFAULT_NOTIFICATIONS[ev]}
+                       for ev, on in tipos.items()},
+        }
+        g.save_config(cfg)
+
+    def test_envia_com_os_dois_ligados(self, tmp_config):
+        self._cfg(geral=True, optimized=True)
+        with mock.patch.object(g, "send_notification") as m:
+            g.notify("optimized", torrentName="X")
+        m.assert_called_once()
+
+    def test_geral_desligado_nao_envia(self, tmp_config):
+        """Toggle geral OFF cala todos os tipos, mesmo os ligados."""
+        self._cfg(geral=False, optimized=True)
+        with mock.patch.object(g, "send_notification") as m:
+            g.notify("optimized", torrentName="X")
+        assert not m.called
+
+    def test_tipo_desligado_nao_envia(self, tmp_config):
+        self._cfg(geral=True, optimized=False)
+        with mock.patch.object(g, "send_notification") as m:
+            g.notify("optimized", torrentName="X")
+        assert not m.called
+
+    def test_tipo_desligado_nao_afeta_os_outros(self, tmp_config):
+        self._cfg(geral=True, optimized=False, removed=True)
+        with mock.patch.object(g, "send_notification") as m:
+            g.notify("optimized", torrentName="X")
+            g.notify("removed", torrentName="Y", reason="r", extensions="")
+        assert m.call_count == 1
+        assert "Y" in m.call_args[0][1]
+
+    @pytest.mark.parametrize("event", ["optimized", "removed", "stalled"])
+    def test_config_sem_a_chave_events_envia_com_o_padrao(self, tmp_config, event):
+        """REGRESSAO: config anterior a v2.1.0 nao tem `events`.
+
+        load_config() nao faz merge com os defaults quando o arquivo existe,
+        entao quem atualizar o container sem tocar na config precisa continuar
+        recebendo notificacao — com o texto de sempre.
+        """
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"] = {"apprise_url": "http://apprise:8000/notify"}
+        g.save_config(cfg)
+
+        with mock.patch.object(g, "send_notification") as m:
+            g.notify(event, torrentName="X", reason="r", extensions="",
+                     state="s", stalledTime="", priorityMedia=7,
+                     priorityAux=1, mediaCount=2)
+
+        m.assert_called_once()
+        assert m.call_args[0][0] == g.DEFAULT_NOTIFICATIONS[event]["title"]
+
+
+class TestNotificationDefaults:
+    """Fallback campo a campo em `_notification_event`."""
+
+    def _com_evento(self, ev, dados):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"] = {"apprise_url": "x", "events": {ev: dados}}
+        g.save_config(cfg)
+        return g.get_config()
+
+    @pytest.mark.parametrize("vazio", ["", "   ", None, 123, []])
+    def test_template_invalido_cai_no_padrao(self, tmp_config, vazio):
+        """Caixa apagada na Web UI nao pode virar notificacao em branco."""
+        cfg = self._com_evento("removed", {"template": vazio})
+        assert g._notification_event(cfg, "removed")["template"] == \
+            g.DEFAULT_NOTIFICATIONS["removed"]["template"]
+
+    @pytest.mark.parametrize("vazio", ["", "   ", None, 7])
+    def test_titulo_invalido_cai_no_padrao(self, tmp_config, vazio):
+        cfg = self._com_evento("removed", {"title": vazio})
+        assert g._notification_event(cfg, "removed")["title"] == \
+            g.DEFAULT_NOTIFICATIONS["removed"]["title"]
+
+    def test_titulo_customizado_e_respeitado(self, tmp_config):
+        cfg = self._com_evento("removed", {"title": "Meu titulo"})
+        assert g._notification_event(cfg, "removed")["title"] == "Meu titulo"
+
+    def test_enabled_ausente_significa_ligado(self, tmp_config):
+        cfg = self._com_evento("removed", {"template": "x"})
+        assert g._notification_event(cfg, "removed")["enabled"] is True
+
+
+class TestNotificationCallSites:
+    """As tres origens de notificacao passam as variaveis que anunciam.
+
+    Se a Web UI oferece {{mediaCount}} mas o call site nao passa mediaCount, o
+    placeholder vai literal para a notificacao do usuario. Estes testes usam um
+    template com TODAS as variaveis declaradas e exigem que nada sobre.
+    """
+
+    def _template_com_todas(self, event):
+        return " ".join("{{%s}}" % v for v in g.NOTIFICATION_VARIABLES[event])
+
+    def _preparar(self, event, **guardian_cfg):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"] = {
+            "apprise_url": "http://apprise:8000/notify",
+            "enabled": True,
+            "events": {event: {"enabled": True,
+                               "template": self._template_com_todas(event)}},
+        }
+        cfg["guardian"].update(guardian_cfg)
+        g.save_config(cfg)
+
+    def test_stalled_passa_todas_as_variaveis(self, tmp_config):
+        self._preparar("stalled", remove_stalled=True, stalled_time=15,
+                       stalled_unit="minutes")
+        torrent = {"hash": "h1", "name": "Show.S01E01", "state": "stalledDL",
+                   "added_on": 0, "num_complete": 5}
+
+        with mock.patch.object(g, "send_notification") as m, \
+             mock.patch.object(g, "block_and_search"), \
+             mock.patch.object(g, "remove_torrent"):
+            assert g.check_stalled_and_remove(torrent)
+
+        corpo = m.call_args[0][1]
+        assert "{{" not in corpo, f"variavel nao passada pelo call site: {corpo}"
+        assert "Show.S01E01" in corpo
+        assert "stalledDL" in corpo
+        assert "15 minutes" in corpo
+
+    def test_removed_passa_todas_as_variaveis(self, tmp_config):
+        self._preparar("removed")
+        torrent = {"hash": "h1", "name": "Filme.2020", "state": "downloading",
+                   "added_on": 0}
+
+        with mock.patch.object(g, "send_notification") as m, \
+             mock.patch.object(g, "get_files",
+                               return_value=[{"name": "setup.exe", "index": 0}]), \
+             mock.patch.object(g, "block_and_search"), \
+             mock.patch.object(g, "remove_torrent"):
+            assert g.analyze_torrent(torrent)
+
+        corpo = m.call_args[0][1]
+        assert "{{" not in corpo, f"variavel nao passada pelo call site: {corpo}"
+        assert "Filme.2020" in corpo
+        assert ".exe" in corpo
+
+    def test_optimized_passa_todas_as_variaveis(self, tmp_config):
+        self._preparar("optimized", priority_media=7, priority_normal=1,
+                       priority_skip=0)
+        torrent = {"hash": "h1", "name": "Serie.S02E03", "state": "downloading",
+                   "added_on": 0}
+
+        with mock.patch.object(g, "send_notification") as m, \
+             mock.patch.object(g, "get_files",
+                               return_value=[{"name": "ep.mkv", "index": 0},
+                                             {"name": "info.nfo", "index": 1}]), \
+             mock.patch.object(g, "set_file_priority"):
+            assert g.analyze_torrent(torrent)
+
+        corpo = m.call_args[0][1]
+        assert "{{" not in corpo, f"variavel nao passada pelo call site: {corpo}"
+        assert "Serie.S02E03" in corpo
+        assert "1" in corpo  # mediaCount
+
+    @pytest.mark.parametrize("event", ["optimized", "removed", "stalled"])
+    def test_template_padrao_so_usa_variaveis_declaradas(self, event):
+        """O texto padrao nao pode citar variavel que o evento nao fornece."""
+        usadas = set(re.findall(r"\{\{\s*(\w+)\s*\}\}",
+                                g.DEFAULT_NOTIFICATIONS[event]["template"]))
+        declaradas = set(g.NOTIFICATION_VARIABLES[event])
+        assert usadas <= declaradas, \
+            f"{event} usa variavel nao declarada: {sorted(usadas - declaradas)}"
+
+
+class TestNotificationBackCompat:
+    """O texto padrao reproduz exatamente as mensagens hardcoded ate a v2.0.8."""
+
+    def test_stalled_mantem_a_mensagem_antiga(self, tmp_config):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"].update(remove_stalled=True, stalled_time=24,
+                               stalled_unit="hours")
+        cfg["notifications"]["apprise_url"] = "http://apprise:8000/notify"
+        g.save_config(cfg)
+        torrent = {"hash": "h", "name": "Show", "state": "stalledDL",
+                   "added_on": 0, "num_complete": 1}
+
+        with mock.patch.object(g, "send_notification") as m, \
+             mock.patch.object(g, "block_and_search"), \
+             mock.patch.object(g, "remove_torrent"):
+            g.check_stalled_and_remove(torrent)
+
+        titulo, corpo = m.call_args[0]
+        assert titulo == "🗑️ Torrent Removido (stalled)"
+        assert corpo == "Nome: Show\nMotivo: stalled (stalledDL) por >24h"
+
+    def test_removed_mantem_a_mensagem_antiga(self, tmp_config):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"]["apprise_url"] = "http://apprise:8000/notify"
+        g.save_config(cfg)
+        torrent = {"hash": "h", "name": "Filme", "state": "downloading",
+                   "added_on": 0}
+
+        with mock.patch.object(g, "send_notification") as m, \
+             mock.patch.object(g, "get_files",
+                               return_value=[{"name": "a.exe", "index": 0}]), \
+             mock.patch.object(g, "block_and_search"), \
+             mock.patch.object(g, "remove_torrent"):
+            g.analyze_torrent(torrent)
+
+        titulo, corpo = m.call_args[0]
+        assert titulo == "⚠️ Torrent Removido"
+        assert corpo == "Nome: Filme\nMotivo: Arquivos perigosos: ['.exe']"
+
+    def test_optimized_mantem_a_mensagem_antiga(self, tmp_config):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"]["apprise_url"] = "http://apprise:8000/notify"
+        g.save_config(cfg)
+        torrent = {"hash": "h", "name": "Serie", "state": "downloading",
+                   "added_on": 0}
+
+        with mock.patch.object(g, "send_notification") as m, \
+             mock.patch.object(g, "get_files",
+                               return_value=[{"name": "ep.mkv", "index": 0}]), \
+             mock.patch.object(g, "set_file_priority"):
+            g.analyze_torrent(torrent)
+
+        titulo, corpo = m.call_args[0]
+        assert titulo == "⚡ Torrent Otimizado"
+        assert corpo == "Nome: Serie\nArquivos de midia priorizados."
+
+
 # ── qBit session ────────────────────────────────────────────────────────
 
 class TestQbitSession:
@@ -1634,6 +1902,113 @@ class TestWebUIDocsLink:
             f"{caminho} nao tem documentacao"
 
 
+class TestApiDefaults:
+    """/api/defaults alimenta a Web UI com os padroes do backend."""
+
+    def test_retorna_eventos_e_variaveis(self, client, tmp_config):
+        r = client.get("/api/defaults")
+        assert r.status_code == 200
+        dados = r.get_json()
+        assert dados["notifications"] == g.DEFAULT_NOTIFICATIONS
+        assert dados["notification_variables"] == g.NOTIFICATION_VARIABLES
+
+    def test_exige_autenticacao(self, client, tmp_config):
+        cfg = g.load_config()
+        cfg["webui"] = {"user": "admin", "password": "secreta"}
+        g.save_config(cfg)
+        assert client.get("/api/defaults").status_code == 401
+
+        auth = base64.b64encode(b"admin:secreta").decode()
+        r = client.get("/api/defaults", headers={"Authorization": f"Basic {auth}"})
+        assert r.status_code == 200
+
+
+class TestWebUINotifications:
+    """Card de Notificacoes: toggle geral + um por mensagem, com template."""
+
+    EVENTOS = ["optimized", "removed", "stalled"]
+
+    def test_toggle_geral_no_cabecalho_do_card(self):
+        html = _read_static("index.html")
+        assert re.search(
+            r'<h2 data-i18n="section_notifications".*?'
+            r'<input type="checkbox" class="switch" id="notifications_enabled">',
+            html, re.S)
+
+    @pytest.mark.parametrize("ev", EVENTOS)
+    def test_cada_evento_tem_toggle_caixa_e_variaveis(self, ev):
+        html = _read_static("index.html")
+        bloco = re.search(r'<div class="msg" id="msg_' + ev + r'_wrap">(.*?)</div>\n\n',
+                          html, re.S)
+        assert bloco, f"bloco de {ev} nao encontrado"
+        corpo = bloco.group(1)
+        assert f'id="msg_{ev}_enabled"' in corpo and 'class="switch"' in corpo
+        assert f'<textarea id="msg_{ev}"' in corpo
+        assert f'id="vars_{ev}"' in corpo
+
+    def test_eventos_do_html_batem_com_os_do_backend(self):
+        """A UI nao pode oferecer evento que o guardian nao conhece."""
+        html = _read_static("index.html")
+        do_html = set(re.findall(r'<textarea id="msg_(\w+)"', html))
+        assert do_html == set(g.DEFAULT_NOTIFICATIONS), \
+            f"html: {sorted(do_html)} vs backend: {sorted(g.DEFAULT_NOTIFICATIONS)}"
+
+    def test_lista_de_eventos_do_js_bate_com_o_backend(self):
+        html = _read_static("index.html")
+        m = re.search(r"const MSG_EVENTS = \[(.*?)\];", html)
+        assert m, "MSG_EVENTS nao encontrado"
+        do_js = set(re.findall(r"'(\w+)'", m.group(1)))
+        assert do_js == set(g.DEFAULT_NOTIFICATIONS)
+
+    def test_ui_nao_carrega_copia_dos_templates(self):
+        """Os textos padrao vem de /api/defaults, nao duplicados no HTML.
+
+        Duplicar deixaria a tela mostrando um texto e o guardian enviando
+        outro assim que um dos dois mudasse.
+        """
+        html = _read_static("index.html")
+        for ev, spec in g.DEFAULT_NOTIFICATIONS.items():
+            primeira_linha = spec["template"].split("\n")[0]
+            assert primeira_linha not in html, \
+                f"template de {ev} duplicado no HTML: {primeira_linha!r}"
+        assert "/api/defaults" in html
+
+    def test_payload_nao_envia_title(self):
+        """`title` fica so no config.json: o deep_merge preserva o que esta la."""
+        html = _read_static("index.html")
+        m = re.search(r"events: Object\.fromEntries\((.*?)\)\n", html, re.S)
+        assert m, "payload de events nao encontrado"
+        assert "title" not in m.group(1), "title nao deve ir no payload da UI"
+        assert "enabled" in m.group(1) and "template" in m.group(1)
+
+    def test_caixa_desabilita_com_o_toggle(self):
+        """Mensagem desligada aparece, mas nao pode ser editada."""
+        html = _read_static("index.html")
+        m = re.search(r"function syncNotifications\(\) \{(.*?)\n\}", html, re.S)
+        assert m, "syncNotifications nao encontrado"
+        corpo = m.group(1)
+        # a caixa desabilita pelo toggle do tipo E pelo geral
+        assert re.search(r"caixa\.disabled\s*=\s*!geral\s*\|\|\s*!\w+\.checked", corpo), corpo
+        # o toggle do tipo desabilita com o geral desligado
+        assert re.search(r"\w+\.disabled\s*=\s*!geral", corpo), corpo
+
+    def test_toggles_estao_ligados_ao_sync(self):
+        html = _read_static("index.html")
+        assert re.search(r"getElementById\('notifications_enabled'\)\s*\n?\s*"
+                         r"\.addEventListener\('change', syncNotifications\)", html)
+        assert re.search(r"'msg_' \+ ev \+ '_enabled'\)\s*\n?\s*"
+                         r"\.addEventListener\('change', syncNotifications\)", html)
+
+    def test_caixa_desabilitada_continua_legivel(self):
+        """Nao basta desabilitar: o texto tem que continuar visivel."""
+        html = _read_static("index.html")
+        m = re.search(r"\.msg textarea:disabled \{([^}]*)\}", html)
+        assert m, "falta o estilo da caixa desabilitada"
+        regra = m.group(1)
+        assert "color:" in regra and "background:" in regra
+        assert "display:none" not in regra and "visibility:hidden" not in regra
+
+
 class TestWebUIi18n:
     """Toda chave usada no HTML existe nos DOIS idiomas."""
 
@@ -1715,6 +2090,31 @@ class TestDocsConfigParity:
 
         assert not so_no_doc, f"{nome} documenta chave inexistente: {sorted(so_no_doc)}"
         assert not so_no_real, f"{nome} nao documenta: {sorted(so_no_real)}"
+
+    @pytest.mark.parametrize("nome", READMES)
+    def test_readme_documenta_todas_as_variaveis(self, nome):
+        """Toda variavel que um evento fornece aparece no README.
+
+        A Web UI mostra os nomes mas nao o que cada um significa; o README e
+        onde isso esta. Variavel nova sem documentacao fica invisivel.
+        """
+        with open(os.path.join(REPO_ROOT, nome), encoding="utf-8") as f:
+            texto = f.read()
+        for ev, variaveis in g.NOTIFICATION_VARIABLES.items():
+            assert f"`{ev}`" in texto, f"{nome} nao documenta o evento {ev}"
+            for v in variaveis:
+                assert "{{" + v + "}}" in texto, \
+                    f"{nome} nao documenta a variavel {{{{{v}}}}} ({ev})"
+
+    @pytest.mark.parametrize("nome", READMES)
+    def test_readme_nao_documenta_variavel_inexistente(self, nome):
+        """O caminho inverso: nada de prometer variavel que o codigo nao passa."""
+        with open(os.path.join(REPO_ROOT, nome), encoding="utf-8") as f:
+            texto = f.read()
+        reais = {v for vs in g.NOTIFICATION_VARIABLES.values() for v in vs}
+        citadas = set(re.findall(r"\{\{(\w+)\}\}", texto))
+        assert citadas <= reais, \
+            f"{nome} documenta variavel inexistente: {sorted(citadas - reais)}"
 
     @pytest.mark.parametrize("nome", READMES)
     def test_exemplo_do_readme_e_aceito_por_load_config(self, nome):

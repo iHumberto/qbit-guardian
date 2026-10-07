@@ -5,6 +5,31 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] — 2026-10-07
+
+Segunda e ultima fatia da nova Web UI desenhada no Penpot: as mensagens de
+notificacao deixam de ser hardcoded e passam a ser editaveis, com liga/desliga
+por tipo.
+
+### Adicionado
+- **Mensagens de notificacao editaveis**, uma por tipo de evento (`optimized`, `removed`, `stalled`), na Web UI ou direto no `config.json`. Dentro do texto, cada `{{...}}` e substituida pelo valor do torrent. Placeholder desconhecido fica **literal** na mensagem: um erro de digitacao aparece em vez de sumir em silencio.
+- **Liga/desliga em dois niveis**, como no prototipo: `notifications.enabled` (geral, no cabecalho do card) e `events.<evento>.enabled` (por tipo). O envio so acontece com os dois ligados. Com a mensagem desligada, o texto **continua visivel** na Web UI mas nao pode ser alterado; com o geral desligado, os toggles de tipo tambem travam, preservando o estado de cada um para quando religar.
+- Variaveis por evento, listadas sob cada caixa na Web UI e documentadas nos dois READMEs: `{{torrentName}}`, `{{priorityMedia}}`, `{{priorityAux}}`, `{{mediaCount}}` (otimizado); `{{torrentName}}`, `{{reason}}`, `{{extensions}}` (removido); `{{torrentName}}`, `{{reason}}`, `{{state}}`, `{{stalledTime}}` (stalled).
+- Novo endpoint `GET /api/defaults` (autenticado) com os titulos/templates padrao e as variaveis de cada evento. A Web UI consome isto em vez de carregar copia das strings: config gravada antes desta versao nao tem a chave `events`, e sem o default a caixa apareceria vazia enquanto o guardian usaria o texto padrao — a tela mentiria sobre o que seria enviado.
+- Novas chaves de config: `notifications.enabled` e `notifications.events.<evento>` com `enabled`, `title` e `template`. Todas opcionais, com fallback campo a campo.
+- Testes: 192 → 242. Cobertura de `app/guardian.py`: 89% → 90%.
+
+### Alterado
+- Os tres `send_notification()` com f-string hardcoded deram lugar a `notify(evento, **variaveis)`, que resolve titulo e template, aplica os dois niveis de toggle e renderiza.
+- Os textos padrao **reproduzem exatamente** as mensagens das versoes anteriores: quem atualizar o container sem mexer na config continua recebendo a notificacao de sempre. Tres testes de regressao comparam o titulo e o corpo byte a byte com o que a v2.0.8 enviava.
+
+### Corrigido
+- Caixa de mensagem apagada (vazia, so espacos, nula ou nao-string) volta ao texto padrao em vez de enviar notificacao em branco. O mesmo vale para o titulo.
+
+### Notas
+- O **titulo** de cada evento nao e exposto na Web UI — o prototipo mostra uma caixa por tipo, e o `deep_merge` do backend preserva o titulo gravado. Continua editavel no `config.json`.
+- `{{stalledTime}}` vem vazio quando a remocao foi pelo ramo de "0 seeds", onde o limiar de stalled nao se aplica; `{{extensions}}` vem vazio quando o motivo foi ausencia de midia valida.
+
 ## [2.0.8] — 2026-10-07
 
 Primeira fatia da nova Web UI desenhada no Penpot. Esta entrega e so a camada

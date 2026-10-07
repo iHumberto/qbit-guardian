@@ -121,8 +121,32 @@ Todas as opções ficam no arquivo `config.json` e podem ser editadas pela Web U
   "guardian": {
     "check_interval_seconds": 300,
     "retry_interval_seconds": 120,
-    "valid_media_extensions": [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".webm"],
-    "dangerous_extensions": [".exe", ".scr", ".bat", ".cmd", ".vbs", ".js", ".com", ".pif", ".msi", ".dll", ".ps1", ".sh", ".bin"],
+    "valid_media_extensions": [
+      ".mkv",
+      ".mp4",
+      ".avi",
+      ".mov",
+      ".m4v",
+      ".ts",
+      ".wmv",
+      ".flv",
+      ".webm"
+    ],
+    "dangerous_extensions": [
+      ".exe",
+      ".scr",
+      ".bat",
+      ".cmd",
+      ".vbs",
+      ".js",
+      ".com",
+      ".pif",
+      ".msi",
+      ".dll",
+      ".ps1",
+      ".sh",
+      ".bin"
+    ],
     "remove_stalled": false,
     "stalled_time": 0,
     "stalled_unit": "hours",
@@ -134,7 +158,25 @@ Todas as opções ficam no arquivo `config.json` e podem ser editadas pela Web U
     "priority_skip": 0
   },
   "notifications": {
-    "apprise_url": ""
+    "apprise_url": "",
+    "enabled": true,
+    "events": {
+      "optimized": {
+        "enabled": true,
+        "title": "⚡ Torrent Otimizado",
+        "template": "Nome: {{torrentName}}\nArquivos de midia priorizados."
+      },
+      "removed": {
+        "enabled": true,
+        "title": "⚠️ Torrent Removido",
+        "template": "Nome: {{torrentName}}\nMotivo: {{reason}}"
+      },
+      "stalled": {
+        "enabled": true,
+        "title": "🗑️ Torrent Removido (stalled)",
+        "template": "Nome: {{torrentName}}\nMotivo: {{reason}}"
+      }
+    }
   },
   "webui": {
     "user": "",
@@ -151,6 +193,33 @@ Todas as opções ficam no arquivo `config.json` e podem ser editadas pela Web U
 | **guardian**     | `check_interval_seconds` (0 = modo webhook), `retry_interval_seconds`, listas de extensões, regras de stalled/sem seeds, prioridades |
 | **notifications** | `apprise_url` — URL compatível com Apprise (veja [documentação do Apprise](https://github.com/caronc/apprise)) |
 | **webui**        | `user`, `password` — credenciais HTTP Basic Auth. Deixe ambos vazios para acesso público             |
+
+### Mensagens de notificação
+
+Cada tipo de notificação tem seu próprio texto, editável na Web UI ou direto no `config.json`, e um liga/desliga próprio — além do liga/desliga geral da seção. O envio só acontece com os **dois** ligados; com a mensagem desligada, o texto continua visível na Web UI, mas não pode ser alterado.
+
+Os textos padrão reproduzem exatamente as mensagens das versões anteriores: quem atualizar sem mexer na configuração continua recebendo a notificação de sempre. Uma caixa apagada volta ao padrão em vez de enviar notificação em branco.
+
+Dentro do texto, cada `{{...}}` da tabela abaixo é substituído pelo valor do torrent. Uma variável que não existe fica literal na mensagem — assim um erro de digitação aparece em vez de sumir em silêncio.
+
+| Evento | Chave em `events` | Variáveis disponíveis |
+|--------|-------------------|------------------------|
+| Torrent otimizado | `optimized` | `{{torrentName}}` `{{priorityMedia}}` `{{priorityAux}}` `{{mediaCount}}` |
+| Torrent removido (perigoso / sem mídia) | `removed` | `{{torrentName}}` `{{reason}}` `{{extensions}}` |
+| Torrent removido (stalled / sem seeds) | `stalled` | `{{torrentName}}` `{{reason}}` `{{state}}` `{{stalledTime}}` |
+
+| Variável | Significado |
+|----------|-------------|
+| `{{extensions}}` | extensões perigosas encontradas (vazio quando o motivo foi ausência de mídia válida) |
+| `{{mediaCount}}` | quantos arquivos de mídia foram priorizados |
+| `{{priorityAux}}` | prioridade aplicada aos arquivos auxiliares (`.nfo`, `.srt`, `.jpg`…) |
+| `{{priorityMedia}}` | prioridade aplicada aos arquivos de mídia |
+| `{{reason}}` | motivo da remoção |
+| `{{stalledTime}}` | limiar de stalled configurado (vazio quando a remoção foi por falta de seeds) |
+| `{{state}}` | estado do torrent no qBittorrent (`stalledDL`, `metaDL`…) |
+| `{{torrentName}}` | nome do torrent |
+
+O **título** de cada notificação (`events.<evento>.title`) não aparece na Web UI, mas continua editável no `config.json`.
 
 ### Autenticação da Web UI
 
@@ -308,7 +377,7 @@ Deixe os campos `sonarr.url` e `radarr.url` em branco. O guardian funciona perfe
 # Instalar dependências (runtime + ferramentas de teste)
 pip install -r requirements-dev.txt
 
-# Rodar todos os testes (192: 172 funcionais + 20 de segurança)
+# Rodar todos os testes (242: 222 funcionais + 20 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais

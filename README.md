@@ -121,8 +121,32 @@ All settings live in `config.json` and can be edited through the Web UI or direc
   "guardian": {
     "check_interval_seconds": 300,
     "retry_interval_seconds": 120,
-    "valid_media_extensions": [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".webm"],
-    "dangerous_extensions": [".exe", ".scr", ".bat", ".cmd", ".vbs", ".js", ".com", ".pif", ".msi", ".dll", ".ps1", ".sh", ".bin"],
+    "valid_media_extensions": [
+      ".mkv",
+      ".mp4",
+      ".avi",
+      ".mov",
+      ".m4v",
+      ".ts",
+      ".wmv",
+      ".flv",
+      ".webm"
+    ],
+    "dangerous_extensions": [
+      ".exe",
+      ".scr",
+      ".bat",
+      ".cmd",
+      ".vbs",
+      ".js",
+      ".com",
+      ".pif",
+      ".msi",
+      ".dll",
+      ".ps1",
+      ".sh",
+      ".bin"
+    ],
     "remove_stalled": false,
     "stalled_time": 0,
     "stalled_unit": "hours",
@@ -134,7 +158,25 @@ All settings live in `config.json` and can be edited through the Web UI or direc
     "priority_skip": 0
   },
   "notifications": {
-    "apprise_url": ""
+    "apprise_url": "",
+    "enabled": true,
+    "events": {
+      "optimized": {
+        "enabled": true,
+        "title": "⚡ Torrent Otimizado",
+        "template": "Nome: {{torrentName}}\nArquivos de midia priorizados."
+      },
+      "removed": {
+        "enabled": true,
+        "title": "⚠️ Torrent Removido",
+        "template": "Nome: {{torrentName}}\nMotivo: {{reason}}"
+      },
+      "stalled": {
+        "enabled": true,
+        "title": "🗑️ Torrent Removido (stalled)",
+        "template": "Nome: {{torrentName}}\nMotivo: {{reason}}"
+      }
+    }
   },
   "webui": {
     "user": "",
@@ -151,6 +193,33 @@ All settings live in `config.json` and can be edited through the Web UI or direc
 | **guardian**    | `check_interval_seconds` (0 = webhook mode), `retry_interval_seconds`, extension lists, stalled/seedless rules, file priorities |
 | **notifications** | `apprise_url` — Apprise-compatible URL (see [Apprise docs](https://github.com/caronc/apprise)) |
 | **webui**       | `user`, `password` — HTTP Basic Auth credentials. Leave both empty for public access |
+
+### Notification messages
+
+Each notification type has its own text — editable in the Web UI or directly in `config.json` — and its own on/off switch, on top of the section's master switch. A message is only sent when **both** are on; while a message is off its text stays visible in the Web UI but cannot be edited.
+
+The default texts reproduce exactly the messages from earlier versions: updating without touching your configuration keeps the notifications you already get. Clearing a box falls back to the default instead of sending an empty notification.
+
+Inside the text, each `{{...}}` from the table below is replaced with the torrent's value. An unknown variable is left literal in the message, so a typo shows up instead of silently disappearing.
+
+| Event | Key under `events` | Available variables |
+|-------|--------------------|---------------------|
+| Torrent optimised | `optimized` | `{{torrentName}}` `{{priorityMedia}}` `{{priorityAux}}` `{{mediaCount}}` |
+| Torrent removed (dangerous / no media) | `removed` | `{{torrentName}}` `{{reason}}` `{{extensions}}` |
+| Torrent removed (stalled / seedless) | `stalled` | `{{torrentName}}` `{{reason}}` `{{state}}` `{{stalledTime}}` |
+
+| Variable | Meaning |
+|----------|---------|
+| `{{extensions}}` | dangerous extensions found (empty when the reason was no valid media) |
+| `{{mediaCount}}` | how many media files were prioritised |
+| `{{priorityAux}}` | priority applied to auxiliary files (`.nfo`, `.srt`, `.jpg`…) |
+| `{{priorityMedia}}` | priority applied to media files |
+| `{{reason}}` | removal reason |
+| `{{stalledTime}}` | configured stalled threshold (empty when the removal was for lack of seeds) |
+| `{{state}}` | torrent state in qBittorrent (`stalledDL`, `metaDL`…) |
+| `{{torrentName}}` | torrent name |
+
+Each notification's **title** (`events.<event>.title`) is not exposed in the Web UI but remains editable in `config.json`.
 
 ### Web UI Authentication
 
@@ -308,7 +377,7 @@ Leave the `sonarr.url` and `radarr.url` fields empty. The guardian works fine wi
 # Install dependencies (runtime + test tooling)
 pip install -r requirements-dev.txt
 
-# Run all tests (192: 172 functional + 20 security)
+# Run all tests (242: 222 functional + 20 security)
 python -m pytest test/ -v
 
 # Functional tests only

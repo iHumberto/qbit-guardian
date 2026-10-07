@@ -117,6 +117,22 @@ def api_save_config():
         return jsonify({"error": str(e)}), 400
 
 
+@app.route("/api/defaults", methods=["GET"])
+@requires_auth
+def api_defaults():
+    """Titulos/templates padrao e variaveis disponiveis por evento.
+
+    A Web UI consome isto em vez de carregar copia das mesmas strings: config
+    gravada antes da v2.1.0 nao tem a chave `events`, e sem o default a caixa
+    apareceria vazia enquanto o guardian usaria o texto padrao — a tela
+    mentiria sobre o que seria enviado.
+    """
+    return jsonify({
+        "notifications": guardian.DEFAULT_NOTIFICATIONS,
+        "notification_variables": guardian.NOTIFICATION_VARIABLES,
+    })
+
+
 @app.route("/api/health")
 def api_health():
     return jsonify({"status": "ok"})

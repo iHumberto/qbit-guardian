@@ -14,8 +14,32 @@
   "guardian": {
     "check_interval_seconds": 300,
     "retry_interval_seconds": 120,
-    "valid_media_extensions": [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".webm"],
-    "dangerous_extensions": [".exe", ".scr", ".bat", ".cmd", ".vbs", ".js", ".com", ".pif", ".msi", ".dll", ".ps1", ".sh", ".bin"],
+    "valid_media_extensions": [
+      ".mkv",
+      ".mp4",
+      ".avi",
+      ".mov",
+      ".m4v",
+      ".ts",
+      ".wmv",
+      ".flv",
+      ".webm"
+    ],
+    "dangerous_extensions": [
+      ".exe",
+      ".scr",
+      ".bat",
+      ".cmd",
+      ".vbs",
+      ".js",
+      ".com",
+      ".pif",
+      ".msi",
+      ".dll",
+      ".ps1",
+      ".sh",
+      ".bin"
+    ],
     "remove_stalled": false,
     "stalled_time": 0,
     "stalled_unit": "hours",
@@ -27,7 +51,25 @@
     "priority_skip": 0
   },
   "notifications": {
-    "apprise_url": ""
+    "apprise_url": "",
+    "enabled": true,
+    "events": {
+      "optimized": {
+        "enabled": true,
+        "title": "⚡ Torrent Otimizado",
+        "template": "Nome: {{torrentName}}\nArquivos de midia priorizados."
+      },
+      "removed": {
+        "enabled": true,
+        "title": "⚠️ Torrent Removido",
+        "template": "Nome: {{torrentName}}\nMotivo: {{reason}}"
+      },
+      "stalled": {
+        "enabled": true,
+        "title": "🗑️ Torrent Removido (stalled)",
+        "template": "Nome: {{torrentName}}\nMotivo: {{reason}}"
+      }
+    }
   },
   "webui": {
     "user": "",
