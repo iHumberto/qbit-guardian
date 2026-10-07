@@ -59,7 +59,14 @@ const translations = {
         help_cred: 'Deixe em branco para manter a senha atual. A senha atual \u00E9 sempre obrigat\u00F3ria.',
         btn_cancel: 'Cancelar',
         btn_save_short: 'Salvar',
-        toast_cred_saved: 'Credenciais alteradas. Entre de novo com os dados novos.'
+        toast_cred_saved: 'Credenciais alteradas. Entre de novo com os dados novos.',
+        login_title: '\uD83D\uDD10 Entrar',
+        label_login_password: 'Senha',
+        btn_login: 'Entrar',
+        login_invalid: 'Usu\u00E1rio ou senha inv\u00E1lidos.',
+        login_throttled: 'Tentativas demais. Aguarde alguns minutos e tente de novo.',
+        login_hint: 'Primeiro acesso? A senha foi gerada no startup e aparece em `docker logs qbit-guardian`.',
+        btn_logout: 'Sair'
     },
     'en-US': {
         title: '\uD83D\uDEE1\uFE0F qbit-guardian',
@@ -114,7 +121,14 @@ const translations = {
         help_cred: 'Leave blank to keep the current password. The current password is always required.',
         btn_cancel: 'Cancel',
         btn_save_short: 'Save',
-        toast_cred_saved: 'Credentials changed. Sign in again with the new details.'
+        toast_cred_saved: 'Credentials changed. Sign in again with the new details.',
+        login_title: '\uD83D\uDD10 Sign in',
+        label_login_password: 'Password',
+        btn_login: 'Sign in',
+        login_invalid: 'Invalid username or password.',
+        login_throttled: 'Too many attempts. Wait a few minutes and try again.',
+        login_hint: 'First time? The password was generated at startup and shows up in `docker logs qbit-guardian`.',
+        btn_logout: 'Sign out'
     }
 };
 

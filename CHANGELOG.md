@@ -5,6 +5,30 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] — 2026-10-07
+
+Tela de login propria no lugar do popup nativo do navegador.
+
+### Adicionado
+- **Pagina de login** (`/login`), com a paleta e os tokens do resto do painel: card centralizado, usuario, senha e um aviso de onde achar a senha inicial. Seletor de idioma no canto, como no painel. Nao carrega nada de fora — painel de homelab precisa abrir sem internet.
+- **Sessao por cookie assinado.** `POST /api/login` troca credencial por um token assinado com `webui.secret_key`, provisionada no startup junto com a senha. O cookie e `HttpOnly` (fora do alcance de qualquer JS), `SameSite=Lax` (nao acompanha POST disparado por outro site) e vale 7 dias.
+- **O token carrega um marcador do par usuario+senha**, entao trocar qualquer um dos dois invalida todas as sessoes abertas — sem precisar guardar lista de sessao nenhuma. Apagar `webui.secret_key` do config e o botao de panico: derruba tudo de uma vez.
+- **Botao "Sair"** no modal de conta. Com Basic Auth nao havia como sair; com sessao, sair e expectativa basica.
+- **Freio de forca bruta** no login: 5 tentativas por cliente em 5 minutos, depois `429` com `Retry-After`. Com formulario (em vez do popup do navegador) um script consegue tentar milhares de senhas sem atrito. A janela desliza, o bloqueio vale **tambem para a senha certa** — senao bastaria errar quatro vezes e acertar na quinta sem custo — e a contagem e por cliente, para um vizinho errando a senha nao trancar os outros.
+
+### Alterado
+- **O header `WWW-Authenticate` saiu das respostas 401.** Era ele que fazia o navegador abrir o popup nativo de usuario e senha. Agora navegacao sem sessao **redireciona** para `/login`, enquanto chamada de API continua recebendo `401` em JSON — o `fetch` da propria pagina precisa do 401 para mostrar o erro.
+- **HTTP Basic Auth continua funcionando** para quem nao tem tela onde digitar: `curl`, scripts e o hook do webhook seguem iguais. As duas formas convivem de proposito.
+- `static/i18n.js` e `static/favicon.svg` passaram a ser **publicos**, por uma allowlist explicita: a tela de login os carrega antes de existir sessao. Sao strings de interface e um icone — nenhum dado de configuracao. `index.html` continua exigindo autenticacao.
+- Trocar credenciais pelo modal agora manda para `/login` em vez de recarregar o painel: a sessao acabou de ser invalidada, e recarregar so mostraria 401.
+- `webui.secret_key` nunca e devolvida pelo `GET /api/config` nem aceita pelo `POST /api/config` — quem a tiver forja login.
+
+### Notas
+- Testes: 476 → **546**. Cobertura: **100%** em `app/web.py` e `app/auth.py`; 99% de ramo no total, zero statements descobertos.
+- 29 mutacoes da tela de login aplicadas uma a uma, 29 pegas — depois de fechar duas lacunas que a primeira rodada expos: nada verificava o provisionamento da `secret_key` (sem ela a tela de login devolve 500 numa instalacao nova) e o teste do botao Sair conferia a regra CSS sem conferir se o botao tinha a classe.
+- Uma das mutacoes nao verificava nada: trocar `TENTATIVAS_MAX` por um valor alto deixava a suite verde, porque os testes montam o cenario lendo a propria constante. Virou `TestConstantesDeSeguranca`, que fixa a faixa aceitavel (3 a 10 tentativas, janela >= 60s, sessao <= 30 dias) em vez do cenario.
+- Fluxo verificado no navegador: redirecionamento sem sessao, login com senha errada e certa, cookie invisivel ao JS, freio disparando na sexta tentativa, troca de idioma e botao de sair.
+
 ## [2.2.0] — 2026-10-07
 
 Endurecimento de seguranca a partir de uma auditoria da superficie de ataque.

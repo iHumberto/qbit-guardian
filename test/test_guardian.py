@@ -3814,7 +3814,8 @@ class TestGarantirCredenciais:
     def test_hash_existente_nao_e_tocado(self, capsys):
         existente = a.hash_senha("ja-definida")
         cfg, alterou = a.garantir_credenciais(
-            {"webui": {"user": "humberto", "password": existente}})
+            {"webui": {"user": "humberto", "password": existente,
+                       "secret_key": "chave-ja-definida"}})
         assert alterou is False
         assert cfg["webui"]["password"] == existente
 
@@ -4034,13 +4035,16 @@ class TestWebUIConta:
     def test_usuario_atual_vem_do_get_config(self):
         assert "setVal('cred_user', (c.webui || {}).user)" in self.html
 
-    def test_recarrega_depois_de_trocar(self):
-        """O navegador segue mandando o Basic Auth antigo.
+    def test_manda_para_o_login_depois_de_trocar(self):
+        """Trocar credencial invalida a sessao: o cookie carrega um marcador
+        do par usuario+senha.
 
-        Sem recarregar, a proxima chamada tomaria 401 e pareceria bug da
-        propria troca.
+        Recarregar o painel so mostraria 401 — o caminho honesto e a tela de
+        login.
         """
-        assert "location.reload()" in self.html
+        envio = re.search(r"credForm\.addEventListener\('submit'.*?\n\}\);",
+                          self.html, re.S).group(0)
+        assert "location.href = '/login'" in envio
 
     def test_fecha_por_esc_e_por_clique_fora(self):
         html = self.html
@@ -4213,3 +4217,184 @@ class TestApiConfigBordas:
         r = client.get("/api/config")
         assert r.status_code == 200
         assert "webui" not in r.get_json()
+
+
+# ── Tela de login ──────────────────────────────────────────────────────
+
+class TestWebUILogin:
+    """static/login.html — a tela que substituiu o popup do navegador."""
+
+    @property
+    def html(self):
+        return _read_static("login.html")
+
+    def test_campos_de_usuario_e_senha(self):
+        html = self.html
+        usuario = re.search(r'<input id="login_user"[^>]*>', html).group(0)
+        senha = re.search(r'<input id="login_password"[^>]*>', html).group(0)
+        assert 'type="password"' in senha
+        assert 'type="password"' not in usuario
+        assert "required" in usuario and "required" in senha
+        assert 'for="login_user"' in html and 'for="login_password"' in html
+
+    def test_foco_comeca_no_usuario(self):
+        assert "autofocus" in re.search(r'<input id="login_user"[^>]*>', self.html).group(0)
+
+    def test_autocomplete_para_o_gerenciador_de_senhas(self):
+        html = self.html
+        assert 'autocomplete="username"' in html
+        assert 'autocomplete="current-password"' in html
+
+    def test_envia_para_api_login_em_json(self):
+        envio = re.search(r"form\.addEventListener\('submit'.*?\n\}\);", self.html, re.S).group(0)
+        assert "'/api/login'" in envio
+        assert "'Content-Type': 'application/json'" in envio
+
+    def test_redireciona_para_o_painel_no_sucesso(self):
+        assert "location.href = '/'" in self.html
+
+    def test_trata_429_e_401_com_mensagem_propria(self):
+        """Erro generico do servidor nao diz ao usuario o que fazer."""
+        html = self.html
+        assert "r.status === 429" in html
+        assert "login_throttled" in html
+        assert "r.status === 401" in html
+        assert "login_invalid" in html
+
+    def test_diz_onde_achar_a_senha_inicial(self):
+        """Sem isso o primeiro acesso vira suporte: a senha so existe no log."""
+        assert "login_hint" in self.html
+        js = _read_static("i18n.js")
+        assert "docker logs qbit-guardian" in js
+
+    def test_usa_os_tokens_do_design_system(self):
+        """Mesma paleta do painel — a tela de login nao e uma ilha."""
+        html = self.html
+        for token, valor in [("--bg", "#1a1a2e"), ("--card", "#16213e"),
+                             ("--field", "#ffffff"), ("--accent", "#e94560"),
+                             ("--col", "365px"), ("--r-card", "15px")]:
+            assert re.search(r"%s:\s*%s" % (re.escape(token), re.escape(valor)), html), token
+
+    def test_tem_seletor_de_idioma(self):
+        html = self.html
+        assert 'id="lang-bar"' in html
+        assert '<script src="/i18n.js">' in html
+        assert "initI18N()" in html
+
+    def test_nao_carrega_nada_de_fora(self):
+        """Painel de homelab precisa abrir sem internet."""
+        html = self.html
+        externos = re.findall(r'(?:src|href)="(https?://[^"]+)"', html)
+        assert externos == [], f"recurso externo na tela de login: {externos}"
+
+    @pytest.mark.parametrize("chave", [
+        "login_title", "label_login_password", "btn_login",
+        "login_invalid", "login_throttled", "login_hint", "btn_logout",
+    ])
+    def test_chaves_de_traducao_nos_dois_idiomas(self, chave):
+        js = _read_static("i18n.js")
+        blocos = re.findall(r"'(?:pt-BR|en-US)':\s*\{(.*?)\n    \}", js, re.S)
+        assert len(blocos) == 2
+        for bloco in blocos:
+            assert re.search(r"\b%s\s*:" % chave, bloco), f"{chave} ausente num idioma"
+
+
+class TestWebUISair:
+    """Botao de sair no modal de conta.
+
+    Com Basic Auth nao havia como sair; com sessao, sair e expectativa basica.
+    """
+
+    @property
+    def html(self):
+        return _read_static("index.html")
+
+    def test_botao_existe_no_modal(self):
+        html = self.html
+        acoes = re.search(r'<div class="modal-actions">(.*?)</div>', html, re.S).group(1)
+        assert 'id="cred-logout"' in acoes
+        assert 'data-i18n="btn_logout"' in acoes
+
+    def test_sair_fica_na_outra_ponta(self):
+        """Nao e acao do formulario: nao pode encostar em Salvar.
+
+        Checa os dois lados — a regra CSS e a classe no botao. Verificar so a
+        regra deixa passar o botao perder a classe.
+        """
+        html = self.html
+        regra = re.search(r"(?m)^\s*\.modal-actions \.secundario\s*\{([^}]*)\}",
+                          html).group(1)
+        assert "margin-right:auto" in regra
+
+        botao = re.search(r'<button[^>]*id="cred-logout"[^>]*>', html).group(0)
+        assert 'class="secundario"' in botao, botao
+
+    def test_chama_api_logout_e_vai_para_o_login(self):
+        trecho = re.search(r"cred-logout'\)\.addEventListener.*?\n\}\);",
+                           self.html, re.S).group(0)
+        assert "'/api/logout'" in trecho
+        assert "method: 'POST'" in trecho
+        assert "location.href = '/login'" in trecho
+
+    def test_falha_de_rede_nao_impede_sair(self):
+        """Sair local vale mesmo se o servidor nao responder."""
+        trecho = re.search(r"cred-logout'\)\.addEventListener.*?\n\}\);",
+                           self.html, re.S).group(0)
+        assert "catch" in trecho
+
+
+class TestChaveDeSessao:
+    """`webui.secret_key` e provisionada junto com a senha.
+
+    Sem ela o `POST /api/login` nao consegue emitir token e devolve 500: numa
+    instalacao nova, a tela de login ficaria inutilizavel mesmo com a senha
+    correta em maos.
+    """
+
+    def test_config_vazia_ganha_chave(self, capsys):
+        cfg, alterou = a.garantir_credenciais({"webui": {}})
+        assert alterou is True
+        assert isinstance(cfg["webui"]["secret_key"], str)
+        assert cfg["webui"]["secret_key"].strip()
+
+    def test_chave_existente_e_preservada(self, capsys):
+        existente = a.gerar_secret_key()
+        cfg, _ = a.garantir_credenciais(
+            {"webui": {"user": "admin", "password": a.hash_senha("x"),
+                       "secret_key": existente}})
+        assert cfg["webui"]["secret_key"] == existente
+
+    def test_config_com_senha_mas_sem_chave_ganha_chave(self, capsys):
+        """Config da v2.2.0: tinha senha em hash, nao tinha chave de sessao."""
+        cfg, alterou = a.garantir_credenciais(
+            {"webui": {"user": "admin", "password": a.hash_senha("x")}})
+        assert alterou is True
+        assert cfg["webui"].get("secret_key")
+
+    def test_bootstrap_grava_a_chave_no_disco(self, tmp_config, capsys):
+        cfg = g.load_config()
+        cfg["webui"] = {"user": "", "password": "", "secret_key": ""}
+        g.save_config(cfg)
+        g.bootstrap_credenciais()
+        with open(tmp_config) as f:
+            assert json.load(f)["webui"]["secret_key"]
+
+    def test_chave_e_longa_e_aleatoria(self):
+        chaves = {a.gerar_secret_key() for _ in range(10)}
+        assert len(chaves) == 10
+        assert all(len(c) >= 32 for c in chaves)
+
+    def test_chave_nao_deriva_da_senha(self, capsys):
+        """Reaproveitar o hash da senha como chave assinante junta dois
+        segredos de propositos diferentes: vazar um entregaria o outro.
+
+        O cenario precisa ser o de uma senha JA existente — numa config vazia
+        a chave e criada antes da senha, e qualquer implementacao passaria.
+        """
+        senha_hash = a.hash_senha("x")
+        cfg, _ = a.garantir_credenciais(
+            {"webui": {"user": "admin", "password": senha_hash}})
+        chave = cfg["webui"]["secret_key"]
+        assert chave != senha_hash
+        assert senha_hash not in chave
+        assert cfg["webui"]["password"] not in chave

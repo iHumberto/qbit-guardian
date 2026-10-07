@@ -7,12 +7,15 @@ Exige HTTP Basic Auth: as credenciais sao provisionadas no startup
 """
 
 import copy
+import hashlib
 import json
 import os
+import time
 import warnings
 import functools
 from urllib.parse import urlparse
-from flask import Flask, request, jsonify, send_from_directory, Response
+from flask import Flask, request, jsonify, send_from_directory, Response, redirect
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.exceptions import HTTPException
 import app.guardian as guardian
 import app.auth as auth
@@ -39,6 +42,22 @@ MAX_BODY_BYTES = 1 * 1024 * 1024
 app.config["MAX_CONTENT_LENGTH"] = MAX_BODY_BYTES
 
 METODOS_DE_ESCRITA = {"POST", "PUT", "PATCH", "DELETE"}
+
+# Cookie de sessao da tela de login.
+COOKIE_SESSAO = "qbg_sessao"
+SESSAO_VALIDADE = 7 * 24 * 3600
+SAL_SESSAO = "qbit-guardian-sessao"
+
+# Arquivos de static/ servidos SEM autenticacao, porque a tela de login
+# precisa deles antes de existir sessao. Sao strings de interface e um icone —
+# nenhum dado de configuracao. `index.html` deliberadamente fica de fora.
+ARQUIVOS_PUBLICOS = {"login.html", "i18n.js", "favicon.svg"}
+
+# Freio de forca bruta na tela de login: com formulario (em vez do popup do
+# navegador) um script consegue tentar milhares de senhas sem atrito.
+TENTATIVAS_MAX = 5
+JANELA_TENTATIVAS = 300
+_tentativas = {}
 
 
 # ── Auth ────────────────────────────────────────────────────────────────
@@ -69,29 +88,120 @@ def _check_auth(username, password):
     return ok_usuario and ok_senha
 
 
+# ── Sessao (tela de login) ──────────────────────────────────────────────
+
+def _marcador_credencial(webui):
+    """Impressao curta do par usuario+senha guardado.
+
+    Vai dentro do cookie: trocar usuario ou senha muda o marcador e invalida
+    todas as sessoes abertas, sem precisar guardar lista de sessao nenhuma.
+    """
+    bruto = f"{webui.get('user') or ''}:{webui.get('password') or ''}".encode()
+    return hashlib.sha256(bruto).hexdigest()[:16]
+
+
+def _serializador():
+    """Assinador do cookie, ou None se ainda nao ha chave provisionada."""
+    webui = _read_config().get("webui") or {}
+    chave = webui.get("secret_key")
+    if not isinstance(chave, str) or not chave.strip():
+        return None
+    return URLSafeTimedSerializer(chave, salt=SAL_SESSAO)
+
+
+def _emitir_sessao():
+    """Token assinado para o usuario configurado."""
+    serializador = _serializador()
+    if serializador is None:
+        return None
+    webui = _read_config().get("webui") or {}
+    return serializador.dumps({"u": webui.get("user"),
+                               "v": _marcador_credencial(webui)})
+
+
+def _sessao_valida():
+    token = request.cookies.get(COOKIE_SESSAO)
+    if not token:
+        return False
+    serializador = _serializador()
+    if serializador is None:
+        return False
+    try:
+        dados = serializador.loads(token, max_age=SESSAO_VALIDADE)
+    except (BadSignature, SignatureExpired):
+        return False
+    if not isinstance(dados, dict):
+        return False
+    webui = _read_config().get("webui") or {}
+    return (dados.get("u") == webui.get("user")
+            and dados.get("v") == _marcador_credencial(webui))
+
+
+def _quer_html():
+    """True quando e navegacao de navegador, nao chamada de API.
+
+    Decide entre redirecionar para a tela de login e devolver 401 em JSON: o
+    `fetch` da propria pagina precisa do 401 para mostrar o erro, enquanto quem
+    digitou a URL precisa ver a tela.
+    """
+    if request.path.startswith("/api/"):
+        return False
+    return "text/html" in (request.headers.get("Accept") or "")
+
+
 def _auth_required():
-    """Retorna 401 com header WWW-Authenticate."""
-    return Response(
-        "Autenticacao necessaria",
-        401,
-        {"WWW-Authenticate": "Basic realm=\"qbit-guardian\""}
-    )
+    """Manda para a tela de login, ou devolve 401 em JSON.
+
+    Sem `WWW-Authenticate`: era ele que fazia o navegador abrir o popup nativo
+    de usuario e senha, no lugar da tela de login da aplicacao.
+    """
+    if _quer_html():
+        return redirect("/login")
+    return jsonify({"error": "autenticacao necessaria"}), 401
 
 
 def requires_auth(f):
-    """Decorator: exige HTTP Basic Auth se configurada em webui.user/webui.password.
+    """Exige sessao valida OU HTTP Basic Auth.
 
-    Se ambos os campos estiverem vazios, auth e desabilitada e o endpoint e publico.
+    As duas formas convivem de proposito: o navegador usa a tela de login e o
+    cookie; `curl` e o hook do webhook continuam mandando Basic Auth, que nao
+    tem tela para preencher.
+
+    Com `webui.user` e `webui.password` vazios a autenticacao fica desligada —
+    escape hatch para quem ja protege a porta por outro meio.
     """
     @functools.wraps(f)
     def decorated(*args, **kwargs):
         if not _is_auth_enabled():
             return f(*args, **kwargs)
+        if _sessao_valida():
+            return f(*args, **kwargs)
         auth_header = request.authorization
-        if not auth_header or not _check_auth(auth_header.username, auth_header.password):
-            return _auth_required()
-        return f(*args, **kwargs)
+        if auth_header and _check_auth(auth_header.username, auth_header.password):
+            return f(*args, **kwargs)
+        return _auth_required()
     return decorated
+
+
+# ── Freio de forca bruta ────────────────────────────────────────────────
+
+def _chave_tentativa():
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+
+
+def _bloqueado_por_tentativas():
+    agora = time.time()
+    recentes = [t for t in _tentativas.get(_chave_tentativa(), []) if agora - t < JANELA_TENTATIVAS]
+    _tentativas[_chave_tentativa()] = recentes
+    return len(recentes) >= TENTATIVAS_MAX
+
+
+def _registrar_falha():
+    _tentativas.setdefault(_chave_tentativa(), []).append(time.time())
+
+
+def _limpar_tentativas():
+    _tentativas.pop(_chave_tentativa(), None)
 
 
 # ── CSRF ────────────────────────────────────────────────────────────────
@@ -184,10 +294,67 @@ def _config_para_leitura():
     webui = cfg.get("webui")
     if isinstance(webui, dict):
         webui.pop("password", None)
+        # A chave de sessao assina o cookie: quem a tiver forja login.
+        webui.pop("secret_key", None)
     return cfg
 
 
 # ── Rotas ──────────────────────────────────────────────────────────────
+
+@app.route("/login")
+def pagina_login():
+    """Tela de login. Publica por definicao.
+
+    Quem ja tem sessao valida nao precisa dela — vai direto para o painel,
+    senao o usuario ficaria olhando um formulario que nao precisa preencher.
+    """
+    if _is_auth_enabled() and _sessao_valida():
+        return redirect("/")
+    return send_from_directory(STATIC_DIR, "login.html")
+
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    erro = _exige_json()
+    if erro:
+        return erro
+
+    if _bloqueado_por_tentativas():
+        resposta = jsonify({"error": "tentativas demais, aguarde alguns minutos"})
+        resposta.headers["Retry-After"] = str(JANELA_TENTATIVAS)
+        return resposta, 429
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "corpo invalido"}), 400
+
+    if not _check_auth(data.get("user") or "", data.get("password") or ""):
+        _registrar_falha()
+        log.warning("login recusado")
+        return jsonify({"error": "usuario ou senha invalidos"}), 401
+
+    token = _emitir_sessao()
+    if token is None:
+        return jsonify({"error": "sessao indisponivel: secret_key ausente"}), 500
+
+    _limpar_tentativas()
+    resposta = jsonify({"status": "ok"})
+    resposta.set_cookie(
+        COOKIE_SESSAO, token,
+        max_age=SESSAO_VALIDADE,
+        httponly=True,       # fora do alcance de qualquer JS
+        samesite="Lax",      # o cookie nao acompanha POST de outro site
+        path="/",
+    )
+    return resposta
+
+
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    resposta = jsonify({"status": "ok"})
+    resposta.delete_cookie(COOKIE_SESSAO, path="/")
+    return resposta
+
 
 @app.route("/")
 @requires_auth
@@ -338,14 +505,17 @@ def api_trigger():
 
 
 @app.route("/<path:arquivo>")
-@requires_auth
 def arquivo_estatico(arquivo):
-    """Serve static/ atras da autenticacao.
+    """Serve static/ — autenticado, menos o que a tela de login precisa.
 
-    `send_from_directory` rejeita path traversal; a rota existe para que
-    `/index.html` e `/i18n.js` nao fiquem publicos enquanto `/` pede senha.
+    `send_from_directory` rejeita path traversal. A rota existe para que
+    `/index.html` nao fique publico enquanto `/` pede senha; `i18n.js` e
+    `favicon.svg` sao liberados porque a tela de login os carrega antes de
+    existir sessao, e nao contem nada alem de strings de interface.
     """
-    return send_from_directory(STATIC_DIR, arquivo)
+    if arquivo in ARQUIVOS_PUBLICOS:
+        return send_from_directory(STATIC_DIR, arquivo)
+    return requires_auth(lambda: send_from_directory(STATIC_DIR, arquivo))()
 
 
 # ── Entrypoint ─────────────────────────────────────────────────────────

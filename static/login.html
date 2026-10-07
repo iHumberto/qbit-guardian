@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>qbit-guardian</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<style>
+  /* Mesmos tokens de index.html. Referencia durável no vault:
+     DevOpsExpert/qbit-guardian/conceitos/design-system-webui.md */
+  :root {
+    --bg: #1a1a2e;
+    --card: #16213e;
+    --line: #ffffff;
+    --text: #ffffff;
+    --text-on-field: #1a1a2e;
+    --field: #ffffff;
+    --accent: #e94560;
+
+    --col: 365px;
+    --card-pad-x: 26px;
+    --card-pad-y: 14px;
+
+    --r-card: 15px;
+    --r-pill: 13px;
+
+    --fs-title: 36px;
+    --fs-base: 14px;
+    --fs-help: 11px;
+    --fs-btn: 16px;
+  }
+
+  * { box-sizing:border-box; margin:0; padding:0; }
+
+  body {
+    background:var(--bg); color:var(--text);
+    font-family:'Source Sans 3','Source Sans Pro',-apple-system,BlinkMacSystemFont,sans-serif;
+    font-size:var(--fs-base);
+    min-height:100vh;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:24px 20px;
+  }
+
+  /* O seletor de idioma acompanha o canto, como no painel. */
+  .topbar {
+    position:fixed; top:24px; right:20px;
+    display:flex; align-items:center; gap:14px;
+  }
+  .lang-bar select {
+    background:var(--card); color:var(--text); border:1px solid var(--line);
+    border-radius:14px; height:28px; padding:0 24px 0 9px; font-size:13px; cursor:pointer;
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 9px center;
+  }
+  .lang-bar select:focus { outline:none; border-color:var(--accent); }
+
+  h1 { font-size:var(--fs-title); font-weight:400; text-align:center; line-height:1.2; }
+  .subtitle { font-size:var(--fs-base); text-align:center; margin:6px 0 34px; }
+
+  .card {
+    background:var(--card); border:1px solid var(--line); border-radius:var(--r-card);
+    padding:var(--card-pad-y) var(--card-pad-x);
+    width:100%; max-width:var(--col);
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .card h2 { font-size:var(--fs-base); font-weight:400; }
+
+  .field label { display:block; font-size:var(--fs-base); margin-bottom:5px; }
+  .field input {
+    width:100%; background:var(--field); color:var(--text-on-field);
+    border:none; border-radius:var(--r-pill); font-size:var(--fs-base);
+    font-family:inherit; height:26px; padding:0 12px;
+  }
+  .field input:focus { outline:2px solid var(--accent); outline-offset:0; }
+
+  .btn-login {
+    height:40px; border-radius:var(--r-card);
+    background:var(--card); border:1px solid var(--line); color:var(--text);
+    font-size:var(--fs-btn); font-family:inherit; cursor:pointer; margin-top:6px;
+  }
+  .btn-login:hover { background:#1d2a4d; }
+  .btn-login:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .btn-login:disabled { opacity:.6; cursor:progress; }
+
+  /* O erro fica no card, nao em toast: a resposta pertence ao formulario. */
+  .erro {
+    font-size:var(--fs-help); line-height:1.3; color:var(--accent);
+    min-height:15px;
+  }
+  .erro:empty { display:none; }
+
+  .dica { font-size:var(--fs-help); line-height:1.3; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="lang-bar" id="lang-bar"></div>
+</div>
+
+<h1 data-i18n="title">🛡️ qbit-guardian</h1>
+<p class="subtitle" data-i18n="subtitle">Protege seu qBittorrent contra torrents maliciosos</p>
+
+<form class="card" id="form-login">
+  <h2 data-i18n="login_title">🔐 Entrar</h2>
+  <div class="field">
+    <label for="login_user" data-i18n="label_cred_user">Usuário</label>
+    <input id="login_user" autocomplete="username" autofocus required>
+  </div>
+  <div class="field">
+    <label for="login_password" data-i18n="label_login_password">Senha</label>
+    <input id="login_password" type="password" autocomplete="current-password" required>
+  </div>
+  <p class="erro" id="erro" role="alert"></p>
+  <button type="submit" class="btn-login" id="btn-login" data-i18n="btn_login">Entrar</button>
+  <p class="dica" data-i18n="login_hint">Primeiro acesso? A senha foi gerada no startup e aparece em <code>docker logs qbit-guardian</code>.</p>
+</form>
+
+<script src="/i18n.js"></script>
+<script>
+const form = document.getElementById('form-login');
+const botao = document.getElementById('btn-login');
+const alvoErro = document.getElementById('erro');
+
+function mostrarErro(chave, texto) {
+  // Mensagem do servidor so aparece quando nao ha chave traduzida: o backend
+  // responde num idioma so, e a tela segue o idioma escolhido pelo usuario.
+  alvoErro.textContent = chave ? t(chave) : (texto || '');
+}
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  mostrarErro(null, '');
+  botao.disabled = true;
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user: document.getElementById('login_user').value,
+        password: document.getElementById('login_password').value
+      })
+    });
+    if (r.ok) {
+      location.href = '/';
+      return;
+    }
+    if (r.status === 429) mostrarErro('login_throttled');
+    else if (r.status === 401) mostrarErro('login_invalid');
+    else {
+      const corpo = await r.json().catch(() => ({}));
+      mostrarErro(null, corpo.error || r.statusText);
+    }
+  } catch (err) {
+    mostrarErro(null, err.message);
+  } finally {
+    botao.disabled = false;
+    document.getElementById('login_password').select();
+  }
+});
+
+initI18N();
+</script>
+</body>
+</html>

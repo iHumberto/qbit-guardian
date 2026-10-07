@@ -47,6 +47,15 @@ def gerar_senha(tamanho=TAMANHO_SENHA_GERADA):
     return "".join(secrets.choice(ALFABETO) for _ in range(tamanho))
 
 
+def gerar_secret_key():
+    """Chave para assinar o cookie de sessao da Web UI.
+
+    Fica no config.json e sobrevive a restart: regenerar a cada boot
+    deslogaria todo mundo sempre que o container reiniciasse.
+    """
+    return secrets.token_urlsafe(32)
+
+
 def e_hash(valor):
     """True se o valor ja esta no formato de hash desta funcao."""
     return isinstance(valor, str) and valor.startswith(PREFIXO_HASH + "$")
@@ -130,6 +139,9 @@ def garantir_credenciais(cfg):
        avisar nada — a senha que o usuario ja usa continua valendo.
     3. Ja e hash: nao mexe.
 
+    Em qualquer um dos casos tambem garante `secret_key`, usada para assinar o
+    cookie de sessao da tela de login.
+
     Nao grava em disco; quem chama decide quando persistir.
     """
     webui = cfg.get("webui")
@@ -138,6 +150,11 @@ def garantir_credenciais(cfg):
         cfg["webui"] = webui
 
     alterou = False
+
+    chave = webui.get("secret_key")
+    if not isinstance(chave, str) or not chave.strip():
+        webui["secret_key"] = gerar_secret_key()
+        alterou = True
 
     usuario = webui.get("user")
     if not isinstance(usuario, str) or not usuario.strip():

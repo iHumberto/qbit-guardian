@@ -25,7 +25,7 @@ It runs as a lightweight Docker container (or a Python process) with a built-in 
 | Web UI      | Flask 3.x                           |
 | HTTP client | requests 2.x                        |
 | Notifications | Apprise (Telegram, Discord, Slack, and 100+ services) |
-| Testing     | pytest 8.x (476 tests: 401 functional + 75 security) |
+| Testing     | pytest 8.x (546 tests: 428 functional + 118 security) |
 | License     | GNU GPL v3                          |
 
 ## Features
@@ -208,7 +208,7 @@ All settings live in `config.json` and can be edited through the Web UI or direc
 | **radarr**      | `url`, `api_key` — optional, leave blank to disable                      |
 | **guardian**    | `check_interval_seconds` (0 = webhook mode), `retry_interval_seconds`, extension lists, stalled/seedless rules, file priorities |
 | **notifications** | `apprise_url` — Apprise-compatible URL (see [Apprise docs](https://github.com/caronc/apprise)) |
-| **webui**       | `user`, `password` — HTTP Basic Auth credentials. Provisioned on first startup; the password is stored as a PBKDF2 hash |
+| **webui**       | `user`, `password`, `secret_key` — provisioned on first startup. The password is stored as a PBKDF2 hash; `secret_key` signs the session cookie |
 
 ### Notification messages
 
@@ -256,9 +256,15 @@ docker logs qbit-guardian
 
 That password is shown **once**, when it is created. Save it.
 
+The Web UI has its own **login page** at `/login`. Anyone without a session is redirected there; `curl` and scripts keep using HTTP Basic Auth as before.
+
 To change the username or password, click the **user icon** in the top-right corner of the panel. The popup asks for the current password (proof of identity), the new username and the new password — either one can be left blank if you only want to change the other.
 
 The password is stored as a **PBKDF2-SHA256 hash** with a per-password salt. It is never kept in plain text in `config.json` and never returned by `GET /api/config`.
+
+Once signed in, the session lasts 7 days in a signed `HttpOnly` cookie. Changing the username or the password **invalidates every open session**. To sign out, use the **Sign out** button in the same user-icon popup.
+
+> After 5 failed attempts within 5 minutes, login answers `429` for that client — even if the next password is correct.
 
 > **Forgot the password?** Clear the `webui.password` value in `config.json` and restart the container. A new password is generated and announced in the log.
 
@@ -313,6 +319,9 @@ The Web UI exposes these endpoints:
 | Method   | Endpoint             | Auth      | Description                                                    |
 |----------|----------------------|-----------|----------------------------------------------------------------|
 | `GET`    | `/api/health`        | Public    | Healthcheck — returns `{"status": "ok"}`                       |
+| `GET`    | `/login`             | Public    | Login page (redirects to `/` if a session already exists)      |
+| `POST`   | `/api/login`         | Public    | Exchanges username and password for a session cookie. `429` after 5 failures |
+| `POST`   | `/api/logout`        | Public    | Ends the session                                               |
 | `GET`    | `/api/config`        | Required  | Reads the current configuration. Does **not** return `webui.password` |
 | `POST`   | `/api/config`        | Required  | Saves configuration (deep merge). The `webui` section is ignored here |
 | `GET`    | `/api/defaults`      | Required  | Default titles/templates and variables for each event          |
@@ -435,7 +444,7 @@ Leave the `sonarr.url` and `radarr.url` fields empty. The guardian works fine wi
 # Install dependencies (runtime + test tooling)
 pip install -r requirements-dev.txt
 
-# Run all tests (476: 401 functional + 75 security)
+# Run all tests (546: 428 functional + 118 security)
 python -m pytest test/ -v
 
 # Functional tests only

@@ -25,7 +25,7 @@ Ele roda como um container Docker leve (ou como um processo Python) com uma inte
 | Interface Web | Flask 3.x                           |
 | Cliente HTTP  | requests 2.x                        |
 | Notificações  | Apprise (Telegram, Discord, Slack e mais de 100 serviços) |
-| Testes        | pytest 8.x (476 testes: 401 funcionais + 75 segurança) |
+| Testes        | pytest 8.x (546 testes: 428 funcionais + 118 segurança) |
 | Licença       | GNU GPL v3                          |
 
 ## Funcionalidades
@@ -208,7 +208,7 @@ Todas as opções ficam no arquivo `config.json` e podem ser editadas pela Web U
 | **radarr**       | `url`, `api_key` — opcional, deixe em branco para desativar                                          |
 | **guardian**     | `check_interval_seconds` (0 = modo webhook), `retry_interval_seconds`, listas de extensões, regras de stalled/sem seeds, prioridades |
 | **notifications** | `apprise_url` — URL compatível com Apprise (veja [documentação do Apprise](https://github.com/caronc/apprise)) |
-| **webui**        | `user`, `password` — credenciais HTTP Basic Auth. Provisionadas no primeiro startup; a senha fica como hash PBKDF2 |
+| **webui**        | `user`, `password`, `secret_key` — provisionados no primeiro startup. A senha fica como hash PBKDF2; a `secret_key` assina o cookie de sessão |
 
 ### Mensagens de notificação
 
@@ -256,9 +256,15 @@ docker logs qbit-guardian
 
 Essa senha aparece **uma vez**, no momento em que é criada. Guarde-a.
 
+A Web UI tem **tela de login propria** em `/login`. Quem acessa sem sessao e redirecionado para la; `curl` e scripts continuam usando HTTP Basic Auth normalmente.
+
 Para trocar usuário ou senha, clique no **ícone de usuário** no canto superior direito do painel. O popup pede a senha atual (prova de identidade), o novo usuário e a nova senha — qualquer um dos dois pode ficar em branco se você só quer trocar o outro.
 
 A senha é guardada como **hash PBKDF2-SHA256** com salt por senha. Ela nunca fica em texto claro no `config.json` e nunca é devolvida pelo `GET /api/config`.
+
+Depois de entrar, a sessão vale 7 dias e fica num cookie `HttpOnly` assinado. Trocar o usuário ou a senha **invalida todas as sessões abertas**. Para sair, use o botão **Sair** no mesmo popup do ícone de usuário.
+
+> Depois de 5 tentativas erradas em 5 minutos, o login responde `429` para aquele cliente — inclusive se a senha seguinte estiver certa.
 
 > **Esqueceu a senha?** Apague o valor de `webui.password` no `config.json` e reinicie o container. Uma senha nova é gerada e anunciada no log.
 
@@ -313,6 +319,9 @@ A Web UI expõe estes endpoints:
 | Método   | Endpoint             | Auth        | Descrição                                                        |
 |----------|----------------------|-------------|------------------------------------------------------------------|
 | `GET`    | `/api/health`        | Público     | Healthcheck — retorna `{"status": "ok"}`                         |
+| `GET`    | `/login`             | Público     | Tela de login (redireciona para `/` se já há sessão)             |
+| `POST`   | `/api/login`         | Público     | Troca usuário e senha por cookie de sessão. `429` após 5 erros   |
+| `POST`   | `/api/logout`        | Público     | Encerra a sessão                                                 |
 | `GET`    | `/api/config`        | Obrigatória | Lê a configuração atual. **Não** devolve `webui.password`        |
 | `POST`   | `/api/config`        | Obrigatória | Salva configuração (deep merge). A seção `webui` é ignorada aqui |
 | `GET`    | `/api/defaults`      | Obrigatória | Títulos/templates padrão e variáveis de cada evento              |
@@ -435,7 +444,7 @@ Deixe os campos `sonarr.url` e `radarr.url` em branco. O guardian funciona perfe
 # Instalar dependências (runtime + ferramentas de teste)
 pip install -r requirements-dev.txt
 
-# Rodar todos os testes (476: 401 funcionais + 75 de segurança)
+# Rodar todos os testes (546: 428 funcionais + 118 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais

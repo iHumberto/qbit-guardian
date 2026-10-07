@@ -11,6 +11,7 @@ Run: .venv/bin/python -m pytest test/test_security.py -v
 import json
 import os
 import tempfile
+import time
 import base64
 import pytest
 from unittest import mock
@@ -104,11 +105,16 @@ class TestAuth:
         assert r.status_code == 200
 
     def test_auth_enabled_blocks_unauthorized(self, client, tmp_config):
-        """Com auth configurada, sem header -> 401."""
+        """Com auth configurada, sem credencial -> 401 em JSON.
+
+        Sem `WWW-Authenticate`: era ele que fazia o navegador abrir o popup
+        nativo de usuario e senha, no lugar da tela de login da aplicacao.
+        """
         self._enable_auth(tmp_config)
         r = client.get("/api/config")
         assert r.status_code == 401
-        assert "WWW-Authenticate" in r.headers
+        assert "WWW-Authenticate" not in r.headers
+        assert r.is_json
 
     def test_auth_wrong_password_returns_401(self, client, tmp_config):
         """Credenciais erradas -> 401."""
@@ -471,14 +477,19 @@ class TestEdgeCases:
 
 @pytest.fixture
 def auth_config(tmp_config):
-    """Config com autenticacao ligada e senha conhecida."""
+    """Config com autenticacao ligada, senha conhecida e chave de sessao."""
     with open(tmp_config) as f:
         cfg = json.load(f)
-    cfg["webui"] = {"user": "admin", "password": auth.hash_senha(SENHA)}
+    cfg["webui"] = {"user": "admin", "password": auth.hash_senha(SENHA),
+                    "secret_key": "chave-de-sessao-para-teste"}
     with open(tmp_config, "w") as f:
         json.dump(cfg, f)
     g._config = None
-    return tmp_config
+    # O freio de forca bruta vive num dict de modulo: sem zerar, um teste que
+    # esgota o limite tranca os seguintes, com resultado dependente da ordem.
+    w._tentativas.clear()
+    yield tmp_config
+    w._tentativas.clear()
 
 
 class TestCSRFOrigemExterna:
@@ -597,15 +608,29 @@ class TestCredenciaisForaDoConfig:
 
 
 class TestArquivosEstaticosAutenticados:
-    """`/index.html` nao pode ser publico enquanto `/` pede senha."""
+    """`/index.html` nao pode ser publico enquanto `/` pede senha.
 
-    ARQUIVOS = ["/index.html", "/i18n.js", "/favicon.svg"]
+    `i18n.js` e `favicon.svg` sao a excecao deliberada: a tela de login os
+    carrega antes de existir sessao. Sao strings de interface e um icone —
+    nenhum dado de configuracao.
+    """
 
-    @pytest.mark.parametrize("rota", ARQUIVOS + ["/"])
+    PROTEGIDOS = ["/index.html", "/"]
+    PUBLICOS = ["/i18n.js", "/favicon.svg", "/login.html", "/login"]
+
+    @pytest.mark.parametrize("rota", PROTEGIDOS)
     def test_sem_credencial_recusa(self, rota, client, auth_config):
         assert client.get(rota).status_code == 401
 
-    @pytest.mark.parametrize("rota", ARQUIVOS + ["/"])
+    @pytest.mark.parametrize("rota", PUBLICOS)
+    def test_arquivos_da_tela_de_login_sao_publicos(self, rota, client, auth_config):
+        assert client.get(rota).status_code == 200
+
+    def test_a_lista_publica_nao_cresce_sem_querer(self, client, auth_config):
+        """Allowlist explicita: so o que a tela de login precisa."""
+        assert w.ARQUIVOS_PUBLICOS == {"login.html", "i18n.js", "favicon.svg"}
+
+    @pytest.mark.parametrize("rota", PROTEGIDOS + ["/i18n.js", "/favicon.svg"])
     def test_com_credencial_serve(self, rota, client, auth_config):
         assert client.get(rota, headers=_basic("admin", SENHA)).status_code == 200
 
@@ -757,3 +782,266 @@ class TestEndpointCredenciais:
                         json={"user": "atacante", "current_password": "",
                               "new_password": "senha-do-atacante"})
         assert r.status_code == 403
+
+
+# ── Tela de login e sessao ─────────────────────────────────────────────
+
+class TestLogin:
+    """`POST /api/login` troca credencial por cookie de sessao."""
+
+    def _entrar(self, client, usuario="admin", senha=SENHA):
+        return client.post("/api/login", json={"user": usuario, "password": senha})
+
+    def test_credencial_correta_abre_sessao(self, client, auth_config):
+        r = self._entrar(client)
+        assert r.status_code == 200
+        assert w.COOKIE_SESSAO in r.headers.get("Set-Cookie", "")
+
+    def test_sessao_substitui_o_basic_auth(self, client, auth_config):
+        """Depois de entrar, o painel abre sem mandar credencial nenhuma."""
+        assert client.get("/api/config").status_code == 401
+        self._entrar(client)
+        assert client.get("/api/config").status_code == 200
+        assert client.get("/").status_code == 200
+
+    @pytest.mark.parametrize("usuario,senha", [
+        ("admin", "errada"), ("ninguem", SENHA), ("", ""), ("admin", ""),
+    ])
+    def test_credencial_errada_recusa(self, usuario, senha, client, auth_config):
+        r = self._entrar(client, usuario, senha)
+        assert r.status_code == 401
+        assert w.COOKIE_SESSAO not in r.headers.get("Set-Cookie", "")
+
+    def test_cookie_e_httponly_e_samesite_lax(self, client, auth_config):
+        """HttpOnly tira o cookie do alcance de qualquer JS; SameSite=Lax
+        impede que ele acompanhe POST disparado por outro site."""
+        cabecalho = self._entrar(client).headers.get("Set-Cookie", "")
+        assert "HttpOnly" in cabecalho
+        assert "SameSite=Lax" in cabecalho
+        assert "Path=/" in cabecalho
+
+    def test_cookie_nao_carrega_a_senha(self, client, auth_config):
+        cabecalho = self._entrar(client).headers.get("Set-Cookie", "")
+        assert SENHA not in cabecalho
+
+    def test_cookie_forjado_nao_vale(self, client, auth_config):
+        """Sem a assinatura correta, o token e lixo."""
+        client.set_cookie(w.COOKIE_SESSAO, "eyJ1IjoiYWRtaW4ifQ.inventado.assinatura")
+        assert client.get("/api/config").status_code == 401
+
+    def test_cookie_assinado_com_outra_chave_nao_vale(self, client, auth_config):
+        from itsdangerous import URLSafeTimedSerializer
+        falso = URLSafeTimedSerializer("chave-do-atacante", salt=w.SAL_SESSAO)
+        client.set_cookie(w.COOKIE_SESSAO, falso.dumps({"u": "admin", "v": "x"}))
+        assert client.get("/api/config").status_code == 401
+
+    def test_troca_de_senha_invalida_a_sessao(self, client, auth_config):
+        """O cookie carrega um marcador do par usuario+senha.
+
+        Sem isso, quem tivesse roubado um cookie continuaria dentro depois de
+        a vitima trocar a senha — que e exatamente o que a vitima faria ao
+        desconfiar.
+        """
+        self._entrar(client)
+        assert client.get("/api/config").status_code == 200
+
+        r = client.post("/api/credentials",
+                        json={"current_password": SENHA, "new_password": "senha-nova-999"})
+        assert r.status_code == 200
+        assert client.get("/api/config").status_code == 401
+
+    def test_troca_de_usuario_invalida_a_sessao(self, client, auth_config):
+        self._entrar(client)
+        client.post("/api/credentials", json={"user": "humberto", "current_password": SENHA})
+        assert client.get("/api/config").status_code == 401
+
+    def test_logout_encerra_a_sessao(self, client, auth_config):
+        self._entrar(client)
+        assert client.get("/api/config").status_code == 200
+        assert client.post("/api/logout").status_code == 200
+        assert client.get("/api/config").status_code == 401
+
+    def test_login_exige_json(self, client, auth_config):
+        r = client.post("/api/login", data="user=admin", content_type="text/plain")
+        assert r.status_code == 415
+
+    def test_login_de_outra_origem_recusado(self, client, auth_config):
+        r = client.post("/api/login", json={"user": "admin", "password": SENHA},
+                        headers={"Sec-Fetch-Site": "cross-site"})
+        assert r.status_code == 403
+
+    def test_corpo_que_nao_e_objeto(self, client, auth_config):
+        assert client.post("/api/login", json=["admin", SENHA]).status_code == 400
+
+    def test_sem_secret_key_nao_emite_sessao(self, client, auth_config):
+        """Config antiga, sem a chave provisionada: falha explicita."""
+        cfg = g.load_config()
+        cfg["webui"].pop("secret_key", None)
+        g.save_config(cfg)
+        r = self._entrar(client)
+        assert r.status_code == 500
+        assert "secret_key" in r.get_json()["error"]
+
+
+class TestFreioDeForcaBruta:
+    """Formulario de login aceita script tentando milhares de senhas."""
+
+    def _falhar(self, client, vezes):
+        for _ in range(vezes):
+            client.post("/api/login", json={"user": "admin", "password": "errada"})
+
+    def test_bloqueia_apos_o_limite(self, client, auth_config):
+        self._falhar(client, w.TENTATIVAS_MAX)
+        r = client.post("/api/login", json={"user": "admin", "password": SENHA})
+        assert r.status_code == 429
+        assert r.headers.get("Retry-After")
+
+    def test_bloqueio_vale_ate_para_a_senha_certa(self, client, auth_config):
+        """Senao bastaria errar 4 vezes e acertar na quinta sem custo."""
+        self._falhar(client, w.TENTATIVAS_MAX)
+        assert client.post("/api/login",
+                           json={"user": "admin", "password": SENHA}).status_code == 429
+
+    def test_abaixo_do_limite_ainda_entra(self, client, auth_config):
+        self._falhar(client, w.TENTATIVAS_MAX - 1)
+        assert client.post("/api/login",
+                           json={"user": "admin", "password": SENHA}).status_code == 200
+
+    def test_sucesso_zera_o_contador(self, client, auth_config):
+        self._falhar(client, w.TENTATIVAS_MAX - 1)
+        assert client.post("/api/login",
+                           json={"user": "admin", "password": SENHA}).status_code == 200
+        self._falhar(client, w.TENTATIVAS_MAX - 1)
+        assert client.post("/api/login",
+                           json={"user": "admin", "password": SENHA}).status_code == 200
+
+    def test_tentativa_velha_sai_da_janela(self, client, auth_config):
+        """A janela desliza: errar ontem nao tranca hoje."""
+        agora = time.time()
+        with mock.patch.object(w.time, "time", return_value=agora - w.JANELA_TENTATIVAS - 1):
+            self._falhar(client, w.TENTATIVAS_MAX)
+        assert client.post("/api/login",
+                           json={"user": "admin", "password": SENHA}).status_code == 200
+
+    def test_contagem_e_por_cliente(self, client, auth_config):
+        """Um vizinho errando a senha nao pode trancar os outros."""
+        for _ in range(w.TENTATIVAS_MAX):
+            client.post("/api/login", json={"user": "admin", "password": "errada"},
+                        headers={"X-Forwarded-For": "10.0.0.9"})
+        r = client.post("/api/login", json={"user": "admin", "password": SENHA},
+                        headers={"X-Forwarded-For": "10.0.0.10"})
+        assert r.status_code == 200
+
+
+class TestRedirecionamentoParaLogin:
+    """Navegacao sem sessao vai para a tela; API devolve JSON."""
+
+    def test_navegacao_redireciona(self, client, auth_config):
+        r = client.get("/", headers={"Accept": "text/html,application/xhtml+xml"})
+        assert r.status_code == 302
+        assert r.headers["Location"].endswith("/login")
+
+    def test_api_devolve_401_json(self, client, auth_config):
+        r = client.get("/api/config", headers={"Accept": "text/html"})
+        assert r.status_code == 401
+        assert r.is_json
+
+    def test_fetch_sem_accept_html_devolve_401(self, client, auth_config):
+        r = client.get("/", headers={"Accept": "application/json"})
+        assert r.status_code == 401
+
+    def test_login_com_sessao_valida_vai_para_o_painel(self, client, auth_config):
+        client.post("/api/login", json={"user": "admin", "password": SENHA})
+        r = client.get("/login")
+        assert r.status_code == 302
+        assert r.headers["Location"].endswith("/")
+
+    def test_login_sem_sessao_serve_a_tela(self, client, auth_config):
+        r = client.get("/login")
+        assert r.status_code == 200
+        assert b"form-login" in r.data
+
+    def test_auth_desligada_nao_redireciona(self, client, tmp_config):
+        r = client.get("/", headers={"Accept": "text/html"})
+        assert r.status_code == 200
+
+
+class TestSecretKeyNaoVaza:
+    """A chave de sessao assina o cookie: quem a tiver forja login."""
+
+    def test_fora_do_get_config(self, client, auth_config):
+        corpo = client.get("/api/config", headers=_basic("admin", SENHA)).get_json()
+        assert "secret_key" not in corpo.get("webui", {})
+
+    def test_post_config_nao_altera_a_chave(self, client, auth_config):
+        original = g.load_config()["webui"]["secret_key"]
+        client.post("/api/config", json={"webui": {"secret_key": "chave-do-atacante"}},
+                    headers=_basic("admin", SENHA))
+        assert g.load_config()["webui"]["secret_key"] == original
+
+
+class TestSessaoBordas:
+    """Caminhos defensivos do cookie de sessao."""
+
+    def test_cookie_com_secret_key_removida_nao_vale(self, client, auth_config):
+        """Apagar a chave do config derruba as sessoes abertas.
+
+        E o botao de panico: sem ela nenhum token assinado volta a ser aceito.
+        """
+        client.post("/api/login", json={"user": "admin", "password": SENHA})
+        assert client.get("/api/config").status_code == 200
+
+        cfg = g.load_config()
+        cfg["webui"].pop("secret_key", None)
+        g.save_config(cfg)
+        assert client.get("/api/config").status_code == 401
+
+    def test_token_que_nao_carrega_objeto_nao_vale(self, client, auth_config):
+        """Token bem assinado mas com conteudo inesperado nao autentica."""
+        from itsdangerous import URLSafeTimedSerializer
+        chave = g.load_config()["webui"]["secret_key"]
+        serializador = URLSafeTimedSerializer(chave, salt=w.SAL_SESSAO)
+        client.set_cookie(w.COOKIE_SESSAO, serializador.dumps(["admin"]))
+        assert client.get("/api/config").status_code == 401
+
+    def test_token_expirado_nao_vale(self, client, auth_config):
+        from itsdangerous import URLSafeTimedSerializer
+        cfg = g.load_config()
+        serializador = URLSafeTimedSerializer(cfg["webui"]["secret_key"], salt=w.SAL_SESSAO)
+        antigo = time.time() - w.SESSAO_VALIDADE - 60
+        with mock.patch("itsdangerous.timed.time.time", return_value=antigo):
+            token = serializador.dumps({"u": "admin",
+                                        "v": w._marcador_credencial(cfg["webui"])})
+        client.set_cookie(w.COOKIE_SESSAO, token)
+        assert client.get("/api/config").status_code == 401
+
+
+class TestConstantesDeSeguranca:
+    """Parametros fixados no codigo, nao so nos testes.
+
+    O resto da suite le `w.TENTATIVAS_MAX` para montar os cenarios, entao
+    afrouxar a constante nao quebraria nenhum deles — o teste se adaptaria
+    junto. Estes aqui fixam a faixa aceitavel.
+    """
+
+    def test_limite_de_tentativas_e_baixo(self):
+        assert 3 <= w.TENTATIVAS_MAX <= 10, \
+            f"{w.TENTATIVAS_MAX} tentativas nao freia forca bruta"
+
+    def test_janela_do_freio_e_significativa(self):
+        """Janela curta demais deixa o atacante retomar quase na hora."""
+        assert w.JANELA_TENTATIVAS >= 60
+
+    def test_sessao_nao_e_eterna(self):
+        assert 0 < w.SESSAO_VALIDADE <= 30 * 24 * 3600
+
+    def test_corpo_maximo_e_modesto(self):
+        assert 0 < w.MAX_BODY_BYTES <= 8 * 1024 * 1024
+
+    def test_cookie_tem_nome_proprio(self):
+        """Nome generico colide com outro servico no mesmo host."""
+        assert w.COOKIE_SESSAO.startswith("qbg")
+
+    def test_sal_do_cookie_e_especifico(self):
+        """Sal proprio impede que um token de outro contexto seja aceito."""
+        assert "qbit-guardian" in w.SAL_SESSAO
