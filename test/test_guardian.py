@@ -2665,3 +2665,1009 @@ class TestGuardianRetry:
         else:
             cfg["guardian"]["retry_interval_seconds"] = bad_value
         assert g._retry_interval(cfg) == g.DEFAULT_RETRY_INTERVAL
+
+
+# ── Contrato HTTP com o qBittorrent ────────────────────────────────────
+
+class _FakeResponse:
+    """Resposta HTTP minima, com raise_for_status fiel ao requests."""
+
+    def __init__(self, status_code=200, text="", payload=None):
+        self.status_code = status_code
+        self.text = text
+        self._payload = [] if payload is None else payload
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(f"HTTP {self.status_code}")
+
+
+class _FakeQbitSession:
+    """Session falsa que registra cada chamada HTTP.
+
+    Os quatro wrappers da API do qBit eram sempre substituidos INTEIROS nos
+    testes (`mock.patch.object(g, "get_torrents")`), entao o corpo deles nunca
+    executava: URL, params, timeout e header de autenticacao nao tinham
+    verificacao nenhuma. E a mesma classe de buraco que deixou a escala de
+    prioridade errada chegar em producao.
+    """
+
+    def __init__(self, respostas=None):
+        self.verify = True
+        self.headers = {}
+        self.calls = []
+        self._respostas = respostas or {}
+
+    def _registra(self, metodo, url, kwargs):
+        self.calls.append({"method": metodo, "url": url, **kwargs})
+        return self._respostas.get(url, _FakeResponse())
+
+    def get(self, url, **kwargs):
+        return self._registra("GET", url, kwargs)
+
+    def post(self, url, **kwargs):
+        return self._registra("POST", url, kwargs)
+
+
+QBIT_URL = "https://torrent.home.arpa/"
+QBIT_BASE = "https://torrent.home.arpa"
+QBIT_KEY = "chave-secreta-do-qbit"
+
+
+@contextlib.contextmanager
+def _qbit_http(respostas=None):
+    """Monta a sessao real do guardian sobre uma Session falsa."""
+    g.load_config()
+    cfg = g.get_config()
+    cfg["qbit"]["url"] = QBIT_URL
+    cfg["qbit"]["api_key"] = QBIT_KEY
+    g.save_config(cfg)
+    g._qbit_session = None
+    g._qbit_base = None
+
+    sess = _FakeQbitSession(respostas)
+    with mock.patch.object(g.requests, "Session", return_value=sess):
+        yield sess
+
+
+class TestQbitHttpContract:
+    """Corpo real de qbit_login/get_torrents/get_files/remove_torrent.
+
+    Cobre o contrato com a API do qBittorrent: endpoint, forma do payload,
+    timeout e tratamento de status — tudo que ficava invisivel enquanto os
+    testes substituiam a funcao inteira.
+    """
+
+    def test_login_consulta_app_version(self, tmp_config):
+        url = f"{QBIT_BASE}/api/v2/app/version"
+        with _qbit_http({url: _FakeResponse(200, "v4.6.0")}) as sess:
+            g.qbit_login()
+
+        assert sess.calls == [{"method": "GET", "url": url, "timeout": 10}]
+
+    @pytest.mark.parametrize("status", [401, 403, 404, 500, 502])
+    def test_login_falha_levanta_runtime_error(self, status, tmp_config):
+        """Credencial errada ou qBit quebrado NAO pode passar em silencio.
+
+        O retorno de qbit_login e o que faz guardian_loop entrar em retry; um
+        login que "da certo" com HTTP 403 deixaria o loop rodando contra um
+        qBit que recusa tudo.
+        """
+        url = f"{QBIT_BASE}/api/v2/app/version"
+        with _qbit_http({url: _FakeResponse(status, "Forbidden")}):
+            with pytest.raises(RuntimeError) as exc:
+                g.qbit_login()
+
+        assert str(status) in str(exc.value)
+
+    def test_get_torrents_endpoint_e_payload(self, tmp_config):
+        url = f"{QBIT_BASE}/api/v2/torrents/info"
+        payload = [{"hash": "abc", "name": "Filme"}]
+        with _qbit_http({url: _FakeResponse(200, payload=payload)}) as sess:
+            assert g.get_torrents() == payload
+
+        assert sess.calls == [{"method": "GET", "url": url, "timeout": 10}]
+
+    def test_get_torrents_propaga_erro_http(self, tmp_config):
+        """raise_for_status e o que converte 5xx em erro de transporte.
+
+        Sem ele, get_torrents devolveria o JSON de erro como se fosse a lista
+        de torrents e o loop trataria zero torrents como estado normal.
+        """
+        url = f"{QBIT_BASE}/api/v2/torrents/info"
+        with _qbit_http({url: _FakeResponse(503, "unavailable")}):
+            with pytest.raises(requests.exceptions.HTTPError):
+                g.get_torrents()
+
+    def test_get_files_manda_hash_em_params(self, tmp_config):
+        """O hash vai em params, nao concatenado na URL (evita quebra de escape)."""
+        url = f"{QBIT_BASE}/api/v2/torrents/files"
+        torrent_hash = "a1b2c3d4e5f6"
+        payload = [{"name": "ep.mkv", "index": 0}]
+        with _qbit_http({url: _FakeResponse(200, payload=payload)}) as sess:
+            assert g.get_files(torrent_hash) == payload
+
+        assert sess.calls == [{"method": "GET", "url": url,
+                               "params": {"hash": torrent_hash}, "timeout": 10}]
+        assert torrent_hash not in sess.calls[0]["url"]
+
+    def test_get_files_propaga_erro_http(self, tmp_config):
+        url = f"{QBIT_BASE}/api/v2/torrents/files"
+        with _qbit_http({url: _FakeResponse(404, "not found")}):
+            with pytest.raises(requests.exceptions.HTTPError):
+                g.get_files("hash-inexistente")
+
+    def test_remove_torrent_apaga_arquivos(self, tmp_config):
+        """deleteFiles=true e o que diferencia remover de apenas destorrentar.
+
+        Sem essa flag o conteudo perigoso continuaria no disco depois da
+        "remocao" — que e justamente o que o guardian existe para evitar.
+        """
+        url = f"{QBIT_BASE}/api/v2/torrents/delete"
+        with _qbit_http() as sess:
+            g.remove_torrent("hash-ruim")
+
+        assert sess.calls == [{"method": "POST", "url": url,
+                               "data": {"hashes": "hash-ruim",
+                                        "deleteFiles": "true"},
+                               "timeout": 10}]
+
+    def test_api_key_vai_no_header_bearer(self, tmp_config):
+        with _qbit_http({f"{QBIT_BASE}/api/v2/app/version":
+                         _FakeResponse(200, "v4.6.0")}) as sess:
+            g.qbit_login()
+
+        assert sess.headers == {"Authorization": f"Bearer {QBIT_KEY}"}
+
+    def test_api_key_nunca_vaza_para_url_ou_corpo(self, tmp_config):
+        """A chave so pode viajar no header.
+
+        Em query string ela entraria no log de acesso do reverse proxy e no
+        historico do navegador; no corpo, em qualquer dump de requisicao.
+        """
+        with _qbit_http({f"{QBIT_BASE}/api/v2/app/version":
+                         _FakeResponse(200, "v4.6.0")}) as sess:
+            g.qbit_login()
+            g.get_torrents()
+            g.get_files("hash1")
+            g.remove_torrent("hash1")
+            g.set_file_priority("hash1", 0, 7)
+
+        assert len(sess.calls) == 5
+        for call in sess.calls:
+            visivel = " ".join(str(call.get(k, "")) for k in ("url", "params", "data"))
+            assert QBIT_KEY not in visivel, f"api_key exposta em {call['url']}"
+
+    def test_todas_as_chamadas_tem_timeout(self, tmp_config):
+        """Sem timeout, uma chamada pendurada congela a thread do guardian.
+
+        E o timeout tambem e o que transforma um qBit mudo em Timeout —
+        exatamente a excecao que TRANSPORT_ERRORS usa para reconectar.
+        """
+        with _qbit_http({f"{QBIT_BASE}/api/v2/app/version":
+                         _FakeResponse(200, "v4.6.0")}) as sess:
+            g.qbit_login()
+            g.get_torrents()
+            g.get_files("hash1")
+            g.remove_torrent("hash1")
+            g.set_file_priority("hash1", 0, 7)
+
+        assert [c.get("timeout") for c in sess.calls] == [10] * 5
+
+
+# ── Contagem do pass 2 (stalled removidos) ─────────────────────────────
+
+class TestPassDoisContagem:
+    """O numero de removidos no pass 2 e reportado, nunca so contado.
+
+    O incremento `stalled_removed += 1` nunca executava em teste: nenhum caso
+    chegava a remover de verdade no pass 2. Um off-by-one aqui mente no log e
+    na resposta do /api/trigger sem quebrar nada.
+    """
+
+    TORRENTS = [{"hash": "a", "name": "A"},
+                {"hash": "b", "name": "B"},
+                {"hash": "c", "name": "C"}]
+
+    def test_trigger_reporta_quantos_foram_removidos(self, client, tmp_config):
+        removidos = {"b", "c"}
+        with mock.patch.object(g, "get_torrents", return_value=self.TORRENTS), \
+             mock.patch.object(g, "analyze_torrent", return_value=True), \
+             mock.patch.object(g, "check_stalled_and_remove",
+                               side_effect=lambda t: t["hash"] in removidos):
+            r = client.post("/api/trigger")
+
+        assert r.status_code == 200
+        corpo = r.get_json()
+        assert corpo["stalled_removed"] == 2
+        assert corpo["checked"] == 3
+        assert corpo["new"] == 3
+
+    def test_trigger_reporta_zero_quando_nada_removido(self, client, tmp_config):
+        with mock.patch.object(g, "get_torrents", return_value=self.TORRENTS), \
+             mock.patch.object(g, "analyze_torrent", return_value=True), \
+             mock.patch.object(g, "check_stalled_and_remove", return_value=False):
+            r = client.post("/api/trigger")
+
+        assert r.get_json()["stalled_removed"] == 0
+
+    def test_pass_dois_avalia_torrents_ja_processados(self, client, tmp_config):
+        """O pass 2 roda sobre TODOS os torrents, nao so os novos.
+
+        Era o bug original: um torrent ja em _processed que ficava stalled
+        depois nunca mais era reavaliado.
+        """
+        g._processed.update({"a", "b", "c"})
+        avaliados = []
+        with mock.patch.object(g, "get_torrents", return_value=self.TORRENTS), \
+             mock.patch.object(g, "analyze_torrent", return_value=True), \
+             mock.patch.object(g, "check_stalled_and_remove",
+                               side_effect=lambda t: avaliados.append(t["hash"])):
+            r = client.post("/api/trigger")
+
+        assert r.get_json()["new"] == 0
+        assert avaliados == ["a", "b", "c"]
+
+
+# ── Corpo do guardian_loop ─────────────────────────────────────────────
+
+class _LoopHarness:
+    """Faz guardian_loop sair apos UMA iteracao, via modo webhook.
+
+    guardian_loop chama get_config() antes do laco e de novo no fim de cada
+    iteracao; devolver check_interval_seconds=0 na 2a chamada encerra o loop
+    pelo caminho de producao, sem matar a thread com excecao.
+    """
+
+    def __init__(self, iteracoes=1):
+        self.original = g.get_config
+        self.chamadas = 0
+        self.iteracoes = iteracoes
+
+    def get_config(self):
+        self.chamadas += 1
+        cfg = dict(self.original())
+        if self.chamadas > self.iteracoes:
+            cfg["guardian"] = dict(cfg["guardian"])
+            cfg["guardian"]["check_interval_seconds"] = 0
+        return cfg
+
+
+class TestGuardianLoopCorpo:
+    """Iteracao do loop: marcacao de processados, contagem e resiliencia."""
+
+    def _preparar(self, tmp_config, interval=300):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"]["check_interval_seconds"] = interval
+        g.save_config(cfg)
+        return _LoopHarness()
+
+    def test_so_marca_processado_quando_a_analise_conclui(self, tmp_config):
+        """Torrent sem metadados (analyze_torrent -> False) volta no proximo ciclo.
+
+        Marcar antes dos metadados chegarem fazia o torrent nunca mais ser
+        validado — o magnet entrava em metaDL, era dado como processado e
+        passava batido mesmo trazendo .exe depois.
+        """
+        harness = self._preparar(tmp_config)
+        torrents = [{"hash": "com-metadados", "name": "A"},
+                    {"hash": "sem-metadados", "name": "B"}]
+
+        with mock.patch.object(g, "qbit_login"), \
+             mock.patch.object(g, "get_torrents", return_value=torrents), \
+             mock.patch.object(g, "check_stalled_and_remove", return_value=False), \
+             mock.patch.object(g, "write_heartbeat"), \
+             mock.patch.object(g, "analyze_torrent",
+                               side_effect=lambda t: t["hash"] == "com-metadados"), \
+             mock.patch.object(g, "get_config", side_effect=harness.get_config):
+            g.guardian_loop()
+
+        assert g._processed == {"com-metadados"}
+
+    def test_resumo_da_verificacao_traz_as_contagens(self, tmp_config):
+        harness = self._preparar(tmp_config)
+        torrents = [{"hash": h, "name": h.upper()} for h in ("a", "b", "c")]
+        removidos = {"a", "c"}
+
+        with mock.patch.object(g, "qbit_login"), \
+             mock.patch.object(g, "get_torrents", return_value=torrents), \
+             mock.patch.object(g, "analyze_torrent", return_value=True), \
+             mock.patch.object(g, "check_stalled_and_remove",
+                               side_effect=lambda t: t["hash"] in removidos), \
+             mock.patch.object(g, "write_heartbeat"), \
+             mock.patch.object(g, "get_config", side_effect=harness.get_config), \
+             mock.patch.object(g, "log") as m_log:
+            g.guardian_loop()
+
+        resumos = [c.args[0] for c in m_log.info.call_args_list
+                   if "Verificacao #" in c.args[0]]
+        assert len(resumos) == 1, f"esperado 1 resumo, veio {resumos}"
+        assert "3 torrents" in resumos[0]
+        assert "3 novos" in resumos[0]
+        assert "2 stalled removidos" in resumos[0]
+
+    def test_erro_de_dominio_nao_dispara_reconexao(self, tmp_config):
+        """So erro de transporte reconecta; o resto so loga e segue.
+
+        Reconectar a cada KeyError de payload esconderia o bug real atras de
+        um login bem-sucedido.
+        """
+        harness = self._preparar(tmp_config)
+
+        with mock.patch.object(g, "_connect_with_retry") as m_conn, \
+             mock.patch.object(g, "get_torrents", side_effect=ValueError("payload torto")), \
+             mock.patch.object(g, "write_heartbeat"), \
+             mock.patch.object(g, "get_config", side_effect=harness.get_config), \
+             mock.patch.object(g, "log") as m_log:
+            g.guardian_loop()
+
+        assert m_conn.call_count == 1, "reconexao so no startup"
+        erros = [c.args[0] for c in m_log.error.call_args_list]
+        assert any("payload torto" in e for e in erros), erros
+
+    def test_loop_sobrevive_a_falha_de_escrita_do_heartbeat(self, tmp_config):
+        """/tmp cheio ou somente-leitura nao pode derrubar a thread.
+
+        O heartbeat e diagnostico; perde-lo deixa o container unhealthy, mas
+        matar o loop por causa dele transforma um problema de disco em parada
+        total do guardian.
+        """
+        harness = self._preparar(tmp_config)
+
+        with mock.patch.object(g, "qbit_login"), \
+             mock.patch.object(g, "get_torrents", return_value=[]), \
+             mock.patch.object(g, "write_heartbeat",
+                               side_effect=OSError("read-only file system")), \
+             mock.patch.object(g, "get_config", side_effect=harness.get_config):
+            g.guardian_loop()  # nao pode levantar
+
+        assert harness.chamadas >= 2
+
+
+class TestConnectRetryResiliencia:
+    """_connect_with_retry nunca pode morrer durante a espera."""
+
+    def test_heartbeat_quebrado_nao_interrompe_o_retry(self, tmp_config):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"]["retry_interval_seconds"] = 5
+        g.save_config(cfg)
+
+        tentativas = {"n": 0}
+
+        def login():
+            tentativas["n"] += 1
+            if tentativas["n"] == 1:
+                raise requests.exceptions.ConnectionError("qbit fora do ar")
+
+        with mock.patch.object(g, "qbit_login", side_effect=login), \
+             mock.patch.object(g, "write_heartbeat",
+                               side_effect=OSError("read-only file system")), \
+             mock.patch.object(g.time, "sleep") as m_sleep:
+            g._connect_with_retry()
+
+        assert tentativas["n"] == 2
+        assert m_sleep.call_args_list == [mock.call(5)]
+
+
+# ── Estados UP: torrent completo nunca e removido ──────────────────────
+
+class TestCheckStalledEstadosUp:
+    """Torrent completo/semeando esta fora do escopo do guardian.
+
+    E o caminho mais destrutivo do codigo: um erro aqui apaga do disco
+    (deleteFiles=true) midia que ja terminou de baixar.
+    """
+
+    UP_STATES = ["uploading", "stalledUP", "pausedUP", "checkingUP", "queuedUP"]
+
+    @pytest.mark.parametrize("state", UP_STATES)
+    def test_estado_up_nao_remove(self, state, tmp_config):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"].update(remove_stalled=True, stalled_time=1,
+                               stalled_unit="seconds", remove_no_seeds=True,
+                               no_seeds_time=1, no_seeds_unit="seconds")
+        g.save_config(cfg)
+
+        # Torrent que satisfaria TODOS os gatilhos se o estado nao fosse UP.
+        torrent = {"hash": "h1", "name": "Filme.Completo", "state": state,
+                   "added_on": 0, "num_complete": 0}
+
+        with mock.patch.object(g, "remove_torrent") as m_remove, \
+             mock.patch.object(g, "block_and_search") as m_block, \
+             mock.patch.object(g, "send_notification") as m_notify:
+            assert g.check_stalled_and_remove(torrent) is False
+
+        assert not m_remove.called, f"{state} nao pode ser removido"
+        assert not m_block.called
+        assert not m_notify.called
+
+    def test_stalled_dl_ainda_e_removido(self, tmp_config):
+        """Contraprova: o skip e por estado UP, nao um 'nunca remove'."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"].update(remove_stalled=True, stalled_time=1,
+                               stalled_unit="seconds")
+        g.save_config(cfg)
+        torrent = {"hash": "h1", "name": "Filme.Travado", "state": "stalledDL",
+                   "added_on": 0, "num_complete": 5}
+
+        with mock.patch.object(g, "remove_torrent") as m_remove, \
+             mock.patch.object(g, "block_and_search"), \
+             mock.patch.object(g, "send_notification"):
+            assert g.check_stalled_and_remove(torrent) is True
+
+        m_remove.assert_called_once_with("h1")
+
+
+# ── _stalled_threshold com remocao por stalled desligada ───────────────
+
+class TestStalledThresholdDesligado:
+    """{{stalledTime}} fica vazio quando o limiar nao se aplica.
+
+    O evento `stalled` tambem e disparado pelo ramo de "0 seeds", onde
+    stalled_time nao tem nenhuma relacao com o motivo da remocao. Preencher o
+    limiar ali faria a notificacao afirmar um prazo que nao foi o criterio.
+    """
+
+    def test_vazio_quando_remocao_por_stalled_desligada(self, tmp_config):
+        cfg = {"guardian": {"remove_stalled": False, "stalled_time": 24,
+                            "stalled_unit": "hours"}}
+        assert g._stalled_threshold(cfg) == ""
+
+    def test_preenchido_quando_ligada(self, tmp_config):
+        cfg = {"guardian": {"remove_stalled": True, "stalled_time": 15,
+                            "stalled_unit": "minutes"}}
+        assert g._stalled_threshold(cfg) == "15 minutes"
+
+    def test_notificacao_de_sem_seeds_nao_afirma_limiar_de_stalled(self, tmp_config):
+        """Remocao por 0 seeds com stalled desligado: limiar nao aparece."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"].update(remove_stalled=False, stalled_time=24,
+                               stalled_unit="hours", remove_no_seeds=True,
+                               no_seeds_time=1, no_seeds_unit="seconds")
+        cfg["notifications"] = {
+            "apprise_url": "http://apprise:8000/notify",
+            "enabled": True,
+            "events": {"stalled": {
+                "enabled": True,
+                "template": "Motivo: {{reason}} | Limiar: [{{stalledTime}}]"}},
+        }
+        g.save_config(cfg)
+
+        torrent = {"hash": "h1", "name": "Filme.Sem.Seeds", "state": "downloading",
+                   "added_on": 0, "num_complete": 0}
+
+        with mock.patch.object(g, "send_notification") as m, \
+             mock.patch.object(g, "block_and_search"), \
+             mock.patch.object(g, "remove_torrent"):
+            assert g.check_stalled_and_remove(torrent) is True
+
+        corpo = m.call_args[0][1]
+        assert "Motivo: 0 seeds" in corpo
+        assert "Limiar: []" in corpo, corpo
+        assert "24" not in corpo, f"limiar de stalled nao se aplica aqui: {corpo}"
+
+
+# ── Otimizacao de prioridades: os tres ramos ───────────────────────────
+
+class TestOtimizacaoPrioridades:
+    """Cada extensao cai no ramo certo: midia, auxiliar ou descarte.
+
+    O ramo `else` (descarte) nunca executava em teste. E ele que impede o
+    download de anexos indesejados que nao estao na lista de perigosos —
+    `.url`, `.lnk`, `.par2`, executaveis renomeados.
+    """
+
+    FILES = [{"name": "ep.mkv", "index": 0},
+             {"name": "info.nfo", "index": 1},
+             {"name": "clique-aqui.url", "index": 2},
+             {"name": "arquivo.par2", "index": 3}]
+
+    def _rodar(self, tmp_config):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"].update(priority_media=7, priority_normal=1,
+                               priority_skip=0, remove_stalled=False,
+                               remove_no_seeds=False)
+        g.save_config(cfg)
+        torrent = {"hash": "h1", "name": "Serie.S01E01", "state": "downloading",
+                   "added_on": 0}
+
+        with mock.patch.object(g, "get_files", return_value=self.FILES), \
+             mock.patch.object(g, "set_file_priority") as m_prio, \
+             mock.patch.object(g, "send_notification"):
+            assert g.analyze_torrent(torrent) is True
+        return m_prio
+
+    def test_cada_extensao_recebe_a_prioridade_do_seu_ramo(self, tmp_config):
+        m_prio = self._rodar(tmp_config)
+        assert m_prio.call_args_list == [
+            mock.call("h1", 0, 7),   # .mkv  -> midia
+            mock.call("h1", 1, 1),   # .nfo  -> auxiliar
+            mock.call("h1", 2, 0),   # .url  -> descarte
+            mock.call("h1", 3, 0),   # .par2 -> descarte
+        ]
+
+    def test_arquivo_desconhecido_nao_e_tratado_como_midia(self, tmp_config):
+        """Contagem de midia so conta o que casa com valid_media_extensions."""
+        m_prio = self._rodar(tmp_config)
+        prioridades = [c.args[2] for c in m_prio.call_args_list]
+        assert prioridades.count(7) == 1, \
+            f"apenas o .mkv e midia, veio {prioridades}"
+
+    def test_descarte_respeita_priority_skip_da_config(self, tmp_config):
+        """priority_skip configuravel: -1 (sem prioridade) em vez de 0."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"].update(priority_media=6, priority_normal=1,
+                               priority_skip=-1, remove_stalled=False,
+                               remove_no_seeds=False)
+        g.save_config(cfg)
+        torrent = {"hash": "h1", "name": "Serie.S01E01", "state": "downloading",
+                   "added_on": 0}
+
+        with mock.patch.object(g, "get_files", return_value=self.FILES), \
+             mock.patch.object(g, "set_file_priority") as m_prio, \
+             mock.patch.object(g, "send_notification"):
+            g.analyze_torrent(torrent)
+
+        assert m_prio.call_args_list == [
+            mock.call("h1", 0, 6),
+            mock.call("h1", 1, 1),
+            mock.call("h1", 2, -1),
+            mock.call("h1", 3, -1),
+        ]
+
+
+# ── get_config: cache vazio ────────────────────────────────────────────
+
+class TestGetConfigCacheVazio:
+    """get_config() com cache vazio le o disco em vez de devolver None.
+
+    Acontece de verdade: a Web UI pode atender uma requisicao antes de o loop
+    do guardian ter rodado load_config().
+    """
+
+    def test_cache_vazio_recarrega_do_disco(self, tmp_config):
+        g._config = None
+        cfg = g.get_config()
+        assert cfg["qbit"]["url"] == "http://localhost:8080"
+
+    def test_cache_preenchido_nao_le_o_disco(self, tmp_config):
+        g.load_config()
+        g._config["qbit"]["url"] = "http://memoria-apenas:1234"
+        assert g.get_config()["qbit"]["url"] == "http://memoria-apenas:1234"
+
+
+# ── /api/config: falha de leitura ──────────────────────────────────────
+
+class TestApiConfigFalhaDeLeitura:
+    """Config ilegivel devolve 500 em JSON, nao traceback HTML.
+
+    Um traceback do Flask exporia caminhos do sistema de arquivos e trechos de
+    codigo na resposta.
+    """
+
+    def test_erro_de_leitura_vira_500_json(self, client, tmp_config):
+        real = g.load_config()
+        # A 1a chamada e do decorator de auth; a 2a e a do endpoint.
+        with mock.patch("app.web._read_config",
+                        side_effect=[real, OSError("config.json ilegivel")]):
+            r = client.get("/api/config")
+
+        assert r.status_code == 500
+        assert r.is_json, "resposta de erro deve ser JSON"
+        assert "error" in r.get_json()
+
+    def test_erro_nao_expoe_traceback(self, client, tmp_config):
+        real = g.load_config()
+        with mock.patch("app.web._read_config",
+                        side_effect=[real, OSError("config.json ilegivel")]):
+            r = client.get("/api/config")
+
+        corpo = r.get_data(as_text=True)
+        assert "Traceback" not in corpo
+        assert "app/web.py" not in corpo
+
+
+# ── logger: nivel VERBOSE ──────────────────────────────────────────────
+
+class TestLoggerVerbose:
+    """log.verbose() respeita o nivel configurado.
+
+    O nivel VERBOSE e injetado em logging.Logger por setattr; se o guard de
+    nivel quebrar, LOG_LEVEL=ERROR em producao passa a despejar uma linha por
+    torrent por ciclo.
+    """
+
+    @contextlib.contextmanager
+    def _capturar(self, nivel):
+        import logging
+        from app.logger import get_logger
+
+        log = get_logger("teste-verbose")
+        registros = []
+        handler = logging.Handler()
+        handler.emit = registros.append
+        nivel_antigo = log.level
+        log.setLevel(nivel)
+        log.addHandler(handler)
+        try:
+            yield registros
+        finally:
+            log.removeHandler(handler)
+            log.setLevel(nivel_antigo)
+
+    def test_emite_no_nivel_15(self):
+        import logging
+        from app.logger import VERBOSE
+
+        with self._capturar(VERBOSE) as registros:
+            logging.getLogger("qbit-guardian.teste-verbose").verbose(
+                "torrent otimizado")
+
+        assert [r.levelno for r in registros] == [VERBOSE]
+        assert registros[0].getMessage() == "torrent otimizado"
+        assert registros[0].levelname == "VERBOSE"
+
+    def test_silencioso_quando_nivel_e_mais_alto(self):
+        import logging
+
+        with self._capturar(logging.INFO) as registros:
+            logging.getLogger("qbit-guardian.teste-verbose").verbose("detalhe")
+
+        assert registros == [], "VERBOSE nao pode sair com nivel INFO"
+
+    def test_interpolacao_de_args(self):
+        import logging
+        from app.logger import VERBOSE
+
+        with self._capturar(VERBOSE) as registros:
+            logging.getLogger("qbit-guardian.teste-verbose").verbose(
+                "torrent %s otimizado", "Serie.S01E01")
+
+        assert registros[0].getMessage() == "torrent Serie.S01E01 otimizado"
+
+
+# ── Healthcheck: config ilegivel ───────────────────────────────────────
+
+class TestHealthcheckConfigIlegivel:
+    """Config quebrada nao pode derrubar o healthcheck.
+
+    Uma excecao em _read_intervals sairia como traceback e exit != 0: o
+    container ficaria `unhealthy` para sempre, mesmo com o guardian vivo — e
+    `restart: always` nao reinicia container unhealthy.
+
+    A tolerancia reportada prova qual valor foi usado:
+    max(600, 300*3, 120*3) = 900s com os defaults.
+    """
+
+    TOLERANCIA_DEFAULT = "tolerancia 900s"
+
+    def _heartbeat(self, path, age_seconds=30):
+        with open(path, "w") as f:
+            f.write(str(time.time() - age_seconds))
+        return str(path)
+
+    def test_config_ausente_cai_nos_defaults(self, tmp_path):
+        from app import healthcheck
+
+        hb = self._heartbeat(tmp_path / "heartbeat")
+        ok, msg = healthcheck.check(heartbeat_path=hb,
+                                    config_path=str(tmp_path / "nao-existe.json"))
+        assert ok, msg
+        assert self.TOLERANCIA_DEFAULT in msg
+
+    def test_config_com_json_invalido_cai_nos_defaults(self, tmp_path):
+        from app import healthcheck
+
+        cfg = tmp_path / "config.json"
+        cfg.write_text("{ isso nao e json ]")
+        hb = self._heartbeat(tmp_path / "heartbeat")
+
+        ok, msg = healthcheck.check(heartbeat_path=hb, config_path=str(cfg))
+        assert ok, msg
+        assert self.TOLERANCIA_DEFAULT in msg
+
+    def test_config_sem_secao_guardian_cai_nos_defaults(self, tmp_path):
+        from app import healthcheck
+
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps({"qbit": {"url": "http://x"}}))
+        hb = self._heartbeat(tmp_path / "heartbeat")
+
+        ok, msg = healthcheck.check(heartbeat_path=hb, config_path=str(cfg))
+        assert ok, msg
+        assert self.TOLERANCIA_DEFAULT in msg
+
+    def test_config_ilegivel_nao_vira_modo_webhook(self, tmp_path):
+        """O fallback e 300s, nao 0 — senao o healthcheck passaria sempre.
+
+        Com interval=0 o healthcheck devolve 'modo webhook' sem nem olhar o
+        heartbeat: uma config corrompida silenciaria a deteccao de loop morto.
+        """
+        from app import healthcheck
+
+        hb = self._heartbeat(tmp_path / "heartbeat", age_seconds=5000)
+        ok, msg = healthcheck.check(heartbeat_path=hb,
+                                    config_path=str(tmp_path / "nao-existe.json"))
+        assert not ok, msg
+        assert "atrasado" in msg
+
+
+# ── _handle_arr com tipo desconhecido ──────────────────────────────────
+
+class TestArrTipoDesconhecido:
+    """Tipo de *Arr fora de Radarr/Sonarr degrada sem efeito colateral.
+
+    Os ramos por tipo nao tem `else`. Se um terceiro *Arr for ligado no futuro
+    sem tratar o tipo, o handler precisa sair em silencio — nunca disparar um
+    comando de busca com item_id indefinido.
+    """
+
+    def test_nao_dispara_busca_nem_quebra(self, tmp_config):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["lidarr"] = {"url": "https://lidarr.home.arpa", "api_key": "lkey"}
+        g.save_config(cfg)
+
+        sess = mock.MagicMock()
+        sess.get.return_value.json.return_value = {
+            "records": [{"id": 1, "downloadId": "HASH1", "artistId": 9}]}
+
+        with mock.patch.object(g.requests, "Session", return_value=sess):
+            g._handle_arr("Lidarr", "lidarr", "hash1", "Album.2020")
+
+        assert not sess.post.called, "sem tipo tratado nao se dispara re-search"
+        # O blocklist da queue ainda acontece: o item foi identificado.
+        sess.delete.assert_called_once()
+
+
+# ── is_stalled: limites do ramo "sem seeds" ────────────────────────────
+
+class TestIsStalledSemSeedsLimites:
+    """Zero e tempo insuficiente nao removem.
+
+    `no_seeds_time: 0` precisa significar "desligado", nunca "remover agora" —
+    e o valor que a config default grava.
+    """
+
+    def _cfg(self, **guardian):
+        base = {"remove_stalled": False, "remove_no_seeds": True,
+                "no_seeds_time": 48, "no_seeds_unit": "hours"}
+        base.update(guardian)
+        return {"guardian": base}
+
+    def test_tempo_zero_nao_remove(self):
+        torrent = {"state": "downloading", "num_complete": 0, "added_on": 0}
+        stalled, motivo = g.is_stalled(torrent, self._cfg(no_seeds_time=0))
+        assert stalled is False
+        assert motivo == ""
+
+    def test_tempo_insuficiente_nao_remove(self):
+        torrent = {"state": "downloading", "num_complete": 0,
+                   "added_on": time.time()}
+        stalled, _ = g.is_stalled(torrent, self._cfg())
+        assert stalled is False
+
+    def test_tempo_atingido_remove(self):
+        """Contraprova: o limiar funciona quando de fato e atingido."""
+        torrent = {"state": "downloading", "num_complete": 0,
+                   "added_on": time.time() - 48 * 3600 - 1}
+        stalled, motivo = g.is_stalled(torrent, self._cfg())
+        assert stalled is True
+        assert motivo == "0 seeds"
+
+
+# ── valid_media_extensions vazia ───────────────────────────────────────
+
+class TestListaDeMidiaVazia:
+    """Lista de extensoes de midia vazia desliga o criterio, nao apaga tudo.
+
+    `valid_media_extensions: []` e um estado alcancavel pela Web UI. Se a
+    checagem de "nenhum arquivo de midia valido" rodasse com a lista vazia,
+    TODO torrent seria removido com os arquivos do disco.
+    """
+
+    def _rodar(self, tmp_config, files):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"].update(valid_media_extensions=[], remove_stalled=False,
+                               remove_no_seeds=False)
+        g.save_config(cfg)
+        torrent = {"hash": "h1", "name": "Qualquer.Coisa", "state": "downloading",
+                   "added_on": 0}
+
+        with mock.patch.object(g, "get_files", return_value=files), \
+             mock.patch.object(g, "set_file_priority"), \
+             mock.patch.object(g, "remove_torrent") as m_remove, \
+             mock.patch.object(g, "block_and_search") as m_block, \
+             mock.patch.object(g, "send_notification") as m_notify:
+            assert g.analyze_torrent(torrent) is True
+        return m_remove, m_block, m_notify
+
+    def test_nao_remove_quando_a_lista_esta_vazia(self, tmp_config):
+        m_remove, m_block, _ = self._rodar(
+            tmp_config, [{"name": "leia-me.txt", "index": 0}])
+        assert not m_remove.called, "lista vazia nao pode remover torrent"
+        assert not m_block.called
+
+    def test_sem_midia_priorizada_nao_notifica_otimizacao(self, tmp_config):
+        """Nada foi otimizado: nao ha o que anunciar.
+
+        Notificar "otimizado (0 arquivos)" treinaria o usuario a ignorar o
+        canal.
+        """
+        _, _, m_notify = self._rodar(
+            tmp_config, [{"name": "leia-me.txt", "index": 0}])
+        assert not m_notify.called
+
+    def test_extensao_perigosa_ainda_remove(self, tmp_config):
+        """Lista de midia vazia nao desliga a checagem de perigosos."""
+        m_remove, m_block, _ = self._rodar(
+            tmp_config, [{"name": "setup.exe", "index": 0}])
+        m_remove.assert_called_once_with("h1")
+        m_block.assert_called_once()
+
+
+# ── Entrypoints: contrato de execucao ──────────────────────────────────
+
+class TestEntrypointsFiacao:
+    """Como o processo e montado: thread daemon, Flask sem debug, ordem."""
+
+    def test_guardian_roda_em_thread_daemon(self):
+        """Thread nao-daemon impediria o container de encerrar.
+
+        O loop e infinito: sem daemon=True, `docker stop` esperaria o timeout
+        e o container morreria com SIGKILL em vez de sair limpo.
+        """
+        with mock.patch.object(g.threading, "Thread") as m_thread:
+            t = g.start_guardian()
+
+        m_thread.assert_called_once_with(target=g.guardian_loop, daemon=True)
+        m_thread.return_value.start.assert_called_once()
+        assert t is m_thread.return_value
+
+    def test_flask_nunca_sobe_com_debug(self):
+        """debug=True exporia o console interativo do Werkzeug.
+
+        Com o debugger ligado, qualquer um que alcance a porta executa Python
+        arbitrario no container — sem passar pelo Basic Auth.
+        """
+        import app.web as w
+
+        with mock.patch.object(w.app, "run") as m_run:
+            w.start_web(host="127.0.0.1", port=5555)
+
+        m_run.assert_called_once_with(host="127.0.0.1", port=5555,
+                                      debug=False, threaded=True)
+
+    def test_main_escreve_heartbeat_antes_de_subir(self):
+        """Ordem importa: heartbeat, guardian, web.
+
+        O HEALTHCHECK do container comeca a rodar junto com o processo. Sem o
+        heartbeat escrito antes, a primeira checagem encontraria o arquivo
+        ausente e marcaria `unhealthy` logo no startup.
+        """
+        import runpy
+
+        ordem = []
+        with mock.patch.object(g, "write_heartbeat",
+                              side_effect=lambda: ordem.append("heartbeat")), \
+             mock.patch.object(g, "start_guardian",
+                               side_effect=lambda: ordem.append("guardian")), \
+             mock.patch("app.web.start_web",
+                        side_effect=lambda: ordem.append("web")):
+            runpy.run_module("app.main", run_name="__main__")
+
+        assert ordem == ["heartbeat", "guardian", "web"]
+
+
+# ── Healthcheck: contrato de exit code ─────────────────────────────────
+
+class TestHealthcheckExitCode:
+    """O Docker le o exit code, nao a mensagem.
+
+    `HEALTHCHECK CMD python app/healthcheck.py` decide healthy/unhealthy pelo
+    codigo de saida: 0 = healthy, qualquer outro = unhealthy.
+    """
+
+    def test_main_devolve_zero_quando_saudavel(self, capsys):
+        from app import healthcheck
+
+        with mock.patch.object(healthcheck, "check",
+                               return_value=(True, "heartbeat ok")):
+            assert healthcheck.main() == 0
+
+        assert "heartbeat ok" in capsys.readouterr().out
+
+    def test_main_devolve_um_quando_doente(self, capsys):
+        from app import healthcheck
+
+        with mock.patch.object(healthcheck, "check",
+                               return_value=(False, "heartbeat atrasado")):
+            assert healthcheck.main() == 1
+
+        assert "heartbeat atrasado" in capsys.readouterr().out
+
+    def test_script_executado_direto_sai_com_o_codigo_do_check(self, tmp_path):
+        """Executa o arquivo como o Dockerfile executa, via __main__."""
+        import subprocess
+        import sys
+
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps({"guardian": {"check_interval_seconds": 0}}))
+
+        raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        r = subprocess.run([sys.executable, os.path.join(raiz, "app", "healthcheck.py")],
+                           env={**os.environ, "CONFIG_PATH": str(cfg)},
+                           capture_output=True, text=True, timeout=30)
+
+        assert r.returncode == 0, r.stderr
+        assert "webhook" in r.stdout
+
+    def test_config_path_default_quando_nao_informado(self, tmp_path):
+        """check() sem config_path usa o CONFIG_PATH do modulo."""
+        from app import healthcheck
+
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps({"guardian": {"check_interval_seconds": 0}}))
+
+        antigo = healthcheck.CONFIG_PATH
+        healthcheck.CONFIG_PATH = str(cfg)
+        try:
+            ok, msg = healthcheck.check(heartbeat_path=str(tmp_path / "ausente"))
+        finally:
+            healthcheck.CONFIG_PATH = antigo
+
+        assert ok, msg
+        assert "webhook" in msg
+
+
+# ── Contagem de testes nos READMEs ─────────────────────────────────────
+
+class TestReadmeContagemDeTestes:
+    """As duas mencoes de contagem em cada README nao podem divergir.
+
+    Isso ja falhou duas vezes: a linha do comando `pytest` foi atualizada e a
+    da tabela de stack ficou para tras, afirmando 79 testes por varias
+    versoes. O teste nao julga se o numero esta certo — garante que as
+    mencoes, nos dois idiomas, contem a MESMA historia, e que atualizar uma e
+    esquecer a outra fica vermelho.
+    """
+
+    # Qualquer parenteses que fale de testes "funcionais": pega tanto
+    # "(308 tests: 288 functional + 20 security)" na tabela de stack quanto
+    # "(308: 288 funcionais + 20 de segurança)" no bloco de comandos, nos dois
+    # idiomas, sem depender da ordem das palavras.
+    PADRAO = re.compile(r"\(([^)]*(?:functional|funcionais)[^)]*)\)")
+
+    def _mencoes(self, arquivo):
+        with open(os.path.join(REPO_ROOT, arquivo), encoding="utf-8") as f:
+            texto = f.read()
+        return [tuple(int(n) for n in re.findall(r"\d+", grupo))
+                for grupo in self.PADRAO.findall(texto)]
+
+    @pytest.mark.parametrize("arquivo", ["README.md", "README.pt-BR.md"])
+    def test_mencoes_do_mesmo_readme_concordam(self, arquivo):
+        mencoes = self._mencoes(arquivo)
+        assert len(mencoes) >= 2, \
+            f"{arquivo}: esperado 2 mencoes de contagem, achei {mencoes}"
+        assert len(set(mencoes)) == 1, \
+            f"{arquivo}: mencoes divergentes {mencoes}"
+
+    @pytest.mark.parametrize("arquivo", ["README.md", "README.pt-BR.md"])
+    def test_total_e_a_soma_das_partes(self, arquivo):
+        total, funcionais, seguranca = self._mencoes(arquivo)[0]
+        assert total == funcionais + seguranca, \
+            f"{arquivo}: {funcionais} + {seguranca} != {total}"
+
+    def test_os_dois_idiomas_concordam(self):
+        assert self._mencoes("README.md")[0] == self._mencoes("README.pt-BR.md")[0]

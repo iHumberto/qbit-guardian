@@ -1,0 +1,18 @@
+# Configuracao de cobertura — mantem `coverage report` reproduzivel.
+#
+# A CI (test.yml) nao mede cobertura; este arquivo serve ao uso local:
+#   .venv/bin/python -m coverage run -m pytest test/
+#   .venv/bin/python -m coverage report
+
+[run]
+source = app
+branch = True
+
+[report]
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    # Guard de execucao direta: nao roda dentro do processo de teste. O
+    # comportamento real (exit code lido pelo HEALTHCHECK do Docker) e
+    # verificado via subprocess em TestHealthcheckExitCode.
+    if __name__ == .__main__.:

@@ -25,7 +25,7 @@ Ele roda como um container Docker leve (ou como um processo Python) com uma inte
 | Interface Web | Flask 3.x                           |
 | Cliente HTTP  | requests 2.x                        |
 | Notificações  | Apprise (Telegram, Discord, Slack e mais de 100 serviços) |
-| Testes        | pytest 8.x (79 testes: 59 funcionais + 20 segurança) |
+| Testes        | pytest 8.x (313 testes: 293 funcionais + 20 segurança) |
 | Licença       | GNU GPL v3                          |
 
 ## Funcionalidades
@@ -377,7 +377,7 @@ Deixe os campos `sonarr.url` e `radarr.url` em branco. O guardian funciona perfe
 # Instalar dependências (runtime + ferramentas de teste)
 pip install -r requirements-dev.txt
 
-# Rodar todos os testes (249: 229 funcionais + 20 de segurança)
+# Rodar todos os testes (313: 293 funcionais + 20 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais
@@ -385,6 +385,9 @@ python -m pytest test/test_guardian.py -v
 
 # Apenas testes de segurança
 python -m pytest test/test_security.py -v
+
+# Cobertura (configuração em .coveragerc)
+python -m coverage run -m pytest test/ && python -m coverage report
 ```
 
 CI roda a cada push e pull request via GitHub Actions (`.github/workflows/test.yml`). O build da imagem (`docker-build.yml`) depende dessa suite, então nada é publicado no GHCR com teste quebrado.

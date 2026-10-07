@@ -5,6 +5,33 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] — 2026-10-07
+
+Fechamento das lacunas de cobertura. **Nenhuma mudanca de comportamento em
+producao**: so testes, configuracao de cobertura e documentacao.
+
+### Adicionado
+- **Contrato HTTP com o qBittorrent sob teste** (`TestQbitHttpContract`). Os quatro wrappers da API (`qbit_login`, `get_torrents`, `get_files`, `remove_torrent`) eram sempre substituidos INTEIROS nos testes, entao o corpo deles nunca executava: endpoint, forma do payload, `timeout` e autenticacao nao tinham verificacao nenhuma — a mesma classe de buraco que deixou a escala de prioridade errada chegar em producao. Agora ha uma `Session` falsa que registra cada chamada e os testes exigem: hash em `params` (nao concatenado na URL), `deleteFiles=true` no delete, `raise_for_status()` nos GETs, `timeout=10` em todas as cinco chamadas, HTTP != 200 no login virando `RuntimeError`, e a `api_key` **somente** no header `Authorization: Bearer` — nunca em query string (onde entraria no log de acesso do reverse proxy) nem no corpo.
+- **Estados UP nunca sao removidos** (`TestCheckStalledEstadosUp`), parametrizado nos cinco estados, com um torrent que satisfaria todos os gatilhos de remocao. E o caminho mais destrutivo do codigo: remocao usa `deleteFiles=true`, ou seja, apaga do disco midia que ja terminou de baixar.
+- **Lista de extensoes de midia vazia nao apaga tudo** (`TestListaDeMidiaVazia`). `valid_media_extensions: []` e alcancavel pela Web UI; se a checagem de "nenhum arquivo de midia valido" rodasse com a lista vazia, TODO torrent seria removido com os arquivos. A deteccao de extensoes perigosas continua ativa nesse estado.
+- **Flask nunca sobe com `debug=True`** e **guardian roda em thread daemon** (`TestEntrypointsFiacao`). Com o debugger do Werkzeug ligado, qualquer um que alcance a porta executa Python arbitrario no container, sem passar pelo Basic Auth. O `app/main.py` tambem passou a ter teste de ordem: heartbeat antes de subir guardian e web, porque o HEALTHCHECK comeca a rodar junto com o processo.
+- **Contagem do pass 2** (`TestPassDoisContagem`): `/api/trigger` e o resumo do loop reportam quantos torrents foram removidos. O incremento nunca executava em teste — um off-by-one ali mentiria no log sem quebrar nada.
+- **Resiliencia do loop** (`TestGuardianLoopCorpo`, `TestConnectRetryResiliencia`): torrent sem metadados nao e marcado como processado; erro de dominio loga sem reconectar (so erro de transporte reconecta); `/tmp` cheio ou somente-leitura nao derruba a thread, nem no loop nem durante o retry.
+- **Config corrompida nao derruba o healthcheck** (`TestHealthcheckConfigIlegivel`) e **contrato de exit code** (`TestHealthcheckExitCode`, incluindo execucao do script via subprocess, como o Dockerfile faz). Uma excecao em `_read_intervals` sairia como traceback e exit != 0: o container ficaria `unhealthy` para sempre mesmo com o guardian vivo — e `restart: always` nao reinicia container unhealthy. O fallback tambem nao pode cair em `interval=0`, que silenciaria a deteccao de loop morto.
+- **Ramo de descarte da otimizacao** (`TestOtimizacaoPrioridades`): `.url`, `.lnk`, `.par2` e companhia recebem `priority_skip` e nao sao baixados. O ramo `else` nunca tinha executado em teste.
+- **Limites do criterio "sem seeds"** (`TestIsStalledSemSeedsLimites`): `no_seeds_time: 0` significa desligado, nunca "remover agora" — e e o valor que a config default grava.
+- **`{{stalledTime}}` vazio quando o limiar nao se aplica** (`TestStalledThresholdDesligado`): o evento `stalled` tambem e disparado pelo ramo de "0 seeds", onde `stalled_time` nao foi o criterio. Preencher o limiar ali faria a notificacao afirmar um prazo que nao foi usado.
+- **`.coveragerc`** com `source`, `branch` e as exclusoes convencionais, para `coverage report` ser reproduzivel. A CI nao mede cobertura; o arquivo serve ao uso local, documentado nos dois READMEs.
+- **Paridade da contagem de testes nos READMEs** (`TestReadmeContagemDeTestes`): as mencoes dentro de cada README e entre os dois idiomas tem de contar a mesma historia, e o total tem de ser a soma das partes.
+
+### Corrigido
+- A tabela de stack dos dois READMEs afirmava **79 testes** desde varias versoes atras: a linha do comando `pytest` vinha sendo atualizada e a da tabela ficava para tras. Agora ha teste proibindo a divergencia.
+
+### Notas
+- Testes: 249 → 313. Cobertura: 88% → **99%** (branch, `app/` inteiro), com **zero statements descobertos**. O unico ramo restante (`guardian.py 414->exit`) e defensivo e comprovadamente inalcancavel: exige `arr_type` fora de Radarr/Sonarr **com** `item_id` preenchido, e so os dois tipos tratados preenchem o id.
+- As 24 regressoes correspondentes foram injetadas uma a uma e todas ficaram vermelhas, mais tres mutacoes na contagem dos READMEs.
+- A sugestao de "notificacao Apprise apos N retries", registrada como pendencia aberta desde a v2.0.6, foi **descartada**: era mitigacao opcional autogerada na secao de riscos do planejamento, nunca um requisito. O healthcheck mede a saude do processo guardian; indisponibilidade do qBittorrent e estado externo (pode ser config do usuario ou problema no proprio qBittorrent) e nao justifica notificar.
+
 ## [2.1.1] — 2026-10-07
 
 Ajustes de layout reportados a partir de uma captura da instalacao em producao.
