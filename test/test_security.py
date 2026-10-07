@@ -13,7 +13,25 @@ import os
 import tempfile
 import base64
 import pytest
+from unittest import mock
+
+import app.auth as auth
+import app.guardian as g
+import app.web as w
 from app.web import app
+
+SENHA = "senha-de-teste-123"
+
+
+def _json_headers(**extra):
+    base = {"Content-Type": "application/json"}
+    base.update(extra)
+    return base
+
+
+def _basic(usuario, senha):
+    bruto = f"{usuario}:{senha}".encode()
+    return {"Authorization": "Basic " + base64.b64encode(bruto).decode()}
 
 
 @pytest.fixture
@@ -74,8 +92,14 @@ class TestAuth:
         with open(tmp_config, "w") as f:
             json.dump(cfg, f)
 
-    def test_auth_disabled_by_default_allows_access(self, client, tmp_config):
-        """Sem user/password configurados, endpoints sao públicos."""
+    def test_auth_pode_ser_desligada_explicitamente(self, client, tmp_config):
+        """Campos vazios desligam a auth — escape hatch consciente.
+
+        Nao e mais o estado inicial: desde a v2.2.0 o startup provisiona
+        usuario e senha (ver TestBootstrapCredenciais). Esvaziar `webui`
+        continua valendo para quem ja protege a porta por outro meio, mas o
+        proximo restart gera senha nova.
+        """
         r = client.get("/api/config")
         assert r.status_code == 200
 
@@ -158,10 +182,10 @@ class TestXSS:
 
 
 class TestCSRF:
-    """CSRF: falta de token anti-CSRF no POST /api/config."""
+    """POST /api/config aceita requisicao local, nunca de outro site."""
 
-    def test_post_config_without_csrf_still_works(self, client, tmp_config):
-        """POST sem token CSRF — aceito (API local, auth desabilitada)."""
+    def test_post_config_do_proprio_painel_funciona(self, client, tmp_config):
+        """Requisicao same-origin continua passando normalmente."""
         r = client.post("/api/config", json={
             "qbit": {"url": "http://test:8080", "api_key": "k"},
             "sonarr": {"url": "", "api_key": ""},
@@ -441,3 +465,295 @@ class TestEdgeCases:
         with open(tmp_config) as f:
             saved = json.load(f)
         assert saved["guardian"]["unknown_future_field"] == "should_survive"
+
+
+# ── CSRF: o vetor que a v2.2.0 fechou ──────────────────────────────────
+
+@pytest.fixture
+def auth_config(tmp_config):
+    """Config com autenticacao ligada e senha conhecida."""
+    with open(tmp_config) as f:
+        cfg = json.load(f)
+    cfg["webui"] = {"user": "admin", "password": auth.hash_senha(SENHA)}
+    with open(tmp_config, "w") as f:
+        json.dump(cfg, f)
+    g._config = None
+    return tmp_config
+
+
+class TestCSRFOrigemExterna:
+    """Escrita vinda de outro site e recusada, com ou sem credencial valida.
+
+    Era o buraco exploravel do projeto: `request.get_json(force=True)` aceitava
+    `Content-Type: text/plain`, que nao dispara preflight de CORS. Qualquer
+    pagina que a vitima visitasse podia disparar um POST, e o navegador anexava
+    o Basic Auth dela sozinho — dava para apontar `qbit.url` para fora (e vazar
+    a API key do qBittorrent no header `Authorization`) ou transformar `.mkv`
+    em extensao perigosa (e apagar a biblioteca, porque a remocao usa
+    `deleteFiles=true`).
+    """
+
+    PAYLOAD = {"guardian": {"check_interval_seconds": 42}}
+
+    @pytest.mark.parametrize("rota", ["/api/config", "/api/credentials"])
+    @pytest.mark.parametrize("tipo", ["text/plain", "application/x-www-form-urlencoded",
+                                      "multipart/form-data"])
+    def test_content_type_simples_recusado(self, rota, tipo, client, auth_config):
+        """So `application/json` passa — o resto dispensaria preflight."""
+        r = client.post(rota, data=json.dumps(self.PAYLOAD), content_type=tipo,
+                        headers=_basic("admin", SENHA))
+        assert r.status_code == 415, r.get_data(as_text=True)
+
+    @pytest.mark.parametrize("site", ["cross-site", "same-site-forjado", "qualquer-coisa"])
+    def test_sec_fetch_site_externo_recusado(self, site, client, auth_config):
+        r = client.post("/api/config", json=self.PAYLOAD,
+                        headers={**_basic("admin", SENHA), "Sec-Fetch-Site": site})
+        assert r.status_code == 403
+
+    @pytest.mark.parametrize("site", ["same-origin", "none"])
+    def test_sec_fetch_site_proprio_aceito(self, site, client, auth_config):
+        r = client.post("/api/config", json=self.PAYLOAD,
+                        headers={**_basic("admin", SENHA), "Sec-Fetch-Site": site})
+        assert r.status_code == 200
+
+    def test_origin_de_outro_host_recusado(self, client, auth_config):
+        """Navegador antigo, sem Sec-Fetch-Site: o Origin decide."""
+        r = client.post("/api/config", json=self.PAYLOAD,
+                        headers={**_basic("admin", SENHA), "Origin": "http://evil.tld"})
+        assert r.status_code == 403
+
+    def test_origin_do_proprio_host_aceito(self, client, auth_config):
+        r = client.post("/api/config", json=self.PAYLOAD,
+                        headers={**_basic("admin", SENHA), "Origin": "http://localhost"})
+        assert r.status_code == 200
+
+    def test_cliente_sem_cabecalhos_de_navegador_aceito(self, client, auth_config):
+        """curl e o hook do webhook nao mandam Sec-Fetch-Site nem Origin.
+
+        Um cliente que nao e navegador nao sofre CSRF: nao ha sessao que outro
+        site possa sequestrar.
+        """
+        r = client.post("/api/config", json=self.PAYLOAD, headers=_basic("admin", SENHA))
+        assert r.status_code == 200
+
+    def test_leitura_nao_e_bloqueada_por_origem(self, client, auth_config):
+        """GET nao muda estado — a checagem e so para escrita."""
+        r = client.get("/api/config", headers={**_basic("admin", SENHA),
+                                               "Sec-Fetch-Site": "cross-site"})
+        assert r.status_code == 200
+
+    def test_trigger_protegido_por_origem(self, client, auth_config):
+        r = client.post("/api/trigger", headers={**_basic("admin", SENHA),
+                                                 "Sec-Fetch-Site": "cross-site"})
+        assert r.status_code == 403
+
+    def test_trigger_aceita_post_sem_corpo(self, client, auth_config):
+        """O hook do qBittorrent faz POST vazio, sem Content-Type.
+
+        Exigir JSON aqui quebraria o modo webhook inteiro.
+        """
+        with mock.patch.object(g, "get_torrents", return_value=[]), \
+             mock.patch.object(g, "write_heartbeat"):
+            r = client.post("/api/trigger", headers=_basic("admin", SENHA))
+        assert r.status_code == 200
+
+
+class TestCredenciaisForaDoConfig:
+    """`/api/config` nao mexe em `webui`; a senha nao sai no GET."""
+
+    def test_post_config_nao_altera_credenciais(self, client, auth_config):
+        """Sem isto, a troca de senha seria contornavel por um POST comum."""
+        r = client.post("/api/config",
+                        json={"webui": {"user": "atacante", "password": "123"}},
+                        headers=_basic("admin", SENHA))
+        assert r.status_code == 200
+
+        with open(auth_config) as f:
+            salvo = json.load(f)
+        assert salvo["webui"]["user"] == "admin"
+        assert auth.verificar_senha(SENHA, salvo["webui"]["password"])
+
+    def test_credencial_antiga_continua_valendo_apos_post(self, client, auth_config):
+        client.post("/api/config", json={"webui": {"user": "atacante", "password": "123"}},
+                    headers=_basic("admin", SENHA))
+        assert client.get("/api/config", headers=_basic("admin", SENHA)).status_code == 200
+        assert client.get("/api/config", headers=_basic("atacante", "123")).status_code == 401
+
+    def test_get_config_nao_devolve_a_senha(self, client, auth_config):
+        corpo = client.get("/api/config", headers=_basic("admin", SENHA)).get_json()
+        assert "password" not in corpo.get("webui", {})
+        assert corpo["webui"]["user"] == "admin"
+        assert SENHA not in json.dumps(corpo)
+
+    def test_get_config_nao_apaga_a_senha_do_cache(self, client, auth_config):
+        """A copia devolvida e profunda.
+
+        `load_config()` devolve o objeto em cache: remover a senha dele
+        apagaria a credencial do processo inteiro e o proximo login falharia.
+        """
+        client.get("/api/config", headers=_basic("admin", SENHA))
+        assert g.get_config()["webui"].get("password")
+        assert client.get("/api/config", headers=_basic("admin", SENHA)).status_code == 200
+
+
+class TestArquivosEstaticosAutenticados:
+    """`/index.html` nao pode ser publico enquanto `/` pede senha."""
+
+    ARQUIVOS = ["/index.html", "/i18n.js", "/favicon.svg"]
+
+    @pytest.mark.parametrize("rota", ARQUIVOS + ["/"])
+    def test_sem_credencial_recusa(self, rota, client, auth_config):
+        assert client.get(rota).status_code == 401
+
+    @pytest.mark.parametrize("rota", ARQUIVOS + ["/"])
+    def test_com_credencial_serve(self, rota, client, auth_config):
+        assert client.get(rota, headers=_basic("admin", SENHA)).status_code == 200
+
+    def test_health_continua_publico(self, client, auth_config):
+        """Healthcheck do Docker roda sem credencial."""
+        r = client.get("/api/health")
+        assert r.status_code == 200
+        assert r.get_json() == {"status": "ok"}
+
+    @pytest.mark.parametrize("alvo", [
+        "/../config.json", "/..%2fconfig.json", "/%2e%2e/config.json",
+        "/....//config.json", "/app/web.py", "/static/../config.json",
+    ])
+    def test_path_traversal_nao_escapa_de_static(self, alvo, client, auth_config):
+        r = client.get(alvo, headers=_basic("admin", SENHA))
+        assert r.status_code == 404, f"{alvo} devolveu {r.status_code}"
+
+
+class TestComparacaoDeCredenciais:
+    """Usuario e senha sao comparados em tempo constante, sem curto-circuito."""
+
+    def test_senha_e_verificada_mesmo_com_usuario_errado(self, auth_config):
+        """Encerrar cedo revelaria, pelo tempo, que o nome de usuario existe."""
+        with mock.patch.object(w.auth, "verificar_senha",
+                               wraps=w.auth.verificar_senha) as m:
+            assert w._check_auth("nao-existe", SENHA) is False
+        assert m.called, "a senha precisa ser verificada mesmo com usuario errado"
+
+    def test_usuario_e_verificado_mesmo_com_senha_errada(self, auth_config):
+        with mock.patch.object(w.auth, "verificar_usuario",
+                               wraps=w.auth.verificar_usuario) as m:
+            assert w._check_auth("admin", "errada") is False
+        assert m.called
+
+    def test_credencial_correta_passa(self, auth_config):
+        assert w._check_auth("admin", SENHA) is True
+
+
+class TestLimiteDeCorpo:
+    """Corpo grande e recusado antes de virar config.json."""
+
+    def test_acima_do_limite_devolve_413(self, client, auth_config):
+        corpo = "x" * (w.MAX_BODY_BYTES + 1024)
+        r = client.post("/api/config", data=corpo, content_type="application/json",
+                        headers=_basic("admin", SENHA))
+        assert r.status_code == 413
+        assert r.is_json
+
+    def test_dentro_do_limite_passa(self, client, auth_config):
+        extensoes = [f".ext{i}" for i in range(500)]
+        r = client.post("/api/config", json={"guardian": {"dangerous_extensions": extensoes}},
+                        headers=_basic("admin", SENHA))
+        assert r.status_code == 200
+
+
+class TestHeadersDeSeguranca:
+    """Respostas trazem os cabecalhos defensivos basicos."""
+
+    @pytest.mark.parametrize("header,valor", [
+        ("X-Content-Type-Options", "nosniff"),
+        ("X-Frame-Options", "DENY"),
+        ("Referrer-Policy", "no-referrer"),
+    ])
+    def test_header_presente(self, header, valor, client, tmp_config):
+        r = client.get("/api/health")
+        assert r.headers.get(header) == valor
+
+
+class TestEndpointCredenciais:
+    """POST /api/credentials — unica porta para trocar usuario/senha."""
+
+    def test_sem_autenticacao_recusa(self, client, auth_config):
+        r = client.post("/api/credentials",
+                        json={"current_password": SENHA, "new_password": "outra-senha"})
+        assert r.status_code == 401
+
+    def test_senha_atual_errada_recusa(self, client, auth_config):
+        r = client.post("/api/credentials",
+                        json={"current_password": "chute", "new_password": "outra-senha"},
+                        headers=_basic("admin", SENHA))
+        assert r.status_code == 403
+        assert "senha atual" in r.get_json()["error"]
+
+    def test_senha_nova_curta_recusa(self, client, auth_config):
+        r = client.post("/api/credentials",
+                        json={"current_password": SENHA, "new_password": "curta"},
+                        headers=_basic("admin", SENHA))
+        assert r.status_code == 400
+        assert str(auth.TAMANHO_MINIMO_SENHA) in r.get_json()["error"]
+
+    def test_sem_nada_para_alterar_recusa(self, client, auth_config):
+        r = client.post("/api/credentials", json={"current_password": SENHA},
+                        headers=_basic("admin", SENHA))
+        assert r.status_code == 400
+
+    def test_troca_apenas_o_usuario(self, client, auth_config):
+        r = client.post("/api/credentials",
+                        json={"user": "humberto", "current_password": SENHA},
+                        headers=_basic("admin", SENHA))
+        assert r.status_code == 200
+        assert r.get_json()["user"] == "humberto"
+        # Mesma senha, nome novo.
+        assert client.get("/api/config", headers=_basic("humberto", SENHA)).status_code == 200
+        assert client.get("/api/config", headers=_basic("admin", SENHA)).status_code == 401
+
+    def test_troca_apenas_a_senha(self, client, auth_config):
+        r = client.post("/api/credentials",
+                        json={"current_password": SENHA, "new_password": "senha-nova-999"},
+                        headers=_basic("admin", SENHA))
+        assert r.status_code == 200
+        assert client.get("/api/config",
+                          headers=_basic("admin", "senha-nova-999")).status_code == 200
+        assert client.get("/api/config", headers=_basic("admin", SENHA)).status_code == 401
+
+    def test_troca_os_dois_de_uma_vez(self, client, auth_config):
+        r = client.post("/api/credentials",
+                        json={"user": "humberto", "current_password": SENHA,
+                              "new_password": "senha-nova-999"},
+                        headers=_basic("admin", SENHA))
+        assert r.status_code == 200
+        assert client.get("/api/config",
+                          headers=_basic("humberto", "senha-nova-999")).status_code == 200
+
+    def test_senha_nova_e_gravada_como_hash(self, client, auth_config):
+        client.post("/api/credentials",
+                    json={"current_password": SENHA, "new_password": "senha-nova-999"},
+                    headers=_basic("admin", SENHA))
+        with open(auth_config) as f:
+            salvo = json.load(f)["webui"]["password"]
+        assert auth.e_hash(salvo)
+        assert "senha-nova-999" not in salvo
+
+    def test_corpo_nao_json_recusa(self, client, auth_config):
+        r = client.post("/api/credentials", data="user=x", content_type="text/plain",
+                        headers=_basic("admin", SENHA))
+        assert r.status_code == 415
+
+    def test_corpo_que_nao_e_objeto_recusa(self, client, auth_config):
+        r = client.post("/api/credentials", json=["lista"], headers=_basic("admin", SENHA))
+        assert r.status_code == 400
+
+    def test_auth_desligada_nao_permite_definir_credencial(self, client, tmp_config):
+        """Com `webui` vazio, nao ha senha atual que confira — ninguem assume.
+
+        Quem quiser voltar a ter senha reinicia o container: o provisionamento
+        gera uma nova e anuncia no log.
+        """
+        r = client.post("/api/credentials",
+                        json={"user": "atacante", "current_password": "",
+                              "new_password": "senha-do-atacante"})
+        assert r.status_code == 403

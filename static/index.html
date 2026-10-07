@@ -80,6 +80,39 @@
   }
   .lang-bar select:focus { outline:none; border-color:var(--accent); }
 
+  /* ── Icone de conta + modal de credenciais ── */
+  .user-btn {
+    display:flex; align-items:center; justify-content:center;
+    width:28px; height:28px; padding:0; background:none; border:none;
+    color:var(--text); cursor:pointer;
+  }
+  .user-btn svg { width:24px; height:24px; display:block;
+                  fill:none; stroke:currentColor; stroke-width:2;
+                  stroke-linecap:round; stroke-linejoin:round; }
+  .user-btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:50%; }
+
+  .modal-bg {
+    position:fixed; inset:0; background:rgba(0,0,0,.55);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+    z-index:50;
+  }
+  .modal-bg[hidden] { display:none; }
+  .modal {
+    background:var(--card); border:1px solid var(--line); border-radius:var(--r-card);
+    padding:var(--card-pad-y) var(--card-pad-x); width:100%; max-width:var(--col);
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .modal h2 { font-size:var(--fs-base); font-weight:400; }
+  .modal .help { font-size:var(--fs-help); line-height:1.3; }
+  .modal-actions { display:flex; justify-content:flex-end; gap:12px; margin-top:6px; }
+  .modal-actions button {
+    height:32px; padding:0 18px; border-radius:var(--r-card);
+    background:var(--card); border:1px solid var(--line); color:var(--text);
+    font-size:var(--fs-base); font-family:inherit; cursor:pointer;
+  }
+  .modal-actions button:hover { background:#1d2a4d; }
+  .modal-actions button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
   /* ── Grade de 3 colunas ── */
   .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:var(--gutter); align-items:stretch; }
   .col { display:flex; flex-direction:column; gap:29px; min-width:0; }
@@ -217,6 +250,16 @@
       <span class="docs-tip" data-i18n="docs_tooltip">Com dúvidas? Leia a documentação e aprenda a configurar</span>
     </a>
     <div class="lang-bar" id="lang-bar"></div>
+    <!-- Conta: abre o modal de troca de usuario/senha da Web UI. -->
+    <button type="button" class="user-btn" id="user-btn"
+            data-i18n-title="account_title" data-i18n-aria="account_title"
+            title="Conta" aria-label="Conta" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="10" r="3"/>
+        <path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/>
+      </svg>
+    </button>
   </div>
 
   <h1 data-i18n="title">🛡️ qbit-guardian</h1>
@@ -391,6 +434,34 @@
   </div>
 </div>
 
+<!-- Modal de credenciais. A senha atual e sempre exigida: e a prova de
+     identidade que impede que um navegador deixado aberto vire troca de
+     credencial. Usuario e nova senha sao independentes — quem so quer trocar
+     o nome deixa a nova senha em branco. -->
+<div class="modal-bg" id="cred-modal" hidden role="dialog" aria-modal="true"
+     aria-labelledby="cred-title">
+  <form class="modal" id="cred-form">
+    <h2 id="cred-title" data-i18n="account_title">👤 Conta</h2>
+    <div class="field">
+      <label for="cred_user" data-i18n="label_cred_user">Usuário</label>
+      <input id="cred_user" autocomplete="username">
+    </div>
+    <div class="field">
+      <label for="cred_current" data-i18n="label_cred_current">Senha atual</label>
+      <input id="cred_current" type="password" autocomplete="current-password" required>
+    </div>
+    <div class="field">
+      <label for="cred_new" data-i18n="label_cred_new">Nova senha</label>
+      <input id="cred_new" type="password" autocomplete="new-password">
+      <span class="help" data-i18n="help_cred">Deixe em branco para manter a senha atual.</span>
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="cred-cancel" data-i18n="btn_cancel">Cancelar</button>
+      <button type="submit" data-i18n="btn_save_short">Salvar</button>
+    </div>
+  </form>
+</div>
+
 <div id="toast" class="toast"></div>
 
 <script src="/i18n.js"></script>
@@ -468,6 +539,8 @@ async function loadConfig() {
     setVal('priority_normal', prioOrDefault(c.guardian.priority_normal, 1));
     setVal('priority_skip', prioOrDefault(c.guardian.priority_skip, 0));
     setVal('apprise_url', c.notifications.apprise_url);
+    // O backend devolve webui sem a senha — so o usuario, para o modal.
+    setVal('cred_user', (c.webui || {}).user);
 
     // Notificacoes: ausencia de chave significa LIGADO (default do backend),
     // e template vazio cai no padrao — e o que o guardian de fato enviaria.
@@ -562,6 +635,61 @@ function toast(msg, type) {
   t.textContent = msg; t.className = 'toast ' + type + ' show';
   setTimeout(() => t.classList.remove('show'), 3000);
 }
+
+// ── Modal de credenciais ──────────────────────────────────────────────
+const CRED_API = '/api/credentials';
+const credModal = document.getElementById('cred-modal');
+const credForm = document.getElementById('cred-form');
+let focoAnterior = null;
+
+function abrirCred() {
+  focoAnterior = document.activeElement;
+  // A senha atual nunca e pre-preenchida; o usuario sempre reprova a posse.
+  setVal('cred_current', '');
+  setVal('cred_new', '');
+  credModal.hidden = false;
+  document.getElementById('cred_user').focus();
+}
+
+function fecharCred() {
+  credModal.hidden = true;
+  if (focoAnterior) focoAnterior.focus();
+}
+
+document.getElementById('user-btn').addEventListener('click', abrirCred);
+document.getElementById('cred-cancel').addEventListener('click', fecharCred);
+credModal.addEventListener('mousedown', e => { if (e.target === credModal) fecharCred(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !credModal.hidden) fecharCred();
+});
+
+credForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const corpo = {
+    user: getVal('cred_user'),
+    current_password: getVal('cred_current'),
+    new_password: getVal('cred_new')
+  };
+  try {
+    const r = await fetch(CRED_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(corpo)
+    });
+    const resposta = await r.json();
+    if (r.ok) {
+      fecharCred();
+      // O navegador segue mandando o Basic Auth antigo: sem recarregar, a
+      // proxima chamada levaria 401 e pareceria bug da troca.
+      toast(t('toast_cred_saved'), 'ok');
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      toast(t('toast_error') + resposta.error, 'err');
+    }
+  } catch (err) {
+    toast(t('toast_error') + err.message, 'err');
+  }
+});
 
 initI18N();
 loadConfig();

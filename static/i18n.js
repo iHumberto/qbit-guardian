@@ -51,7 +51,15 @@ const translations = {
         btn_save: '\uD83D\uDCBE Salvar Configura\u00E7\u00F5es',
         toast_saved: 'Configura\u00E7\u00F5es salvas!',
         toast_load_error: 'Erro ao carregar configura\u00E7\u00E3o: ',
-        toast_error: 'Erro: '
+        toast_error: 'Erro: ',
+        account_title: '\uD83D\uDC64 Conta',
+        label_cred_user: 'Usu\u00E1rio',
+        label_cred_current: 'Senha atual',
+        label_cred_new: 'Nova senha',
+        help_cred: 'Deixe em branco para manter a senha atual. A senha atual \u00E9 sempre obrigat\u00F3ria.',
+        btn_cancel: 'Cancelar',
+        btn_save_short: 'Salvar',
+        toast_cred_saved: 'Credenciais alteradas. Entre de novo com os dados novos.'
     },
     'en-US': {
         title: '\uD83D\uDEE1\uFE0F qbit-guardian',
@@ -98,7 +106,15 @@ const translations = {
         btn_save: '\uD83D\uDCBE Save Settings',
         toast_saved: 'Settings saved!',
         toast_load_error: 'Error loading configuration: ',
-        toast_error: 'Error: '
+        toast_error: 'Error: ',
+        account_title: '\uD83D\uDC64 Account',
+        label_cred_user: 'Username',
+        label_cred_current: 'Current password',
+        label_cred_new: 'New password',
+        help_cred: 'Leave blank to keep the current password. The current password is always required.',
+        btn_cancel: 'Cancel',
+        btn_save_short: 'Save',
+        toast_cred_saved: 'Credentials changed. Sign in again with the new details.'
     }
 };
 
@@ -167,6 +183,21 @@ function applyTranslations() {
         var el = els[i];
         var key = el.getAttribute('data-i18n-href');
         if (key) el.href = t(key);
+    }
+
+    // Title and aria-label (the account button has no visible text).
+    els = document.querySelectorAll('[data-i18n-title]');
+    for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        var key = el.getAttribute('data-i18n-title');
+        if (key) el.title = t(key);
+    }
+
+    els = document.querySelectorAll('[data-i18n-aria]');
+    for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        var key = el.getAttribute('data-i18n-aria');
+        if (key) el.setAttribute('aria-label', t(key));
     }
 
     // Select options (value stays the same, only display text changes).

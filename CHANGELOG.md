@@ -5,6 +5,38 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] — 2026-10-07
+
+Endurecimento de seguranca a partir de uma auditoria da superficie de ataque.
+**Esta versao pede duas acoes de quem ja roda o guardian** — ver "Atualizando"
+nos READMEs: `chown -R 1000:1000 ./config` e, no modo webhook,
+`QBIT_GUARDIAN_PASS` no servico do qBittorrent.
+
+### Corrigido (seguranca)
+- **CSRF no `POST /api/config`.** `request.get_json(force=True)` aceitava `Content-Type: text/plain`, que nao dispara preflight de CORS. Qualquer pagina que a vitima visitasse podia disparar um POST, e o navegador anexava o Basic Auth dela automaticamente — dava para apontar `qbit.url` para fora (e vazar a API key do qBittorrent no header `Authorization`), transformar `.mkv` em extensao perigosa (e apagar a biblioteca, porque a remocao usa `deleteFiles=true`) ou simplesmente trocar as credenciais. Agora escrita exige `application/json` e e recusada quando `Sec-Fetch-Site`/`Origin` indicam outro site. `curl` e o hook do webhook nao sao afetados: cliente que nao e navegador nao sofre CSRF.
+- **Segredos expostos sem autenticacao.** O default era `webui` vazio, o que desligava a auth, e o compose publica a porta 5000 em todas as interfaces: `GET /api/config` devolvia `qbit.api_key`, `sonarr.api_key`, `radarr.api_key`, a `apprise_url` (que embute o token do bot) e a propria senha da Web UI para quem alcancasse a porta. A autenticacao passou a ser provisionada no startup e a senha sumiu da resposta.
+- **`/index.html` e `/i18n.js` eram publicos** enquanto `/` pedia senha: a rota estatica automatica do Flask nao passava pelo `@requires_auth`. Agora os arquivos de `static/` sao servidos por rota propria, autenticada. `/api/health` continua publico, para o healthcheck do Docker.
+- **Credenciais comparadas com `==`**, que vaza pelo tempo de resposta quantos caracteres do inicio estao certos. Trocado por `hmac.compare_digest`, e usuario e senha sao sempre os dois verificados: encerrar cedo revelaria que o nome existe.
+- **Sem limite de corpo.** Um POST arbitrariamente grande era parseado em memoria e gravado no `config.json`. Teto de 1 MB, com `413` em JSON.
+- **Token do Apprise no log.** `send_notification` registrava a `apprise_url` inteira em `DEBUG` — e em `tgram://TOKEN/CHAT` o authority **e** a credencial. Agora so o esquema sai no log para os esquemas proprios do Apprise; em `http(s)` sem userinfo o host continua visivel, que ajuda a depurar e nao e segredo.
+- **Container rodava como root.** Passou a rodar como UID 1000. O arquivo de configuracao deixa de ser escrito como root no volume do host.
+- **Hook do webhook engolia falhas.** `curl -s` sem `-f` sai com codigo 0 num 401, entao nem a tentativa extra percebia: o modo webhook parava de funcionar sem nenhum sinal. Agora usa `-sf`, manda credenciais e reporta no stderr do qBittorrent.
+
+### Adicionado
+- **Autenticacao obrigatoria com senha provisionada.** Sem tela de cadastro: no primeiro startup o guardian gera a senha, grava o hash e imprime usuario e senha no stdout — `docker logs qbit-guardian`. Vai em `print`, nao em `log`: o compose publicado usa `LOG_LEVEL=ERROR`, e uma senha anunciada em INFO nao apareceria justamente na hora em que o usuario precisa dela. Usuario padrao `admin`.
+- **Senha guardada como hash PBKDF2-SHA256** (600k iteracoes, salt por senha), nunca em texto claro. Config gravada antes desta versao tem a senha em texto: ela continua autenticando e e convertida para hash no primeiro startup, sem o usuario precisar fazer nada.
+- **Icone de conta na Web UI** (o `circle-user` do prototipo Penpot) abrindo um popup com usuario, senha atual e nova senha. A senha atual e sempre exigida — e a prova de identidade que impede que um navegador deixado aberto vire troca de credencial. Quem so quer trocar o nome deixa a nova senha em branco, e vice-versa.
+- **`POST /api/credentials`**, unica porta para trocar usuario/senha. A secao `webui` passou a ser **descartada** no `POST /api/config`: sem isso, a troca de senha seria contornavel por um POST de configuracao comum.
+- Cabecalhos `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` e `Referrer-Policy: no-referrer`.
+- `QBIT_GUARDIAN_USER` e `QBIT_GUARDIAN_PASS` no hook do webhook.
+- Guarda no `conftest.py` que falha qualquer teste que grave no `config.json` versionado — um teste que executava o entrypoint de verdade rodou o provisionamento contra o caminho padrao e sujou um arquivo rastreado.
+
+### Notas
+- Testes: 313 → **476**. Cobertura: **99%** de ramo, zero statements descobertos.
+- 32 mutacoes de seguranca aplicadas uma a uma, 31 pegas. A sobrevivente (devolver `force=True` ao `get_json`) e **equivalente**: com `_exige_json()` no lugar, os dois se comportam igual — o que protege e o guarda, e remove-lo e pego por teste. Documentado no codigo para ninguem tirar o guarda achando que o `get_json()` sozinho basta.
+- A auditoria tambem confirmou o que **nao** e problema: path traversal e barrado pelo Werkzeug (6 variantes testadas), nao ha `eval`/`exec`/`subprocess`/`pickle`/`yaml.load` no projeto, e nao ha sink de XSS no DOM — todo valor de config entra por `.value`/`.checked`/`.textContent`.
+- Continua possivel desligar a autenticacao esvaziando `webui`, para quem ja protege a porta com proxy reverso + SSO. Deixou de ser o padrao, e o proximo restart religa.
+
 ## [2.1.2] — 2026-10-07
 
 Fechamento das lacunas de cobertura. **Nenhuma mudanca de comportamento em

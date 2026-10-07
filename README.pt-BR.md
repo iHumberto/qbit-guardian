@@ -25,7 +25,7 @@ Ele roda como um container Docker leve (ou como um processo Python) com uma inte
 | Interface Web | Flask 3.x                           |
 | Cliente HTTP  | requests 2.x                        |
 | Notificações  | Apprise (Telegram, Discord, Slack e mais de 100 serviços) |
-| Testes        | pytest 8.x (313 testes: 293 funcionais + 20 segurança) |
+| Testes        | pytest 8.x (476 testes: 401 funcionais + 75 segurança) |
 | Licença       | GNU GPL v3                          |
 
 ## Funcionalidades
@@ -36,9 +36,25 @@ Ele roda como um container Docker leve (ou como um processo Python) com uma inte
 - 🗑️ **Remoção de stalled e sem seeds** — limpa torrents mortos após um tempo configurável
 - ⚡ **Otimização de prioridades** — prioriza automaticamente arquivos de mídia, reduz ou pula arquivos inúteis
 - 🔔 **Notificações via Apprise** — alertas por Telegram, Discord, Slack, Pushover e mais de 100 outros serviços
-- 🖥️ **Web UI** — duas colunas com tema escuro: serviços externos (qBittorrent, Sonarr, Radarr, notificações) à esquerda, configurações do Guardian à direita. Suporte a HTTP Basic Auth
+- 🖥️ **Web UI** — três colunas com tema escuro: serviços externos (qBittorrent, Radarr, Sonarr) à esquerda, configurações do Guardian no meio, notificações à direita. HTTP Basic Auth obrigatória, com troca de credenciais pelo próprio painel
 - 🪝 **Modo webhook** — processamento em tempo real quando um torrent é adicionado (sem delay de polling)
 - 🐳 **Docker-first** — imagem pronta no `ghcr.io`, healthcheck incluso
+
+## ⚠️ Atualizando para a 2.2.0
+
+Duas mudanças pedem uma ação sua. Faça **antes** de subir a nova imagem:
+
+**1. A pasta de configuração precisa pertencer ao UID 1000.** O container deixou de rodar como root. Na pasta do `docker-compose.yml`:
+
+```bash
+sudo chown -R 1000:1000 ./config
+```
+
+Sem isso o container sai na hora e imprime esse mesmo comando no log.
+
+**2. Se você usa o modo webhook,** defina `QBIT_GUARDIAN_PASS` no serviço do qBittorrent — veja [Modo Webhook](#modo-webhook-tempo-real). O `/api/trigger` passou a exigir autenticação.
+
+Depois de subir, pegue a senha da Web UI com `docker logs qbit-guardian` (veja [Autenticação da Web UI](#autenticação-da-web-ui)). Se você já tinha usuário e senha configurados, eles continuam valendo.
 
 ## Quick Start (Docker)
 
@@ -192,7 +208,7 @@ Todas as opções ficam no arquivo `config.json` e podem ser editadas pela Web U
 | **radarr**       | `url`, `api_key` — opcional, deixe em branco para desativar                                          |
 | **guardian**     | `check_interval_seconds` (0 = modo webhook), `retry_interval_seconds`, listas de extensões, regras de stalled/sem seeds, prioridades |
 | **notifications** | `apprise_url` — URL compatível com Apprise (veja [documentação do Apprise](https://github.com/caronc/apprise)) |
-| **webui**        | `user`, `password` — credenciais HTTP Basic Auth. Deixe ambos vazios para acesso público             |
+| **webui**        | `user`, `password` — credenciais HTTP Basic Auth. Provisionadas no primeiro startup; a senha fica como hash PBKDF2 |
 
 ### Mensagens de notificação
 
@@ -223,9 +239,32 @@ O **título** de cada notificação (`events.<evento>.title`) não aparece na We
 
 ### Autenticação da Web UI
 
-Para proteger o painel com senha, preencha `webui.user` e `webui.password`. O navegador passará a pedir usuário e senha em todo acesso. Deixe ambos vazios para manter a página pública.
+**A Web UI exige autenticação.** Não há tela de cadastro: na primeira subida o guardian **gera a senha sozinho** e a imprime no log do container.
 
-> ⚠️ Se esquecer a senha, edite o `config.json` diretamente e limpe os dois campos.
+```bash
+docker logs qbit-guardian
+```
+
+```
+====================================================================
+  qbit-guardian — credenciais da Web UI geradas automaticamente
+====================================================================
+  usuario: admin
+  senha:   y7f3CKYTGvYeskf3vEQk
+====================================================================
+```
+
+Essa senha aparece **uma vez**, no momento em que é criada. Guarde-a.
+
+Para trocar usuário ou senha, clique no **ícone de usuário** no canto superior direito do painel. O popup pede a senha atual (prova de identidade), o novo usuário e a nova senha — qualquer um dos dois pode ficar em branco se você só quer trocar o outro.
+
+A senha é guardada como **hash PBKDF2-SHA256** com salt por senha. Ela nunca fica em texto claro no `config.json` e nunca é devolvida pelo `GET /api/config`.
+
+> **Esqueceu a senha?** Apague o valor de `webui.password` no `config.json` e reinicie o container. Uma senha nova é gerada e anunciada no log.
+
+> **Atualizando de uma versão anterior a 2.2.0?** Se você já tinha `webui.user`/`webui.password` preenchidos, nada muda: a senha que você usava continua valendo e é convertida para hash no primeiro startup. Se os campos estavam vazios, uma senha é gerada e aparece no log.
+
+Deixar `webui.user` e `webui.password` vazios continua desligando a autenticação — para quem já protege a porta por outro meio, como um proxy reverso com SSO. Mas o próximo restart do container gera uma senha nova e religa.
 
 ## Modos de Operação
 
@@ -257,20 +296,39 @@ Defina `check_interval_seconds` como `0` e configure o qBittorrent para chamar o
 # No serviço do qBittorrent no docker-compose:
 volumes:
   - ./caminho/para/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh
+environment:
+  - QBIT_GUARDIAN_URL=http://qbit-guardian:5000
+  - QBIT_GUARDIAN_USER=admin
+  - QBIT_GUARDIAN_PASS=a-senha-da-web-ui
 ```
 
 Quando um torrent é adicionado, o qBittorrent chama o script, que envia `POST /api/trigger` para o guardian — processando o torrent instantaneamente.
+
+> ⚠️ **`QBIT_GUARDIAN_PASS` é obrigatória desde a v2.2.0.** O `/api/trigger` exige autenticação; sem a senha o guardian responde 401 e o modo webhook para de funcionar. O script avisa no stderr do qBittorrent quando isso acontece.
 
 ## API REST
 
 A Web UI expõe estes endpoints:
 
-| Método   | Endpoint        | Auth      | Descrição                                           |
-|----------|-----------------|-----------|-----------------------------------------------------|
-| `GET`    | `/api/health`   | Público   | Healthcheck — retorna `{"status": "ok"}`            |
-| `GET`    | `/api/config`   | Obrigatória | Lê a configuração atual (JSON completo)           |
-| `POST`   | `/api/config`   | Obrigatória | Salva configuração (JSON no body, deep merge)     |
-| `POST`   | `/api/trigger`  | Obrigatória | Força verificação imediata (manual ou webhook)     |
+| Método   | Endpoint             | Auth        | Descrição                                                        |
+|----------|----------------------|-------------|------------------------------------------------------------------|
+| `GET`    | `/api/health`        | Público     | Healthcheck — retorna `{"status": "ok"}`                         |
+| `GET`    | `/api/config`        | Obrigatória | Lê a configuração atual. **Não** devolve `webui.password`        |
+| `POST`   | `/api/config`        | Obrigatória | Salva configuração (deep merge). A seção `webui` é ignorada aqui |
+| `GET`    | `/api/defaults`      | Obrigatória | Títulos/templates padrão e variáveis de cada evento              |
+| `POST`   | `/api/credentials`   | Obrigatória | Troca usuário e/ou senha da Web UI                               |
+| `POST`   | `/api/trigger`       | Obrigatória | Força verificação imediata (manual ou webhook)                   |
+
+Todo endpoint de escrita exige `Content-Type: application/json` (exceto `/api/trigger`, que não tem corpo) e recusa requisição disparada por outro site — é a proteção contra CSRF. Clientes de linha de comando como o `curl` não são afetados.
+
+### Exemplo: trocar a senha da Web UI
+
+```bash
+curl -X POST http://seu-host:5000/api/credentials \
+  -u admin:senha-atual \
+  -H "Content-Type: application/json" \
+  -d '{"current_password": "senha-atual", "new_password": "senha-nova-forte"}'
+```
 
 ### Exemplo: disparar verificação
 
@@ -377,7 +435,7 @@ Deixe os campos `sonarr.url` e `radarr.url` em branco. O guardian funciona perfe
 # Instalar dependências (runtime + ferramentas de teste)
 pip install -r requirements-dev.txt
 
-# Rodar todos os testes (313: 293 funcionais + 20 de segurança)
+# Rodar todos os testes (476: 401 funcionais + 75 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais

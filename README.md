@@ -25,7 +25,7 @@ It runs as a lightweight Docker container (or a Python process) with a built-in 
 | Web UI      | Flask 3.x                           |
 | HTTP client | requests 2.x                        |
 | Notifications | Apprise (Telegram, Discord, Slack, and 100+ services) |
-| Testing     | pytest 8.x (313 tests: 293 functional + 20 security) |
+| Testing     | pytest 8.x (476 tests: 401 functional + 75 security) |
 | License     | GNU GPL v3                          |
 
 ## Features
@@ -36,9 +36,25 @@ It runs as a lightweight Docker container (or a Python process) with a built-in 
 - 🗑️ **Stalled & seedless removal** — cleans up dead torrents after a configurable time limit
 - ⚡ **File priority optimization** — auto-prioritizes media files, lowers or skips junk files
 - 🔔 **Apprise notifications** — alerts via Telegram, Discord, Slack, Pushover, and 100+ other services
-- 🖥️ **Web UI** — two-column layout with dark theme: external services (qBittorrent, Sonarr, Radarr, notifications) on the left, Guardian settings on the right. HTTP Basic Auth support
+- 🖥️ **Web UI** — three-column dark layout: external services (qBittorrent, Radarr, Sonarr) on the left, Guardian settings in the middle, notifications on the right. Mandatory HTTP Basic Auth, with credentials changeable from the panel itself
 - 🪝 **Webhook mode** — real-time processing on torrent addition (no polling delay)
 - 🐳 **Docker-first** — pre-built image on `ghcr.io`, healthcheck included
+
+## ⚠️ Upgrading to 2.2.0
+
+Two changes need action from you. Do this **before** pulling the new image:
+
+**1. The config folder must be owned by UID 1000.** The container no longer runs as root. In your `docker-compose.yml` folder:
+
+```bash
+sudo chown -R 1000:1000 ./config
+```
+
+Without it the container exits immediately and prints that same command to the log.
+
+**2. If you use webhook mode,** set `QBIT_GUARDIAN_PASS` on the qBittorrent service — see [Webhook Mode](#webhook-mode-real-time). `/api/trigger` now requires authentication.
+
+After starting, get the Web UI password with `docker logs qbit-guardian` (see [Web UI Authentication](#web-ui-authentication)). If you already had a username and password configured, they keep working.
 
 ## Quick Start (Docker)
 
@@ -192,7 +208,7 @@ All settings live in `config.json` and can be edited through the Web UI or direc
 | **radarr**      | `url`, `api_key` — optional, leave blank to disable                      |
 | **guardian**    | `check_interval_seconds` (0 = webhook mode), `retry_interval_seconds`, extension lists, stalled/seedless rules, file priorities |
 | **notifications** | `apprise_url` — Apprise-compatible URL (see [Apprise docs](https://github.com/caronc/apprise)) |
-| **webui**       | `user`, `password` — HTTP Basic Auth credentials. Leave both empty for public access |
+| **webui**       | `user`, `password` — HTTP Basic Auth credentials. Provisioned on first startup; the password is stored as a PBKDF2 hash |
 
 ### Notification messages
 
@@ -223,9 +239,32 @@ Each notification's **title** (`events.<event>.title`) is not exposed in the Web
 
 ### Web UI Authentication
 
-To password-protect the dashboard, fill in `webui.user` and `webui.password`. The browser will prompt for credentials on every visit. Leave both empty to keep the page public.
+**The Web UI requires authentication.** There is no sign-up screen: on first boot the guardian **generates the password itself** and prints it to the container log.
 
-> ⚠️ If you forget the password, edit `config.json` directly and clear both fields.
+```bash
+docker logs qbit-guardian
+```
+
+```
+====================================================================
+  qbit-guardian — credenciais da Web UI geradas automaticamente
+====================================================================
+  usuario: admin
+  senha:   y7f3CKYTGvYeskf3vEQk
+====================================================================
+```
+
+That password is shown **once**, when it is created. Save it.
+
+To change the username or password, click the **user icon** in the top-right corner of the panel. The popup asks for the current password (proof of identity), the new username and the new password — either one can be left blank if you only want to change the other.
+
+The password is stored as a **PBKDF2-SHA256 hash** with a per-password salt. It is never kept in plain text in `config.json` and never returned by `GET /api/config`.
+
+> **Forgot the password?** Clear the `webui.password` value in `config.json` and restart the container. A new password is generated and announced in the log.
+
+> **Upgrading from before 2.2.0?** If you already had `webui.user`/`webui.password` filled in, nothing changes: the password you were using keeps working and is converted to a hash on first startup. If the fields were empty, a password is generated and shown in the log.
+
+Leaving `webui.user` and `webui.password` empty still disables authentication — for setups already protected another way, such as a reverse proxy with SSO. But the next container restart generates a new password and turns it back on.
 
 ## Operating Modes
 
@@ -257,20 +296,39 @@ Set `check_interval_seconds` to `0` and configure qBittorrent to call the guardi
 # In your qBittorrent docker-compose service:
 volumes:
   - ./path/to/qbit-guardian-hook.sh:/scripts/qbit-guardian-hook.sh
+environment:
+  - QBIT_GUARDIAN_URL=http://qbit-guardian:5000
+  - QBIT_GUARDIAN_USER=admin
+  - QBIT_GUARDIAN_PASS=your-web-ui-password
 ```
 
 When a torrent is added, qBittorrent calls the script, which sends `POST /api/trigger` to the guardian — processing the torrent instantly.
+
+> ⚠️ **`QBIT_GUARDIAN_PASS` is required as of v2.2.0.** `/api/trigger` requires authentication; without the password the guardian answers 401 and webhook mode stops working. The script reports this on qBittorrent's stderr.
 
 ## REST API
 
 The Web UI exposes these endpoints:
 
-| Method   | Endpoint       | Auth     | Description                                      |
-|----------|----------------|----------|--------------------------------------------------|
-| `GET`    | `/api/health`  | Public   | Healthcheck — returns `{"status": "ok"}`         |
-| `GET`    | `/api/config`  | Required | Read current configuration (full JSON)           |
-| `POST`   | `/api/config`  | Required | Save configuration (JSON body, deep merge)       |
-| `POST`   | `/api/trigger` | Required | Force an immediate check (manual or webhook)     |
+| Method   | Endpoint             | Auth      | Description                                                    |
+|----------|----------------------|-----------|----------------------------------------------------------------|
+| `GET`    | `/api/health`        | Public    | Healthcheck — returns `{"status": "ok"}`                       |
+| `GET`    | `/api/config`        | Required  | Reads the current configuration. Does **not** return `webui.password` |
+| `POST`   | `/api/config`        | Required  | Saves configuration (deep merge). The `webui` section is ignored here |
+| `GET`    | `/api/defaults`      | Required  | Default titles/templates and variables for each event          |
+| `POST`   | `/api/credentials`   | Required  | Changes the Web UI username and/or password                    |
+| `POST`   | `/api/trigger`       | Required  | Forces an immediate check (manual or webhook)                  |
+
+Every write endpoint requires `Content-Type: application/json` (except `/api/trigger`, which has no body) and rejects requests triggered by another site — that is the CSRF protection. Command-line clients such as `curl` are unaffected.
+
+### Example: change the Web UI password
+
+```bash
+curl -X POST http://your-host:5000/api/credentials \
+  -u admin:current-password \
+  -H "Content-Type: application/json" \
+  -d '{"current_password": "current-password", "new_password": "new-strong-password"}'
+```
 
 ### Example: trigger a check
 
@@ -377,7 +435,7 @@ Leave the `sonarr.url` and `radarr.url` fields empty. The guardian works fine wi
 # Install dependencies (runtime + test tooling)
 pip install -r requirements-dev.txt
 
-# Run all tests (313: 293 functional + 20 security)
+# Run all tests (476: 401 functional + 75 security)
 python -m pytest test/ -v
 
 # Functional tests only

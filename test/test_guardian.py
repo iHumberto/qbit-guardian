@@ -3549,17 +3549,23 @@ class TestEntrypointsFiacao:
         m_run.assert_called_once_with(host="127.0.0.1", port=5555,
                                       debug=False, threaded=True)
 
-    def test_main_escreve_heartbeat_antes_de_subir(self):
-        """Ordem importa: heartbeat, guardian, web.
+    def test_main_provisiona_credenciais_antes_de_abrir_a_porta(self):
+        """Ordem importa: credenciais, heartbeat, guardian, web.
 
-        O HEALTHCHECK do container comeca a rodar junto com o processo. Sem o
-        heartbeat escrito antes, a primeira checagem encontraria o arquivo
-        ausente e marcaria `unhealthy` logo no startup.
+        O provisionamento vem primeiro porque a janela entre a porta abrir e a
+        senha existir precisa ser zero — senao a Web UI fica publica por
+        alguns instantes a cada deploy.
+
+        O heartbeat vem antes de guardian e web porque o HEALTHCHECK do
+        container comeca a rodar junto com o processo: sem o arquivo, a
+        primeira checagem marcaria `unhealthy` logo no startup.
         """
         import runpy
 
         ordem = []
-        with mock.patch.object(g, "write_heartbeat",
+        with mock.patch.object(g, "bootstrap_credenciais",
+                               side_effect=lambda: ordem.append("credenciais")), \
+             mock.patch.object(g, "write_heartbeat",
                               side_effect=lambda: ordem.append("heartbeat")), \
              mock.patch.object(g, "start_guardian",
                                side_effect=lambda: ordem.append("guardian")), \
@@ -3567,7 +3573,7 @@ class TestEntrypointsFiacao:
                         side_effect=lambda: ordem.append("web")):
             runpy.run_module("app.main", run_name="__main__")
 
-        assert ordem == ["heartbeat", "guardian", "web"]
+        assert ordem == ["credenciais", "heartbeat", "guardian", "web"]
 
 
 # ── Healthcheck: contrato de exit code ─────────────────────────────────
@@ -3671,3 +3677,539 @@ class TestReadmeContagemDeTestes:
 
     def test_os_dois_idiomas_concordam(self):
         assert self._mencoes("README.md")[0] == self._mencoes("README.pt-BR.md")[0]
+
+
+# ── Modulo de credenciais (app/auth.py) ────────────────────────────────
+
+import app.auth as a
+
+
+class TestGeracaoDeSenha:
+    """A senha inicial e lida do log e digitada a mao."""
+
+    def test_tamanho_declarado(self):
+        assert len(a.gerar_senha()) == a.TAMANHO_SENHA_GERADA
+
+    def test_tamanho_sob_medida(self):
+        assert len(a.gerar_senha(32)) == 32
+
+    def test_duas_chamadas_diferem(self):
+        """Fonte criptografica, nao `random` com seed previsivel."""
+        assert len({a.gerar_senha() for _ in range(20)}) == 20
+
+    @pytest.mark.parametrize("ambiguo", ["0", "O", "1", "l", "I"])
+    def test_sem_caracteres_ambiguos(self, ambiguo):
+        """`0` e `O` na mesma senha custam um chamado de suporte."""
+        assert ambiguo not in a.ALFABETO
+
+    def test_usa_fonte_criptografica(self):
+        """`random` e previsivel a partir de algumas amostras."""
+        with mock.patch.object(a.secrets, "choice", wraps=a.secrets.choice) as m:
+            a.gerar_senha(5)
+        assert m.call_count == 5
+
+
+class TestHashDeSenha:
+    """PBKDF2-SHA256 com salt por senha."""
+
+    def test_formato(self):
+        partes = a.hash_senha("qualquer").split("$")
+        assert partes[0] == a.PREFIXO_HASH
+        assert int(partes[1]) == a.ITERACOES
+        assert len(partes) == 4
+
+    def test_senha_nao_aparece_no_hash(self):
+        assert "qualquer" not in a.hash_senha("qualquer")
+
+    def test_salt_diferente_a_cada_chamada(self):
+        """Sem salt por senha, duas contas com a mesma senha teriam o mesmo
+        hash — e uma rainbow table quebraria as duas de uma vez."""
+        assert a.hash_senha("mesma") != a.hash_senha("mesma")
+
+    def test_iteracoes_no_minimo_recomendado(self):
+        """OWASP (2023): >= 600k para PBKDF2-HMAC-SHA256."""
+        assert a.ITERACOES >= 600_000
+
+    def test_verifica_a_propria_saida(self):
+        assert a.verificar_senha("mesma", a.hash_senha("mesma"))
+
+
+class TestVerificacaoDeSenha:
+    @pytest.mark.parametrize("senha", ["", " ", "errada", "MESMA", "mesma "])
+    def test_senha_errada_recusada(self, senha):
+        assert a.verificar_senha(senha, a.hash_senha("mesma")) is False
+
+    @pytest.mark.parametrize("armazenado", ["", None, 123, [], "pbkdf2_sha256$lixo",
+                                            "pbkdf2_sha256$x$y$z"])
+    def test_valor_armazenado_invalido_nao_autentica(self, armazenado):
+        """Hash corrompido recusa todo mundo, nunca aceita todo mundo."""
+        assert a.verificar_senha("qualquer", armazenado) is False
+
+    @pytest.mark.parametrize("senha", [None, 123, []])
+    def test_senha_de_tipo_errado_recusada(self, senha):
+        assert a.verificar_senha(senha, a.hash_senha("mesma")) is False
+
+    def test_formato_legado_em_texto_claro_aceito(self):
+        """Config anterior a v2.2.0 guardava a senha em texto.
+
+        Recusar aqui trancaria para fora todo mundo que atualizasse.
+        """
+        assert a.verificar_senha("antiga", "antiga") is True
+        assert a.verificar_senha("outra", "antiga") is False
+
+    def test_usa_comparacao_em_tempo_constante(self):
+        """`==` em string vaza quantos caracteres do inicio estao certos."""
+        with mock.patch.object(a.hmac, "compare_digest",
+                               wraps=a.hmac.compare_digest) as m:
+            a.verificar_senha("x", a.hash_senha("x"))
+            a.verificar_senha("x", "legado")
+        assert m.call_count == 2
+
+    def test_usuario_em_tempo_constante(self):
+        with mock.patch.object(a.hmac, "compare_digest",
+                               wraps=a.hmac.compare_digest) as m:
+            assert a.verificar_usuario("admin", "admin") is True
+        assert m.called
+
+    @pytest.mark.parametrize("args", [(None, "admin"), ("admin", None), (1, "admin")])
+    def test_usuario_de_tipo_errado_recusado(self, args):
+        assert a.verificar_usuario(*args) is False
+
+
+class TestGarantirCredenciais:
+    """Provisionamento: gera, migra ou nao mexe."""
+
+    def test_config_vazia_gera_usuario_e_senha(self, capsys):
+        cfg, alterou = a.garantir_credenciais({"webui": {"user": "", "password": ""}})
+        assert alterou is True
+        assert cfg["webui"]["user"] == a.USUARIO_PADRAO
+        assert a.e_hash(cfg["webui"]["password"])
+
+    def test_senha_gerada_e_anunciada_no_stdout(self, capsys):
+        """`print`, nao `log`: o compose publicado usa LOG_LEVEL=ERROR, e uma
+        senha anunciada em INFO nao apareceria no `docker logs`."""
+        cfg, _ = a.garantir_credenciais({})
+        saida = capsys.readouterr().out
+        assert "usuario: admin" in saida
+        assert "senha:" in saida
+        # A senha impressa e a que autentica.
+        senha = [l.split("senha:")[1].strip() for l in saida.splitlines()
+                 if l.strip().startswith("senha:")][0]
+        assert a.verificar_senha(senha, cfg["webui"]["password"])
+
+    def test_senha_em_texto_claro_vira_hash(self, capsys):
+        cfg, alterou = a.garantir_credenciais(
+            {"webui": {"user": "humberto", "password": "antiga"}})
+        assert alterou is True
+        assert a.e_hash(cfg["webui"]["password"])
+        # A senha que o usuario ja usava continua valendo.
+        assert a.verificar_senha("antiga", cfg["webui"]["password"])
+        assert cfg["webui"]["user"] == "humberto"
+
+    def test_migracao_nao_anuncia_senha(self, capsys):
+        """Nao ha senha nova para anunciar — e seria vaza-la no log."""
+        a.garantir_credenciais({"webui": {"user": "humberto", "password": "antiga"}})
+        assert "senha:" not in capsys.readouterr().out
+
+    def test_hash_existente_nao_e_tocado(self, capsys):
+        existente = a.hash_senha("ja-definida")
+        cfg, alterou = a.garantir_credenciais(
+            {"webui": {"user": "humberto", "password": existente}})
+        assert alterou is False
+        assert cfg["webui"]["password"] == existente
+
+    def test_usuario_vazio_com_hash_valido_so_ajusta_o_usuario(self, capsys):
+        existente = a.hash_senha("ja-definida")
+        cfg, alterou = a.garantir_credenciais({"webui": {"user": "", "password": existente}})
+        assert alterou is True
+        assert cfg["webui"]["user"] == a.USUARIO_PADRAO
+        assert cfg["webui"]["password"] == existente
+
+    @pytest.mark.parametrize("webui", [None, "texto", 123, []])
+    def test_secao_webui_invalida_e_reconstruida(self, webui, capsys):
+        cfg, alterou = a.garantir_credenciais({"webui": webui})
+        assert alterou is True
+        assert cfg["webui"]["user"] == a.USUARIO_PADRAO
+        assert a.e_hash(cfg["webui"]["password"])
+
+    @pytest.mark.parametrize("senha", ["", "   ", None])
+    def test_senha_em_branco_gera_nova(self, senha, capsys):
+        cfg, alterou = a.garantir_credenciais({"webui": {"user": "x", "password": senha}})
+        assert alterou is True
+        assert a.e_hash(cfg["webui"]["password"])
+
+
+class TestBootstrapCredenciais:
+    """guardian.bootstrap_credenciais() — roda no entrypoint."""
+
+    def test_grava_no_disco(self, tmp_config, capsys):
+        cfg = g.load_config()
+        cfg["webui"] = {"user": "", "password": ""}
+        g.save_config(cfg)
+
+        assert g.bootstrap_credenciais() is True
+        with open(tmp_config) as f:
+            salvo = json.load(f)
+        assert salvo["webui"]["user"] == "admin"
+        assert a.e_hash(salvo["webui"]["password"])
+
+    def test_segundo_boot_nao_troca_a_senha(self, tmp_config, capsys):
+        """Senha regenerada a cada restart trancaria o usuario para fora."""
+        g.load_config()
+        g.bootstrap_credenciais()
+        with open(tmp_config) as f:
+            primeira = json.load(f)["webui"]["password"]
+
+        g._config = None
+        assert g.bootstrap_credenciais() is False
+        with open(tmp_config) as f:
+            assert json.load(f)["webui"]["password"] == primeira
+
+    def test_config_sem_permissao_de_escrita_falha_cedo(self, tmp_path, capsys):
+        """Falhar antes de sortear a senha.
+
+        O container passou a rodar sem privilegio; um volume `./config` criado
+        pelas versoes antigas pertence ao root. Sem esta checagem a senha seria
+        anunciada no log e nunca chegaria ao disco — o usuario tentaria entrar
+        com uma credencial que nao existe.
+        """
+        caminho = tmp_path / "somente-leitura" / "config.json"
+        caminho.parent.mkdir()
+        caminho.write_text("{}")
+        caminho.chmod(0o400)
+
+        antigo = g.CONFIG_PATH
+        g.CONFIG_PATH = str(caminho)
+        g._config = None
+        try:
+            with pytest.raises(PermissionError):
+                g.bootstrap_credenciais()
+        finally:
+            g.CONFIG_PATH = antigo
+            g._config = None
+            caminho.chmod(0o600)
+
+        assert "senha:" not in capsys.readouterr().out
+
+    def test_diretorio_gravavel_sem_arquivo_e_aceito(self, tmp_path):
+        """Primeira instalacao: o config.json ainda nao existe."""
+        antigo = g.CONFIG_PATH
+        g.CONFIG_PATH = str(tmp_path / "config" / "config.json")
+        try:
+            assert g.config_gravavel() is True
+        finally:
+            g.CONFIG_PATH = antigo
+
+
+class TestEntrypointPermissao:
+    """O entrypoint explica o conserto em vez de soltar traceback."""
+
+    def test_banner_traz_o_comando_de_chown(self, capsys):
+        import app.main as m
+        m._erro_de_permissao("/app/config/config.json")
+        saida = capsys.readouterr().out
+        assert "chown -R 1000:1000 ./config" in saida
+        assert "/app/config/config.json" in saida
+
+
+# ── Higiene de log ─────────────────────────────────────────────────────
+
+class TestApprisUrlNaoVazaNoLog:
+    """A apprise_url embute o token do bot (tgram://TOKEN/chat)."""
+
+    def _registrar(self, apprise_url, tmp_config):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["notifications"] = {"apprise_url": apprise_url}
+        g.save_config(cfg)
+
+        with mock.patch.object(g.requests, "post"), \
+             mock.patch.object(g, "log") as m_log:
+            g.send_notification("titulo", "corpo")
+
+        return " ".join(str(c) for c in
+                        m_log.debug.call_args_list + m_log.error.call_args_list)
+
+    @pytest.mark.parametrize("url,segredo", [
+        # Em cada esquema do Apprise o segredo mora num lugar diferente da URL.
+        ("tgram://123456:AAH-token-do-bot/987", "AAH-token-do-bot"),
+        ("discord://id-do-webhook/token-do-webhook", "token-do-webhook"),
+        ("pover://user-key/app-token", "app-token"),
+        ("https://TOKEN-SECRETO@apprise.home.arpa:8443/notify/x", "TOKEN-SECRETO"),
+        ("https://apprise.home.arpa/notify/token-no-caminho", "token-no-caminho"),
+    ])
+    def test_segredo_nao_chega_ao_log(self, url, segredo, tmp_config):
+        assert segredo not in self._registrar(url, tmp_config)
+
+    def test_host_proprio_continua_visivel_para_depurar(self, tmp_config):
+        """Apprise self-hosted em http(s): o endereco ajuda e nao e credencial."""
+        registrado = self._registrar("https://apprise.home.arpa/notify/x", tmp_config)
+        assert "apprise.home.arpa" in registrado
+
+    @pytest.mark.parametrize("url,esperado", [
+        ("https://apprise.home.arpa/notify/x", "https://apprise.home.arpa"),
+        ("http://apprise:8000/notify", "http://apprise:8000"),
+        # Esquema proprio do Apprise: o authority E a credencial.
+        ("tgram://token/123", "tgram://..."),
+        ("discord://id/token", "discord://..."),
+        # http com userinfo tambem esconde: o usuario pode ser o segredo.
+        ("https://user:senha@host/x", "https://..."),
+        # Porta nao numerica: nao da para separar host de credencial.
+        ("tgram://123456:AAH-token/987", "tgram://..."),
+    ])
+    def test_destino_de(self, url, esperado):
+        assert g._destino_de(url) == esperado
+
+    @pytest.mark.parametrize("url", ["nao-e-url", "", "://sem-esquema"])
+    def test_url_invalida_nao_quebra(self, url):
+        assert g._destino_de(url) == "<url invalida>"
+
+
+# ── Web UI: icone de conta e modal de credenciais ──────────────────────
+
+class TestWebUIConta:
+    """O modal de troca de credenciais existe e esta ligado ao endpoint."""
+
+    @property
+    def html(self):
+        return _read_static("index.html")
+
+    def test_botao_de_conta_na_topbar(self):
+        html = self.html
+        assert 'id="user-btn"' in html
+        # Dentro da topbar, depois do seletor de idioma (canto superior direito).
+        # A topbar vai da abertura ate o <h1> seguinte: parar no primeiro
+        # </div> pegaria so o seletor de idioma.
+        topbar = html[html.index('<div class="topbar">'):html.index("<h1")]
+        assert 'id="user-btn"' in topbar
+        assert topbar.index('id="lang-bar"') < topbar.index('id="user-btn"')
+
+    def test_icone_e_o_circle_user_do_prototipo(self):
+        """24x24, traco branco de 2px — o componente que esta no Penpot."""
+        html = self.html
+        svg = re.search(r'<button[^>]*id="user-btn".*?</button>', html, re.S).group(0)
+        assert '<circle cx="12" cy="12" r="10"/>' in svg
+        assert '<circle cx="12" cy="10" r="3"/>' in svg
+        assert 'M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662' in svg
+
+        regra = re.search(r"(?m)^\s*\.user-btn svg\s*\{([^}]*)\}", html).group(1)
+        assert "width:24px" in regra and "height:24px" in regra
+        assert "stroke:currentColor" in regra
+        assert "stroke-width:2" in regra
+
+    @pytest.mark.parametrize("campo,tipo", [
+        ("cred_user", None),
+        ("cred_current", "password"),
+        ("cred_new", "password"),
+    ])
+    def test_campos_do_modal(self, campo, tipo):
+        html = self.html
+        entrada = re.search(r'<input id="%s"[^>]*>' % campo, html).group(0)
+        if tipo:
+            assert f'type="{tipo}"' in entrada, entrada
+        assert f'for="{campo}"' in html, "todo campo precisa de label associado"
+
+    def test_senha_atual_e_obrigatoria(self):
+        entrada = re.search(r'<input id="cred_current"[^>]*>', self.html).group(0)
+        assert "required" in entrada
+
+    def test_modal_comeca_escondido(self):
+        assert re.search(r'<div class="modal-bg" id="cred-modal" hidden', self.html)
+
+    def test_envia_para_o_endpoint_proprio_em_json(self):
+        """Nunca por /api/config: la o `webui` e descartado de proposito."""
+        html = self.html
+        assert "const CRED_API = '/api/credentials';" in html
+        envio = re.search(r"credForm\.addEventListener\('submit'.*?\n\}\);", html, re.S).group(0)
+        assert "'Content-Type': 'application/json'" in envio
+        assert "CRED_API" in envio
+        assert "current_password" in envio
+
+    def test_senha_atual_nunca_e_pre_preenchida(self):
+        """Pre-preencher anularia a prova de identidade."""
+        abrir = re.search(r"function abrirCred\(\) \{.*?\n\}", self.html, re.S).group(0)
+        assert "setVal('cred_current', '')" in abrir
+        assert "setVal('cred_new', '')" in abrir
+
+    def test_usuario_atual_vem_do_get_config(self):
+        assert "setVal('cred_user', (c.webui || {}).user)" in self.html
+
+    def test_recarrega_depois_de_trocar(self):
+        """O navegador segue mandando o Basic Auth antigo.
+
+        Sem recarregar, a proxima chamada tomaria 401 e pareceria bug da
+        propria troca.
+        """
+        assert "location.reload()" in self.html
+
+    def test_fecha_por_esc_e_por_clique_fora(self):
+        html = self.html
+        assert "e.key === 'Escape'" in html
+        assert "if (e.target === credModal) fecharCred();" in html
+
+    @pytest.mark.parametrize("chave", [
+        "account_title", "label_cred_user", "label_cred_current",
+        "label_cred_new", "help_cred", "btn_cancel", "btn_save_short",
+        "toast_cred_saved",
+    ])
+    def test_chaves_de_traducao_nos_dois_idiomas(self, chave):
+        js = _read_static("i18n.js")
+        blocos = re.findall(r"'(?:pt-BR|en-US)':\s*\{(.*?)\n    \}", js, re.S)
+        assert len(blocos) == 2, "esperado um bloco por idioma"
+        for bloco in blocos:
+            assert re.search(r"\b%s\s*:" % chave, bloco), f"{chave} ausente num idioma"
+
+    def test_i18n_traduz_title_e_aria(self):
+        """O botao nao tem texto visivel: title/aria-label sao o rotulo."""
+        js = _read_static("i18n.js")
+        assert "data-i18n-title" in js
+        assert "data-i18n-aria" in js
+        html = self.html
+        botao = re.search(r'<button[^>]*id="user-btn"[^>]*>', html, re.S).group(0)
+        assert 'data-i18n-title="account_title"' in botao
+        assert 'data-i18n-aria="account_title"' in botao
+
+
+# ── Empacotamento e hook ───────────────────────────────────────────────
+
+class TestDockerfileSemRoot:
+    """O container nao roda como root."""
+
+    @property
+    def dockerfile(self):
+        with open(os.path.join(REPO_ROOT, "Dockerfile"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_declara_usuario_sem_privilegio(self):
+        conteudo = self.dockerfile
+        assert re.search(r"(?m)^USER\s+guardian\s*$", conteudo), \
+            "sem USER, o processo roda como root e grava o volume como root"
+
+    def test_usuario_criado_com_uid_1000(self):
+        """UID 1000 e o primeiro usuario comum: casa com o bind mount do host."""
+        assert "--uid 1000" in self.dockerfile
+
+    def test_config_pertence_ao_usuario(self):
+        conteudo = self.dockerfile
+        assert "chown -R guardian:guardian /app" in conteudo
+
+    def test_user_vem_depois_dos_copy(self):
+        """Trocar de usuario antes do COPY deixaria os arquivos sem dono certo."""
+        conteudo = self.dockerfile
+        assert conteudo.index("COPY static/") < conteudo.index("USER guardian")
+
+
+class TestHookDoWebhook:
+    """scripts/qbit-guardian-hook.sh — webhook com auth obrigatoria."""
+
+    @property
+    def script(self):
+        caminho = os.path.join(REPO_ROOT, "scripts", "qbit-guardian-hook.sh")
+        with open(caminho, encoding="utf-8") as f:
+            return f.read()
+
+    def test_envia_credenciais_quando_definidas(self):
+        """Sem credencial o /api/trigger devolve 401 e o webhook morre."""
+        conteudo = self.script
+        assert "QBIT_GUARDIAN_USER" in conteudo
+        assert "QBIT_GUARDIAN_PASS" in conteudo
+        assert "--user" in conteudo
+
+    def test_curl_falha_em_erro_http(self):
+        """`curl -s` sem `-f` sai com codigo 0 num 401: a falha sumia.
+
+        Com isso ate a tentativa extra passava despercebida — o modo webhook
+        parava de funcionar sem nenhum sinal.
+        """
+        assert re.search(r"curl\s+-sf\b", self.script)
+
+    def test_avisa_no_stderr_quando_desiste(self):
+        conteudo = self.script
+        assert ">&2" in conteudo
+        assert "QBIT_GUARDIAN_PASS nao definida" in conteudo
+
+    def test_continua_nao_bloqueante(self):
+        """O qBittorrent nao pode esperar o guardian."""
+        conteudo = self.script
+        assert conteudo.rstrip().endswith(") &")
+        assert "--connect-timeout 5" in conteudo
+        assert "--max-time 10" in conteudo
+
+    def test_sintaxe_valida(self):
+        import subprocess
+        caminho = os.path.join(REPO_ROOT, "scripts", "qbit-guardian-hook.sh")
+        r = subprocess.run(["bash", "-n", caminho], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+
+
+# ── Bordas defensivas de v2.2.0 ────────────────────────────────────────
+
+class TestDestinoDeBordas:
+    """_destino_de nunca propaga excecao: e chamado dentro do notificador."""
+
+    def test_urlparse_quebrado_nao_derruba_a_notificacao(self):
+        with mock.patch.object(g, "urlparse", side_effect=ValueError("url torta")):
+            assert g._destino_de("qualquer-coisa") == "<url invalida>"
+
+    def test_porta_nao_numerica_em_http_esconde_o_authority(self):
+        """`https://host:nao-numerica/x`: nao da para separar host de credencial."""
+        assert g._destino_de("https://apprise.home.arpa:porta/x") == "https://..."
+
+    def test_config_gravavel_com_diretorio_pai_inexistente(self, tmp_path):
+        """Caminho aninhado que ainda nao existe: decide pelo avo gravavel."""
+        alvo = tmp_path / "ainda-nao" / "config.json"
+        assert g.config_gravavel(str(alvo)) is True
+
+    def test_config_gravavel_com_arvore_inexistente(self):
+        assert g.config_gravavel("/nao/existe/mesmo/config.json") is False
+
+    def test_config_gravavel_com_diretorio_existente_e_arquivo_novo(self, tmp_path):
+        """Caso do primeiro boot: a pasta montada existe, o arquivo ainda nao."""
+        assert g.config_gravavel(str(tmp_path / "config.json")) is True
+
+
+class TestHashComSaltFixo:
+    """O salt pode ser informado — e o que torna o hash reproduzivel."""
+
+    def test_mesmo_salt_gera_o_mesmo_hash(self):
+        salt = b"0123456789abcdef"
+        assert a.hash_senha("x", salt=salt) == a.hash_senha("x", salt=salt)
+
+    def test_salt_entra_no_hash_resultante(self):
+        import base64 as b64
+        salt = b"0123456789abcdef"
+        armazenado = a.hash_senha("x", salt=salt)
+        assert armazenado.split("$")[2] == b64.b64encode(salt).decode()
+
+    def test_iteracoes_sob_medida_sao_respeitadas(self):
+        """Permite baratear o custo em teste sem mexer no default."""
+        armazenado = a.hash_senha("x", iteracoes=1000)
+        assert armazenado.split("$")[1] == "1000"
+        assert a.verificar_senha("x", armazenado)
+
+
+class TestApiConfigBordas:
+    """Entradas fora do formato esperado no POST /api/config."""
+
+    def test_corpo_json_que_nao_e_objeto(self, client, tmp_config):
+        """Uma lista no lugar do objeto nao pode virar config."""
+        r = client.post("/api/config", json=["nao", "e", "objeto"])
+        assert r.status_code == 400
+
+    def test_falha_ao_gravar_vira_400_json(self, client, tmp_config):
+        import app.web as w
+        with mock.patch.object(w, "_write_config", side_effect=OSError("disco cheio")):
+            r = client.post("/api/config", json={"guardian": {"check_interval_seconds": 60}})
+        assert r.status_code == 400
+        assert r.is_json
+        assert "disco cheio" in r.get_json()["error"]
+
+    def test_config_sem_secao_webui_nao_quebra_a_leitura(self, client, tmp_config):
+        """Config antigo pode nem ter `webui`."""
+        import app.web as w
+        cfg = g.load_config()
+        cfg.pop("webui", None)
+        g.save_config(cfg)
+        r = client.get("/api/config")
+        assert r.status_code == 200
+        assert "webui" not in r.get_json()

@@ -15,11 +15,13 @@ import threading
 import requests
 import urllib3
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 # Suprimir warnings de SSL inseguro (homelab com certificados auto-assinados)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from app.logger import get_logger, VERBOSE
+import app.auth as auth
 
 log = get_logger("guardian")
 
@@ -292,13 +294,49 @@ def notify(event, **variaveis):
     send_notification(ev["title"], _render_template(ev["template"], variaveis))
 
 
+# Esquemas em que o authority e um endereco de servidor, nao credencial.
+ESQUEMAS_COM_HOST_PUBLICO = {"http", "https"}
+
+
+def _destino_de(url):
+    """Identifica o backend de notificacao sem revelar credencial.
+
+    Em http/https o authority e um endereco e ajuda a depurar. Nos esquemas
+    proprios do Apprise o authority E o segredo — `tgram://TOKEN/CHAT`,
+    `discord://ID/TOKEN`, `pover://USER/APP` —, entao desses so o esquema sai
+    no log.
+    """
+    try:
+        partes = urlparse(url)
+    except Exception:
+        return "<url invalida>"
+
+    esquema = (partes.scheme or "").lower()
+    if not esquema:
+        return "<url invalida>"
+
+    if esquema not in ESQUEMAS_COM_HOST_PUBLICO or partes.username or partes.password:
+        return f"{esquema}://..."
+
+    try:
+        porta = f":{partes.port}" if partes.port else ""
+    except ValueError:
+        # Authority com porta nao numerica: nao da para separar host de
+        # credencial com seguranca, entao nao arrisca.
+        return f"{esquema}://..."
+
+    return f"{esquema}://{partes.hostname or '<sem host>'}{porta}"
+
+
 def send_notification(title, message):
     cfg = get_config()
     url = cfg["notifications"].get("apprise_url", "")
     if not url:
         return
     try:
-        log.debug(f"HTTP POST {url} (Apprise: {title})")
+        # So o host: a apprise_url embute o token do bot (tgram://TOKEN/chat),
+        # e com LOG_LEVEL=DEBUG ela iria inteira para o `docker logs`.
+        log.debug(f"HTTP POST {_destino_de(url)} (Apprise: {title})")
         requests.post(url, data={"title": title, "body": message},
                      timeout=10, verify=False)
     except Exception as e:
@@ -772,6 +810,42 @@ def guardian_loop():
             return
 
         time.sleep(interval)
+
+
+def config_gravavel(caminho=None):
+    """True se o guardian consegue persistir o config.json.
+
+    O container passou a rodar como usuario nao-root (v2.2.0). Um volume
+    `./config` criado pelas versoes antigas pertence ao root, e o processo
+    sem privilegio nao escreve nele: sem esta checagem a falha apareceria como
+    PermissionError no meio do provisionamento, depois de a senha ja ter sido
+    sorteada e anunciada — senha que nunca chegaria ao disco.
+    """
+    caminho = caminho or CONFIG_PATH
+    if os.path.exists(caminho):
+        return os.access(caminho, os.W_OK)
+    diretorio = os.path.dirname(caminho) or "."
+    if not os.path.isdir(diretorio):
+        diretorio = os.path.dirname(diretorio) or "."
+    return os.path.isdir(diretorio) and os.access(diretorio, os.W_OK)
+
+
+def bootstrap_credenciais():
+    """Provisiona as credenciais da Web UI antes de o servidor subir.
+
+    Roda no entrypoint, nao sob demanda: a janela entre o processo subir e as
+    credenciais existirem precisa ser zero, senao a Web UI fica publica por
+    alguns instantes a cada deploy.
+
+    Retorna True se o config.json foi alterado.
+    """
+    if not config_gravavel():
+        raise PermissionError(CONFIG_PATH)
+    cfg = load_config()
+    cfg, alterou = auth.garantir_credenciais(cfg)
+    if alterou:
+        save_config(cfg)
+    return alterou
 
 
 def start_guardian():
