@@ -5,6 +5,17 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.6] — 2026-09-25
+
+### Corrigido
+- Bug: o guardian morria no startup quando o qBittorrent ainda nao estava disponivel (ex.: apos reboot do servidor, quando o qbit-guardian sobe antes do qBittorrent). `guardian_loop()` fazia `return` na primeira falha de `qbit_login()` (tipicamente `SSLError(UNEXPECTED_EOF_WHILE_READING)`), encerrando a thread definitivamente. Consequencia em cadeia: o heartbeat (`/tmp/heartbeat`) parava de ser atualizado e, passada a tolerancia do healthcheck (`max(600s, 3x intervalo)`), o container era marcado `unhealthy`; como `restart: always` nao reinicia container unhealthy (so em crash), o guardian ficava morto ate intervencao manual.
+  - `guardian_loop()` agora chama `_connect_with_retry()`, que retenta `qbit_login()` a cada `retry_interval_seconds` ate sucesso, escrevendo `write_heartbeat()` a cada tentativa (o healthcheck mede a saude do PROCESSO guardian, nao do qBit);
+  - Loop principal ampliado: `except TRANSPORT_ERRORS` captura a familia de erros de transporte (`ConnectionError`, `SSLError`, `Timeout`, `ReadTimeout`) — antes so `ConnectionError` era capturado, e `SSLError`/`Timeout` escapavam para o `except Exception` generico (apenas logava, sem reconectar).
+
+### Adicionado
+- Nova chave `guardian.retry_interval_seconds` (default 120s) — intervalo entre tentativas de reconexao ao qBit, independente de `check_interval_seconds`. Fallback seguro para valores ausentes/invalidos (<= 0, nao numerico).
+- Testes: `TestGuardianRetry` (retry no startup, heartbeat vivo durante retry prolongado, reconexao nos 4 erros de transporte, fallback do retry_interval).
+
 ## [2.0.5] — 2026-09-19
 
 ### Corrigido

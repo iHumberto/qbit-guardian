@@ -27,6 +27,24 @@ CONFIG_PATH = os.environ.get("CONFIG_PATH",
 
 MAX_PROCESSED_SIZE = 10_000
 
+# Intervalo padrao entre tentativas de reconexao ao qBittorrent (segundos).
+# Independente de check_interval_seconds: este e o ritmo do retry de conexao,
+# aquele e o ritmo da verificacao periodica de torrents.
+DEFAULT_RETRY_INTERVAL = 120
+
+# Familia de excecoes de transporte na comunicacao com o qBittorrent. O loop
+# principal antes so capturava ConnectionError; SSLError e Timeout/ReadTimeout
+# escapavam para o `except Exception` generico (apenas loga, sem reconectar).
+# ConnectionError ja cobre SSLError/ProxyError/ConnectTimeout e Timeout cobre
+# ReadTimeout/ConnectTimeout — a lista explicita documenta a intencao e resiste
+# a mudancas na hierarquia de excecoes do requests.
+TRANSPORT_ERRORS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.SSLError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ReadTimeout,
+)
+
 # ── Config loader ──────────────────────────────────────────────────────
 _config = None
 _config_lock = threading.Lock()
@@ -43,6 +61,7 @@ def load_config():
                 "radarr": {"url": "", "api_key": ""},
                 "guardian": {
                     "check_interval_seconds": 300,
+                    "retry_interval_seconds": 120,
                     "valid_media_extensions": [
                         ".mkv", ".mp4", ".avi", ".mov", ".m4v",
                         ".ts", ".wmv", ".flv", ".webm"
@@ -499,14 +518,54 @@ def _prune_processed(current_hashes):
                     f"removidos {excess} hashes antigos")
 
 
+def _retry_interval(cfg):
+    """Le guardian.retry_interval_seconds com fallback seguro.
+
+    Retorna sempre um inteiro positivo. Valores ausentes, nao numericos ou
+    <= 0 caem no DEFAULT_RETRY_INTERVAL — evita busy loop no retry quando a
+    config esta corrompida ou mal preenchida.
+    """
+    raw = (cfg.get("guardian") or {}).get("retry_interval_seconds",
+                                          DEFAULT_RETRY_INTERVAL)
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_RETRY_INTERVAL
+    return val if val > 0 else DEFAULT_RETRY_INTERVAL
+
+
+def _connect_with_retry():
+    """Conecta ao qBittorrent, retentando a cada retry_interval_seconds.
+
+    NUNCA retorna/levanta por falha de conexao: mantem a thread do guardian
+    viva, retentando ate o qBit responder. A cada tentativa fracassada escreve
+    o heartbeat — o healthcheck mede a saude do PROCESSO guardian, nao a do
+    qBit, e a indisponibilidade do qBit e um estado externo transitorio.
+    """
+    while True:
+        try:
+            qbit_login()
+            return
+        except Exception as e:
+            cfg = get_config()
+            retry_interval = _retry_interval(cfg)
+            log.warning(f"qBittorrent indisponivel ({e}) — "
+                        f"nova tentativa em {retry_interval}s")
+            try:
+                write_heartbeat()
+            except Exception:
+                pass
+            time.sleep(retry_interval)
+
+
 def guardian_loop():
     global _check_count
     load_config()
-    try:
-        qbit_login()
-    except Exception as e:
-        log.error(f"Falha ao conectar no qBit: {e}")
-        return
+
+    # Conecta com retry: se o qBit ainda nao estiver disponivel no startup
+    # (ex.: qbit-guardian sobe antes do qBittorrent apos um reboot), o loop
+    # retenta a cada retry_interval_seconds em vez de encerrar a thread.
+    _connect_with_retry()
 
     cfg = get_config()
     interval = cfg["guardian"].get("check_interval_seconds", 300)
@@ -552,12 +611,9 @@ def guardian_loop():
                      f"{new_this_check} novos, {stalled_removed} stalled removidos, "
                      f"{removed_this_check} removidos do historico")
 
-        except requests.exceptions.ConnectionError:
+        except TRANSPORT_ERRORS:
             log.warning("qBittorrent inacessivel, reconectando...")
-            try:
-                qbit_login()
-            except Exception:
-                pass
+            _connect_with_retry()
         except Exception as e:
             log.error(f"Erro: {e}")
 

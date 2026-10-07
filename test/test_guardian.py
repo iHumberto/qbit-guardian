@@ -1190,3 +1190,155 @@ class TestHealthcheck:
                                     config_path=str(cfg))
         assert not ok
         assert "ausente" in msg
+
+
+# ── Retry de conexao ao qBit ───────────────────────────────────────────
+
+class TestGuardianRetry:
+    """Retry de conexao ao qBittorrent no startup e no loop principal.
+
+    Corrige o bug em que uma unica falha de qbit_login() no startup encerrava a
+    thread do guardian (return), congelando o heartbeat e deixando o container
+    unhealthy indefinidamente. Agora o guardian retenta a cada
+    retry_interval_seconds ate reconectar, mantendo o heartbeat vivo.
+    """
+
+    def test_guardian_loop_retries_on_startup_failure(self, tmp_config):
+        """qbit_login falha no startup → retenta ate sucesso (thread nao morre)."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"]["check_interval_seconds"] = 0  # webhook apos conectar
+        cfg["guardian"]["retry_interval_seconds"] = 1
+        g.save_config(cfg)
+
+        attempts = {"n": 0}
+
+        def fake_qbit_login():
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise requests.exceptions.SSLError("UNEXPECTED_EOF_WHILE_READING")
+            # sucesso na 3a tentativa
+
+        with mock.patch.object(g, "qbit_login", side_effect=fake_qbit_login), \
+             mock.patch.object(g, "write_heartbeat") as m_hb, \
+             mock.patch("time.sleep"):
+            g.guardian_loop()
+
+        assert attempts["n"] == 3, \
+            f"esperado 3 tentativas de login, obtido {attempts['n']}"
+        # heartbeat escrito nas 2 tentativas fracassadas (criterio de aceite)
+        assert m_hb.call_count >= 2, \
+            f"heartbeat deve ser escrito a cada retry, chamadas: {m_hb.call_count}"
+
+    def test_heartbeat_kept_alive_during_prolonged_retry(self, tmp_config):
+        """Heartbeat continua vivo enquanto o qBit esta fora (retry prolongado)."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"]["check_interval_seconds"] = 0
+        cfg["guardian"]["retry_interval_seconds"] = 1
+        g.save_config(cfg)
+
+        attempts = {"n": 0}
+        hb = {"n": 0}
+        sleeps = {"n": 0}
+
+        def fake_qbit_login():
+            attempts["n"] += 1
+            raise requests.exceptions.ConnectionError("refused")
+
+        def fake_write_heartbeat():
+            hb["n"] += 1
+
+        class _StopRetry(Exception):
+            pass
+
+        def fake_sleep(_):
+            # time.sleep fica FORA do try/except de _connect_with_retry, entao
+            # levantar aqui propaga e interrompe o loop de retry no teste.
+            sleeps["n"] += 1
+            if sleeps["n"] >= 4:
+                raise _StopRetry()
+
+        with mock.patch.object(g, "qbit_login", side_effect=fake_qbit_login), \
+             mock.patch.object(g, "write_heartbeat", side_effect=fake_write_heartbeat), \
+             mock.patch("time.sleep", side_effect=fake_sleep):
+            with pytest.raises(_StopRetry):
+                g.guardian_loop()
+
+        # 4 falhas processadas → 4 heartbeats, um por tentativa
+        assert attempts["n"] >= 4
+        assert hb["n"] == 4, f"heartbeat esperado 4x durante retry, obtido {hb['n']}"
+
+    @pytest.mark.parametrize("exc", [
+        requests.exceptions.ConnectionError("conn refused"),
+        requests.exceptions.SSLError("ssl eof"),
+        requests.exceptions.Timeout("timeout"),
+        requests.exceptions.ReadTimeout("read timeout"),
+    ])
+    def test_guardian_loop_reconnects_on_transport_error(self, exc, tmp_config):
+        """Qualquer erro de transporte no get_torrents dispara reconexao.
+
+        Antes, so ConnectionError era capturado; SSLError/Timeout/ReadTimeout
+        escapavam para o except Exception generico (apenas loga, sem reconectar).
+        """
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"]["check_interval_seconds"] = 1
+        cfg["guardian"]["retry_interval_seconds"] = 1
+        g.save_config(cfg)
+
+        orig_get_config = g.get_config
+        call_count = {"n": 0}
+
+        def mock_get_config():
+            call_count["n"] += 1
+            c = orig_get_config().copy()
+            if call_count["n"] >= 3:
+                c["guardian"] = dict(c["guardian"])
+                c["guardian"]["check_interval_seconds"] = 0  # sai do loop
+            return c
+
+        torrent_calls = {"n": 0}
+
+        def fake_get_torrents():
+            torrent_calls["n"] += 1
+            if torrent_calls["n"] == 1:
+                raise exc
+            return []
+
+        login_calls = {"n": 0}
+
+        def fake_qbit_login():
+            login_calls["n"] += 1
+
+        with mock.patch.object(g, "get_config", side_effect=mock_get_config), \
+             mock.patch.object(g, "qbit_login", side_effect=fake_qbit_login), \
+             mock.patch.object(g, "get_torrents", side_effect=fake_get_torrents), \
+             mock.patch.object(g, "write_heartbeat"), \
+             mock.patch("time.sleep"):
+            g.guardian_loop()
+
+        # get_torrents voltou a rodar apos a reconexao e o loop principal seguiu
+        assert torrent_calls["n"] >= 2, \
+            f"get_torrents deveria rodar apos reconexao, chamadas: {torrent_calls['n']}"
+        # startup + reconexao apos o erro de transporte
+        assert login_calls["n"] >= 2, \
+            f"qbit_login deveria ser chamado para reconectar, chamadas: {login_calls['n']}"
+
+    def test_retry_interval_default_positive(self, tmp_config):
+        """Chave valida e respeitada."""
+        g.load_config()
+        cfg = g.get_config()
+        cfg["guardian"]["retry_interval_seconds"] = 60
+        assert g._retry_interval(cfg) == 60
+
+    @pytest.mark.parametrize("bad_value", [None, 0, -5, "abc", ""])
+    def test_retry_interval_fallback(self, bad_value, tmp_config):
+        """Valores ausentes/invalidos caem no DEFAULT_RETRY_INTERVAL (120)."""
+        g.load_config()
+        cfg = g.get_config()
+        if bad_value is None:
+            cfg["guardian"].pop("retry_interval_seconds", None)
+        else:
+            cfg["guardian"]["retry_interval_seconds"] = bad_value
+        assert g._retry_interval(cfg) == g.DEFAULT_RETRY_INTERVAL
