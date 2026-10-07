@@ -1,5 +1,12 @@
 name: tests
 
+# Sem filtro de paths, de proposito: a suite roda em QUALQUER mudanca.
+#
+# Tentador filtrar docs/ aqui tambem, mas a documentacao passou a ser
+# verificada por teste (TestDocsContraOCodigo e companhia): um ajuste em
+# docs/ pode legitimamente quebrar a suite, e pular os testes nesse caso
+# anularia a protecao inteira. A suite leva ~30s; o que custa caro e o build
+# multi-arch, e esse sim e filtrado no docker-build.yml.
 on:
   push:
     branches: [main]

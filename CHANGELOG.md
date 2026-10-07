@@ -5,6 +5,21 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.2] — 2026-10-07
+
+### Corrigido
+- **Commit de documentacao publicava imagem nova no GHCR.** O `docker-build` disparava em qualquer push para `main`, entao mexer em `docs/`, README ou CHANGELOG gerava um build multi-arch e uma imagem **identica** no registry — e o Watchtower trocava o container em producao sem nada ter mudado. O gatilho passou a filtrar por caminho, listando exatamente o que entra na imagem: `app/`, `static/`, `requirements.txt`, `Dockerfile` e os dois workflows.
+- Push de **tag** continua publicando normalmente: o GitHub Actions ignora `paths` em push de tag, entao `git push --tags` segue gerando release.
+
+### Alterado
+- O workflow `tests` **nao** ganhou filtro, de proposito. A documentacao passou a ser verificada por teste na v2.3.1, entao um ajuste em `docs/` pode legitimamente quebrar a suite — pular os testes nesse caso anularia a protecao inteira. A suite leva ~30s; o que custa caro e o build multi-arch, e esse sim e filtrado.
+
+### Adicionado
+- `TestWorkflowBuild` e `TestWorkflowTestes`: o filtro do build e conferido contra as linhas `COPY` do **Dockerfile**, entao passar a copiar uma pasta nova sem incluir no filtro quebra a suite — senao mudancas nessa pasta nunca chegariam a producao. Tambem fixam que `docs/`, README, CHANGELOG e `test/` **nao** disparam build, que o gatilho de tag continua la, e que o build segue atras do gate da suite.
+
+### Notas
+- Testes: 687 → **703**. 8 mutacoes nos workflows, 8 pegas.
+
 ## [2.3.1] — 2026-10-07
 
 Reescrita da documentacao de usuario (`docs/`), que estava quatro releases

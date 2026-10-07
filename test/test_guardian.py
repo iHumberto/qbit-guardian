@@ -4666,3 +4666,104 @@ class TestDocsValoresPadrao:
             return
         for estado in ("uploading", "stalledUP", "pausedUP", "checkingUP", "queuedUP"):
             assert f"`{estado}`" in texto, f"{os.path.basename(caminho)}: falta {estado}"
+
+
+# ── Workflows de CI ────────────────────────────────────────────────────
+
+WORKFLOWS_DIR = os.path.join(REPO_ROOT, ".github", "workflows")
+
+
+def _workflow(nome):
+    with open(os.path.join(WORKFLOWS_DIR, nome), encoding="utf-8") as f:
+        return f.read()
+
+
+class TestWorkflowBuild:
+    """O build so roda quando o conteudo da imagem muda.
+
+    Antes, qualquer push reconstruia e publicava no GHCR — inclusive ajuste de
+    documentacao. O Watchtower entao trocava o container em producao por uma
+    imagem identica.
+    """
+
+    @staticmethod
+    def _paths_do_build():
+        """Lista de `paths` do gatilho de push do docker-build."""
+        texto = _workflow("docker-build.yml")
+        bloco = re.search(r"(?m)^    paths:\n((?:      - .*\n)+)", texto)
+        assert bloco, "docker-build.yml sem filtro de paths"
+        return [l.strip().lstrip("- ").strip("'\"")
+                for l in bloco.group(1).splitlines()]
+
+    @staticmethod
+    def _copiado_pelo_dockerfile():
+        """O que o Dockerfile traz para dentro da imagem."""
+        with open(os.path.join(REPO_ROOT, "Dockerfile"), encoding="utf-8") as f:
+            origens = re.findall(r"(?m)^COPY\s+(\S+)", f.read())
+        return {o.rstrip("/") for o in origens}
+
+    def test_build_filtra_por_path(self):
+        assert self._paths_do_build(), "sem filtro, docs republicam a imagem"
+
+    @pytest.mark.parametrize("obrigatorio", ["Dockerfile", "requirements.txt"])
+    def test_arquivos_da_imagem_disparam_build(self, obrigatorio):
+        assert obrigatorio in self._paths_do_build()
+
+    def test_tudo_que_o_dockerfile_copia_dispara_build(self):
+        """Se o Dockerfile passar a copiar uma pasta nova e o filtro nao
+        acompanhar, mudancas nela nunca chegam a producao."""
+        paths = self._paths_do_build()
+        for origem in self._copiado_pelo_dockerfile():
+            casa = any(p == origem or p.startswith(origem + "/") for p in paths)
+            assert casa, f"Dockerfile copia {origem}, mas o filtro nao cobre"
+
+    def test_o_proprio_workflow_dispara_build(self):
+        """Mexer no workflow sem rodar o workflow esconde o erro ate o
+        proximo push de aplicacao."""
+        paths = self._paths_do_build()
+        assert ".github/workflows/docker-build.yml" in paths
+        assert ".github/workflows/test.yml" in paths, \
+            "o build reutiliza o test.yml como gate"
+
+    @pytest.mark.parametrize("inerte", ["docs/**", "docs/", "README.md",
+                                        "CHANGELOG.md", "LICENSE", "test/**"])
+    def test_arquivo_sem_efeito_na_imagem_nao_dispara_build(self, inerte):
+        assert inerte not in self._paths_do_build()
+
+    def test_tag_continua_publicando(self):
+        """`paths` e ignorado em push de tag (comportamento do GitHub).
+
+        O gatilho de tag precisa continuar la, senao um release deixa de
+        publicar quando o commit da tag nao toca a aplicacao.
+        """
+        texto = _workflow("docker-build.yml")
+        assert re.search(r"(?m)^    tags:\n      - 'v\*'", texto)
+
+    def test_build_continua_atras_da_suite(self):
+        """Gate de publicacao: imagem nao sobe com teste vermelho."""
+        texto = _workflow("docker-build.yml")
+        assert "uses: ./.github/workflows/test.yml" in texto
+        assert "needs: test" in texto
+
+
+class TestWorkflowTestes:
+    """A suite roda em qualquer mudanca, inclusive em docs/."""
+
+    def test_sem_filtro_de_paths(self):
+        """Documentacao e verificada por teste desde a v2.3.1.
+
+        Filtrar docs/ aqui faria um ajuste de documentacao escapar da propria
+        suite que existe para pegar o drift dela.
+        """
+        texto = _workflow("test.yml")
+        gatilho = texto.split("jobs:")[0]
+        assert "paths:" not in gatilho
+        assert "paths-ignore:" not in gatilho
+
+    def test_roda_em_push_e_pull_request(self):
+        texto = _workflow("test.yml")
+        assert re.search(r"(?m)^  push:", texto)
+        assert re.search(r"(?m)^  pull_request:", texto)
+
+    def test_exposto_para_reuso(self):
+        assert re.search(r"(?m)^  workflow_call:", _workflow("test.yml"))

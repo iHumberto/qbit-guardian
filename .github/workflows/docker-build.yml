@@ -3,6 +3,22 @@ name: docker-build
 on:
   push:
     branches: [main]
+    # So reconstroi quando o conteudo da IMAGEM muda. Mexer em docs/, README
+    # ou CHANGELOG publicava uma imagem nova e identica no GHCR — e o
+    # Watchtower trocava o container em producao sem nada ter mudado.
+    #
+    # Esta lista espelha o que o Dockerfile COPIA, mais o proprio Dockerfile e
+    # os workflows. Ha teste de paridade: test_guardian.py > TestWorkflowBuild.
+    #
+    # Push de TAG ignora paths (comportamento do GitHub Actions), entao
+    # `git tag -a v2.4.0 && git push --tags` continua publicando normalmente.
+    paths:
+      - 'app/**'
+      - 'static/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/docker-build.yml'
+      - '.github/workflows/test.yml'
     tags:
       - 'v*'
 
