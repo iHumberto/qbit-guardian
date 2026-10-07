@@ -4142,8 +4142,45 @@ class TestHookDoWebhook:
     def test_sintaxe_valida(self):
         import subprocess
         caminho = os.path.join(REPO_ROOT, "scripts", "qbit-guardian-hook.sh")
-        r = subprocess.run(["bash", "-n", caminho], capture_output=True, text=True)
+        r = subprocess.run(["sh", "-n", caminho], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
+
+    def test_shebang_e_posix(self):
+        """As imagens Docker do qBittorrent sao Alpine, que NAO tem /bin/bash.
+
+        Com `#!/bin/bash` o qBittorrent falha ao executar com "not found"
+        (exit 127) e o modo webhook nunca funciona — verificado rodando o
+        script dentro de uma alpine:3.
+        """
+        assert self.script.startswith("#!/bin/sh\n"), \
+            "shebang precisa ser POSIX: Alpine nao tem bash"
+
+    def test_sem_construcoes_exclusivas_do_bash(self):
+        conteudo = self.script
+        assert "local " not in conteudo, "`local` nao e POSIX"
+        assert not re.search(r"^\s*\w+=\(", conteudo, re.M), "array e bash-ismo"
+        assert "[[" not in conteudo, "`[[` nao e POSIX"
+
+    def test_tem_fallback_para_wget(self):
+        """Alpine limpa tambem nao traz curl — so o wget do busybox."""
+        conteudo = self.script
+        assert "command -v curl" in conteudo
+        assert "command -v wget" in conteudo
+        # O wget do busybox nao tem --user: o Basic Auth vai montado a mao.
+        assert "base64" in conteudo
+        assert "Authorization: Basic" in conteudo
+        assert "--post-data" in conteudo, "sem isso o wget faria GET"
+
+    def test_avisa_quando_nao_ha_cliente_http(self):
+        assert "nao tem curl nem wget" in self.script
+
+    def test_executavel(self):
+        """qBittorrent executa o arquivo direto, nao via shell.
+
+        Sem o bit de execucao, a chamada falha antes do shebang importar.
+        """
+        caminho = os.path.join(REPO_ROOT, "scripts", "qbit-guardian-hook.sh")
+        assert os.access(caminho, os.X_OK), "falta chmod +x"
 
 
 # ── Bordas defensivas de v2.2.0 ────────────────────────────────────────
@@ -4574,11 +4611,25 @@ class TestDocsContraOCodigo:
 
     @pytest.mark.parametrize("caminho", TODOS_OS_DOCS)
     def test_endpoints_citados_existem(self, caminho):
+        """Endpoints DO GUARDIAN citados nos docs precisam existir.
+
+        `/api/v2/...` fica de fora: e a API do proprio qBittorrent, que os
+        docs citam para o usuario conferir as preferencias de autorun.
+        """
         import app.web as w
         rotas = {str(r.rule) for r in w.app.url_map.iter_rules()}
-        citados = set(re.findall(r"(/api/[a-z]+)", _ler_doc(caminho)))
+        citados = {c for c in re.findall(r"(/api/[a-z][a-z_]*)", _ler_doc(caminho))
+                   if not c.startswith("/api/v")}
+        # Nem toda pagina cita endpoint — os guias iniciais nao citam nenhum.
         for rota in citados:
             assert rota in rotas, f"{os.path.basename(caminho)}: {rota} nao existe"
+
+    @pytest.mark.parametrize("caminho", TODOS_OS_DOCS)
+    def test_endpoints_do_qbittorrent_sao_da_api_v2(self, caminho):
+        """Contraprova: o que e citado como API do qBit tem o prefixo certo."""
+        texto = _ler_doc(caminho)
+        for trecho in re.findall(r"/api/v\d[a-z0-9/_]*", texto):
+            assert trecho.startswith("/api/v2/"), f"prefixo inesperado: {trecho}"
 
 
 class TestDocsValoresPadrao:

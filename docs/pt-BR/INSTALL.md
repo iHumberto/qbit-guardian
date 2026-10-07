@@ -273,13 +273,35 @@ services:
 ### Passo 3: Configure o qBittorrent
 
 1. No qBittorrent, vá em **Ferramentas → Opções → Downloads**.
-2. Em **Executar programa externo ao adicionar torrent**, cole:
+2. Localize **Executar programa externo ao adicionar torrent**.
+3. **Marque a caixa** ao lado do campo. Sem ela marcada o qBittorrent **não salva** o caminho — o campo volta vazio e o webhook nunca dispara. É a causa mais comum de "configurei e não acontece nada".
+4. No campo, cole:
 
 ```
 /scripts/qbit-guardian-hook.sh
 ```
 
-3. Clique em **Salvar**.
+5. Clique em **Salvar**.
+
+Para conferir que ficou gravado de verdade, sem depender da tela:
+
+```bash
+curl -s -H "Authorization: Bearer SUA_API_KEY_DO_QBIT" \
+  http://IP-DO-QBIT:PORTA/api/v2/app/preferences \
+  | python3 -m json.tool | grep autorun
+```
+
+Você deve ver `"autorun_on_torrent_added_enabled": true` e o caminho em
+`"autorun_on_torrent_added_program"`. Se vier `false` e `""`, a configuração
+não foi salva.
+
+> **📘 Por que o script é `#!/bin/sh` e não `#!/bin/bash`:** as imagens Docker do qBittorrent são baseadas em **Alpine Linux**, que **não traz bash nem curl**. Um script com `#!/bin/bash` falha com "not found" (código 127) no momento em que o qBittorrent tenta executá-lo, sem mensagem útil. O script do projeto é POSIX puro e usa `curl` quando existe, caindo para o `wget` do busybox quando não — então funciona nas duas situações.
+
+Se quiser confirmar o que o seu container tem:
+
+```bash
+docker exec qbittorrent sh -c 'command -v sh bash curl wget base64'
+```
 
 ### Passo 4: Ajuste o intervalo para zero
 

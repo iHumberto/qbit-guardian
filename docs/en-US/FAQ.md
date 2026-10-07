@@ -124,6 +124,32 @@ The script writes to qBittorrent's stderr when it fails, including whether the c
 
 ---
 
+## I configured the webhook and nothing happens
+
+Three causes, in order of frequency:
+
+**1. The checkbox next to the field isn't ticked.** In qBittorrent, **Options → Downloads → Run external program on torrent added** has a checkbox. Without it ticked, the path you typed **is not saved** — the field comes back empty when you reopen it. Check via the API, which doesn't lie:
+
+```bash
+curl -s -H "Authorization: Bearer YOUR_QBIT_API_KEY" \
+  http://QBIT-IP:PORT/api/v2/app/preferences \
+  | python3 -m json.tool | grep autorun
+```
+
+`"autorun_on_torrent_added_enabled": false` with `"autorun_on_torrent_added_program": ""` means it was never saved.
+
+**2. The script isn't executable.** qBittorrent runs the file directly, not through a shell. Without the execute bit, nothing happens:
+
+```bash
+chmod +x scripts/qbit-guardian-hook.sh
+```
+
+**3. `QBIT_GUARDIAN_PASS` is missing.** Since v2.2.0 `/api/trigger` requires authentication. The script reports this on qBittorrent's stderr — look under **Tools → Execution log** in qBittorrent's Web UI.
+
+> **Note about older versions of the script:** up to v2.3.3 it started with `#!/bin/bash` and used `curl`. qBittorrent's Docker images are Alpine, which ships **neither** — so qBittorrent failed with "not found" (exit 127) before any line ran. If you grabbed the script a while ago, pull the new one from the repository.
+
+---
+
 ## Why wasn't a torrent removed?
 
 There are a few reasons a torrent stays active after the guardian looked at it:

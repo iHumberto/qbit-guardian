@@ -5,6 +5,23 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.3] — 2026-10-07
+
+Modo webhook que nunca funcionou para quem roda o qBittorrent em container.
+
+### Corrigido
+- **O script do webhook nao rodava nas imagens Docker do qBittorrent.** Ele comecava com `#!/bin/bash` e usava `curl`; as imagens sao baseadas em **Alpine Linux**, que **nao traz nenhum dos dois**. O qBittorrent falhava com "not found" (codigo 127) antes da primeira linha executar, e sem mensagem util. Verificado rodando o script dentro de uma `alpine:3`.
+- O script virou **POSIX puro** (`#!/bin/sh`), e usa `curl` quando existe, caindo para o **`wget` do busybox** quando nao. Como o wget do busybox nao tem `--user`, o Basic Auth vai montado a mao com `base64`. Testado ponta a ponta de dentro de uma Alpine sem bash e sem curl: o script principal retorna em **0 ms** e a chamada chega ao `/api/trigger` com a credencial correta.
+- Quando nao ha nem `curl` nem `wget`, o script diz isso no stderr do qBittorrent em vez de falhar em silencio.
+
+### Adicionado
+- Documentacao do que de fato impede o webhook de funcionar, nos dois idiomas: a **caixa de selecao** ao lado de "Executar programa externo ao adicionar torrent" precisa estar marcada, senao o qBittorrent **nao salva** o caminho e o campo volta vazio; o comando que confere isso pela API do qBittorrent (`/api/v2/app/preferences`, chaves `autorun_on_torrent_added_*`), que nao depende da tela; o bit de execucao do script; e `QBIT_GUARDIAN_PASS`.
+- Testes do script: shebang POSIX, ausencia de construcoes exclusivas do bash, fallback para wget com `--post-data` e cabecalho de autenticacao, aviso quando nao ha cliente HTTP, e o bit de execucao.
+
+### Notas
+- Testes: 703 → **716**. 8 mutacoes no script, 8 pegas.
+- O teste de paridade de endpoints precisou distinguir as duas APIs: `/api/v2/...` e do **qBittorrent**, nao do guardian. Ele reprovou a documentacao nova antes de a distincao existir.
+
 ## [2.3.2] — 2026-10-07
 
 ### Corrigido
