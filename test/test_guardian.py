@@ -2175,14 +2175,47 @@ class TestWebUIRodape:
         assert "dados.update_available" in html, \
             "o HTML decide sozinho se ha atualizacao em vez de usar o backend"
 
-    def test_aviso_usa_i18n(self):
-        """Texto do aviso traduzido — nao pode nascer so em portugues."""
-        html = _read_static("index.html")
-        assert "t('update_available')" in html
+    def test_aviso_tem_traducao_nos_dois_idiomas(self):
         tables = _i18n_tables()
         for lang, known in tables.items():
             assert "update_available" in known, f"{lang} sem update_available"
             assert "update_tooltip" in known, f"{lang} sem update_tooltip"
+
+    def test_aviso_passa_pelo_walker_do_i18n(self):
+        """Regressao: texto escrito na mao congela no idioma do 1o carregamento.
+
+        `setLang()` re-renderiza sem recarregar a pagina e so alcanca quem tem
+        `data-i18n*`. Quem escreve `textContent`/`title` por fora continua em
+        ingles depois de trocar para pt-BR — foi o que aconteceu.
+        """
+        html = _read_static("index.html")
+        aviso = re.search(r'<a class="atualizacao"[^>]*>', html, re.S).group(0)
+        assert 'data-i18n="update_available"' in aviso, \
+            "texto do aviso fora do walker: congela ao trocar de idioma"
+        assert 'data-i18n-title="update_tooltip"' in aviso, \
+            "tooltip do aviso fora do walker: congela ao trocar de idioma"
+        assert "t('update_available')" not in html, \
+            "aviso ainda escreve o texto na mao em paralelo ao walker"
+
+    def test_aviso_re_renderiza_ao_receber_a_versao(self):
+        """O walker precisa rodar depois que o data-version chega."""
+        html = _read_static("index.html")
+        trecho = html[html.index("update_available && dados.latest"):]
+        assert "data-version" in trecho[:400]
+        assert "applyTranslations()" in trecho[:400], \
+            "sem re-render, o aviso aparece com o placeholder {version} cru"
+
+    def test_walker_preenche_placeholder(self):
+        """`{version}` so chega ao usuario se o walker souber substituir."""
+        js = _read_static("i18n.js")
+        assert "_fillVars" in js, "walker sem substituicao de placeholder"
+        assert r"\{(\w+)\}" in js, "sem a regex de placeholder no i18n.js"
+
+    def test_strings_do_aviso_tem_o_placeholder(self):
+        """Traducao sem `{version}` viraria aviso sem numero de versao."""
+        js = _read_static("i18n.js")
+        for linha in re.findall(r"update_available: '([^']*)'", js):
+            assert "{version}" in linha, f"traducao sem placeholder: {linha!r}"
 
     def test_link_do_aviso_abre_com_seguranca(self):
         """target=_blank sem rel deixa a aba nova com acesso a window.opener."""

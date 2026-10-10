@@ -452,7 +452,12 @@
        seria uma terceira copia para sair de sincronia. -->
   <footer class="rodape">
     <span class="versao" id="app-version"></span>
+    <!-- Texto e tooltip passam pelo walker do i18n (data-i18n*), e nao escritos
+         na mao: setLang() re-renderiza sem recarregar a pagina, entao quem
+         escreve o texto por fora fica congelado no idioma do primeiro
+         carregamento. O `{version}` e preenchido pelo data-version. -->
     <a class="atualizacao" id="app-update" hidden target="_blank" rel="noopener noreferrer"
+       data-i18n="update_available" data-i18n-title="update_tooltip"
        href="https://github.com/iHumberto/qbit-guardian/releases"></a>
   </footer>
 </div>
@@ -736,9 +741,11 @@ async function loadVersion() {
     // mantem o aviso escondido: nao saber nao e motivo para alarme.
     if (dados.update_available && dados.latest) {
       const aviso = document.getElementById('app-update');
-      aviso.textContent = t('update_available').replace('{version}', 'v' + dados.latest);
-      aviso.title = t('update_tooltip');
+      aviso.setAttribute('data-version', 'v' + dados.latest);
       aviso.hidden = false;
+      // O walker escreve texto e tooltip no idioma ativo — e volta a escrever
+      // sozinho a cada troca de idioma.
+      applyTranslations();
     }
   } catch (err) {
     // Rodape e informativo: sem versao ele fica vazio, o painel segue util.

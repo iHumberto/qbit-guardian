@@ -5,6 +5,21 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.1] — 2026-10-10
+
+O aviso de versao nova ficava em ingles depois de trocar o idioma.
+
+### Corrigido
+- **O aviso do rodape congelava no idioma do primeiro carregamento.** Em pt-BR ele continuava mostrando "available" e o tooltip em ingles. Causa: `setLang()` re-renderiza a pagina **sem recarregar**, e o `applyTranslations()` so alcanca elementos marcados com `data-i18n*` — o aviso escrevia `textContent` e `title` na mao, uma unica vez, entao nada o reescrevia na troca de idioma.
+- O aviso passou a usar `data-i18n` e `data-i18n-title`, como o resto da interface. O `renderVars()` **ja documentava essa convencao** para elementos criados por JS; o aviso e que nao a seguiu.
+
+### Adicionado
+- O walker do i18n passa a preencher placeholders `{nome}` a partir dos `data-nome` do proprio elemento. Sem isso um texto com valor no meio (`{version} disponivel`) nao teria como passar pelo walker: quem tem o valor precisaria escrever o texto por fora — que e exatamente o que causava o congelamento.
+
+### Notas
+- Testes: 752 -> **756**. Os tres testes de regressao foram conferidos contra o codigo bugado: reprovam nele e passam na correcao.
+- Verificado no navegador alternando pt-BR -> en-US -> pt-BR -> en-US: texto e tooltip acompanham as quatro trocas.
+
 ## [2.5.0] — 2026-10-10
 
 O rodape avisa quando ha versao nova publicada.

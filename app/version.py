@@ -10,4 +10,4 @@ Ao subir a versao aqui, atualize tambem o CHANGELOG.md: ha teste de paridade
 entre os dois (test_guardian.py > TestVersaoDaImagem).
 """
 
-__version__ = "2.5.0"
+__version__ = "2.5.1"

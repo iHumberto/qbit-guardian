@@ -175,6 +175,23 @@ function setLang(lang) {
 }
 
 /**
+ * Fill `{name}` placeholders in a translated string from the element's own
+ * `data-name` attributes.
+ *
+ * Without this, a string with a value in the middle ('{version} available')
+ * could not go through the walker: whoever had the value would have to write
+ * the text by hand, and that text would then stay frozen in the language of
+ * the first render, because setLang() re-renders without reloading the page.
+ * An absent attribute leaves the placeholder untouched.
+ */
+function _fillVars(texto, el) {
+    return texto.replace(/\{(\w+)\}/g, function (todo, nome) {
+        var valor = el.getAttribute('data-' + nome);
+        return valor === null ? todo : valor;
+    });
+}
+
+/**
  * Walk all elements with [data-i18n] and [data-i18n-placeholder],
  * replacing their text/placeholder with translated strings.
  */
@@ -184,7 +201,7 @@ function applyTranslations() {
     for (var i = 0; i < els.length; i++) {
         var el = els[i];
         var key = el.getAttribute('data-i18n');
-        if (key) el.textContent = t(key);
+        if (key) el.textContent = _fillVars(t(key), el);
     }
 
     // Placeholder attributes
