@@ -84,8 +84,20 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/ihumberto/qbit-guardian
+          # `latest` = ultima RELEASE, nao ultimo commit.
+          #
+          # Antes a regra era `enable={{is_default_branch}}`, que o
+          # metadata-action considera verdadeiro tambem em push de TAG. Com o
+          # branch e a tag indo juntos, os dois builds disputavam a `latest` e
+          # ficava o que terminasse por ultimo — por isso a versao publicada
+          # ora saia `2.6.1`, ora `2.6.1+768f557`.
+          #
+          # Agora a `latest` so se move em tag, e builds de main vao para
+          # `edge`. O sufixo de commit passa a marcar exatamente o que ele e:
+          # build que nao e release.
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=edge,enable=${{ !startsWith(github.ref, 'refs/tags/') }}
             type=semver,pattern={{version}}
           # Sobrescreve o label gerado pela action: os labels do input entram
           # depois dos automaticos e a deduplicacao por chave e last-wins

@@ -5062,6 +5062,30 @@ class TestWorkflowBuild:
     def test_arquivo_sem_efeito_na_imagem_nao_dispara_build(self, inerte):
         assert inerte not in self._paths_do_build()
 
+    def test_latest_se_move_so_em_release(self):
+        """Regressao da corrida pela `latest`.
+
+        `{{is_default_branch}}` e verdadeiro tambem em push de TAG no
+        metadata-action. Com branch e tag indo no mesmo push, os dois builds
+        disputavam a `latest` e a versao publicada ora saia limpa, ora com o
+        sufixo de commit, dependendo de qual terminasse por ultimo.
+        """
+        texto = _workflow("docker-build.yml")
+        regra = re.search(r"type=raw,value=latest,enable=([^\n]+)", texto)
+        assert regra, "sem regra para a tag latest"
+        assert "is_default_branch" not in regra.group(1), \
+            "is_default_branch tambem vale para push de tag: volta a corrida"
+        assert "refs/tags/v" in regra.group(1), \
+            "latest precisa se mover so em tag de versao"
+
+    def test_build_de_main_publica_em_edge(self):
+        """Main continua publicando imagem — so nao mexe na `latest`."""
+        texto = _workflow("docker-build.yml")
+        regra = re.search(r"type=raw,value=edge,enable=([^\n]+)", texto)
+        assert regra, "build de main sem destino: o push-action falha sem tags"
+        assert "!startsWith(github.ref, 'refs/tags/')" in regra.group(1), \
+            "edge sairia tambem em push de tag"
+
     def test_tag_continua_publicando(self):
         """`paths` e ignorado em push de tag (comportamento do GitHub).
 

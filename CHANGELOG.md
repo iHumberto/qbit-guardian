@@ -5,6 +5,22 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.2] — 2026-10-10
+
+`latest` passa a significar "ultima release", e a versao publicada para de oscilar.
+
+### Corrigido
+- **A versao da imagem `latest` ora saia `2.6.1`, ora `2.6.1+768f557`.** Branch e tag sao empurrados juntos, e os **dois** builds publicavam a `latest`: o de main com o sufixo de commit, o de tag com o numero limpo. Ficava o que terminasse por ultimo — era corrida, nao regra.
+- A causa de o build de tag tambem publicar a `latest` era a condicao `{{is_default_branch}}`, que o `docker/metadata-action` considera verdadeira **tambem em push de tag**. A regra agora e explicita: `startsWith(github.ref, 'refs/tags/v')`.
+
+### Alterado
+- **`latest` so se move em tag de versao.** Quem usa `ghcr.io/ihumberto/qbit-guardian:latest` (o que os docs recomendam) passa a receber **releases**, nao todo commit de `main`.
+- Build de `main` publica em **`edge`**. O sufixo de commit (`2.6.2+abc1234`) passa a marcar exatamente o que ele e: build que **nao** e release.
+
+### Notas
+- **Isto muda o fluxo de deploy de quem acompanha a `latest`**: push para `main` deixa de atualizar o container sozinho; e preciso taguear. Em troca, a versao que aparece na notificacao do Watchtower e sempre um numero de release limpo (`2.6.1` -> `2.6.2`).
+- Testes: 772 -> **774**. O teste de regressao rejeita explicitamente o `is_default_branch` na regra da `latest`, que e a armadilha que criou a corrida.
+
 ## [2.6.1] — 2026-10-10
 
 O extrator do CHANGELOG estava na pasta errada.
