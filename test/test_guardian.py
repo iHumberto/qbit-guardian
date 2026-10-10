@@ -2198,12 +2198,20 @@ class TestWebUIRodape:
             "aviso ainda escreve o texto na mao em paralelo ao walker"
 
     def test_aviso_re_renderiza_ao_receber_a_versao(self):
-        """O walker precisa rodar depois que o data-version chega."""
+        """O walker precisa rodar depois que o data-version chega.
+
+        Delimita pela funcao inteira, e nao por uma janela de N caracteres:
+        janela fixa quebra quando se acrescenta uma linha ao bloco, que e
+        fragilidade do teste e nao do codigo.
+        """
         html = _read_static("index.html")
-        trecho = html[html.index("update_available && dados.latest"):]
-        assert "data-version" in trecho[:400]
-        assert "applyTranslations()" in trecho[:400], \
+        corpo = html[html.index("async function loadVersion()"):]
+        corpo = corpo[:corpo.index("\n}")]
+        assert "data-version" in corpo
+        assert "applyTranslations()" in corpo, \
             "sem re-render, o aviso aparece com o placeholder {version} cru"
+        assert corpo.index("data-version") < corpo.index("applyTranslations()"), \
+            "re-render antes do valor chegar deixaria o placeholder cru"
 
     def test_walker_preenche_placeholder(self):
         """`{version}` so chega ao usuario se o walker souber substituir."""
@@ -2256,12 +2264,13 @@ class TestWebUIRodape:
                 f".{classe} declara display e e usada com o atributo hidden, "
                 f"mas nao tem a guarda .{classe}[hidden]")
 
-    def test_link_do_aviso_aponta_para_o_que_a_checagem_le(self):
-        """O repo cria tags, nao releases: /releases fica vazia."""
+    def test_link_do_aviso_leva_as_notas_da_versao(self):
+        """Fallback na lista de releases; com a versao em maos, a release dela."""
         html = _read_static("index.html")
         aviso = re.search(r'<a class="atualizacao"[^>]*>', html, re.S).group(0)
-        assert "/tags" in aviso, \
-            "link do aviso nao leva as tags, que e o que a checagem compara"
+        assert "/releases" in aviso, "link do aviso nao leva aos releases"
+        assert "RELEASES_URL + '/tag/v' + dados.latest" in html, \
+            "o aviso nao aponta para as notas da versao disponivel"
 
     def test_link_do_aviso_abre_com_seguranca(self):
         """target=_blank sem rel deixa a aba nova com acesso a window.opener."""
@@ -5111,6 +5120,78 @@ class TestVersaoDaImagem:
         texto = _workflow("docker-build.yml")
         assert "GITHUB_REF_TYPE" in texto and "nao casa com __version__" in texto, \
             "o build de tag nao confere a tag contra app/version.py"
+
+
+class TestReleaseAutomatico:
+    """Tag publicada vira GitHub Release com a secao do CHANGELOG."""
+
+    @staticmethod
+    def _secao():
+        import importlib.util
+        caminho = os.path.join(REPO_ROOT, "scripts", "changelog_section.py")
+        spec = importlib.util.spec_from_file_location("changelog_section", caminho)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.secao
+
+    CHANGELOG_FAKE = (
+        "# Changelog\n\n"
+        "## [2.6.0] \u2014 2026-10-10\n\nResumo novo.\n\n### Adicionado\n- coisa nova\n\n"
+        "## [2.5.2] \u2014 2026-10-10\n\nResumo velho.\n\n### Corrigido\n- coisa velha\n"
+    )
+
+    def test_extrai_a_secao_da_versao(self):
+        corpo = self._secao()("2.6.0", self.CHANGELOG_FAKE)
+        assert "Resumo novo." in corpo
+        assert "coisa nova" in corpo
+
+    def test_para_na_versao_seguinte(self):
+        """Senao o release da 2.6.0 traria o changelog inteiro do projeto."""
+        corpo = self._secao()("2.6.0", self.CHANGELOG_FAKE)
+        assert "coisa velha" not in corpo
+        assert "2.5.2" not in corpo
+
+    def test_nao_repete_o_cabecalho(self):
+        """A pagina do release ja mostra versao e data."""
+        corpo = self._secao()("2.6.0", self.CHANGELOG_FAKE)
+        assert not corpo.startswith("## [")
+
+    def test_versao_sem_secao_devolve_nada(self):
+        """Release sem notas e pior que release nenhum: o workflow para."""
+        assert self._secao()("9.9.9", self.CHANGELOG_FAKE) is None
+
+    def test_versao_instalada_tem_secao_no_changelog_real(self):
+        with open(os.path.join(REPO_ROOT, "CHANGELOG.md"), encoding="utf-8") as f:
+            corpo = self._secao()(APP_VERSION, f.read())
+        assert corpo, f"CHANGELOG.md sem secao para {APP_VERSION}: a tag falharia"
+
+    def test_workflow_publica_release_so_em_tag(self):
+        texto = _workflow("docker-build.yml")
+        assert re.search(r"(?m)^  release:", texto), "sem job de release"
+        assert "startsWith(github.ref, 'refs/tags/v')" in texto, \
+            "o release rodaria tambem em push para main"
+
+    def test_release_espera_a_imagem_subir(self):
+        """Release apontando para imagem que nao subiu e pior que nenhum."""
+        texto = _workflow("docker-build.yml")
+        bloco = texto[texto.index("  release:"):]
+        assert "needs: build-and-push" in bloco
+
+    def test_release_usa_a_secao_do_changelog(self):
+        texto = _workflow("docker-build.yml")
+        assert "scripts/changelog_section.py" in texto
+        assert "--notes-file" in texto, "release publicado sem corpo"
+
+    def test_release_tem_permissao_de_escrita(self):
+        """Sem contents: write o gh release create falha com 403."""
+        bloco = _workflow("docker-build.yml")
+        bloco = bloco[bloco.index("  release:"):]
+        assert re.search(r"permissions:\s*\n\s*contents: write", bloco)
+
+    def test_release_confere_que_a_tag_existe(self):
+        """--verify-tag evita o gh criar a tag sozinho a partir do branch."""
+        texto = _workflow("docker-build.yml")
+        assert "--verify-tag" in texto
 
 
 class TestWorkflowTestes:

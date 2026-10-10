@@ -5,6 +5,21 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] — 2026-10-10
+
+Cada tag publicada vira um GitHub Release com as notas desta pagina.
+
+### Adicionado
+- **Release automatico no GitHub a cada tag**, com a secao correspondente do CHANGELOG como corpo. A pagina de releases do projeto estava vazia porque o fluxo criava **tags**, nao releases — e era para ela que o aviso de versao nova apontava.
+- `scripts/changelog_section.py`: extrai a secao de uma versao do CHANGELOG. Ficou como script, e nao como regex dentro do YAML, porque assim a suite testa a extracao contra o CHANGELOG real e um erro falha com mensagem em vez de publicar um release de corpo vazio.
+- O aviso do rodape agora linka direto para as **notas da versao disponivel** (`/releases/tag/vX.Y.Z`) em vez da lista inteira. O `href` do HTML e so o destino de fallback, para antes do JavaScript rodar.
+
+### Notas
+- O job de release usa o `gh`, que ja vem no runner, em vez de uma action de terceiro — uma dependencia a menos na cadeia de publicacao. Roda so em tag (`startsWith(github.ref, 'refs/tags/v')`) e depende do build: release apontando para imagem que nao subiu seria pior que release nenhum.
+- A cadeia de guardas fica completa: a suite exige `app/version.py` == topo do CHANGELOG, o build exige tag == `app/version.py`, e o release exige secao do CHANGELOG para aquela versao.
+- `--verify-tag` impede o `gh` de criar a tag sozinho a partir do branch caso a ref nao exista.
+- Testes: 759 -> **769**. Um teste antigo foi robustecido de quebra: ele delimitava um bloco de JavaScript por janela de 400 caracteres e quebrou ao ganhar uma linha — fragilidade do teste, nao do codigo.
+
 ## [2.5.2] — 2026-10-10
 
 O aviso de versao nova aparecia sempre, com o placeholder cru.

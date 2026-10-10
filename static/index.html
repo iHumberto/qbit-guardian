@@ -462,7 +462,7 @@
          carregamento. O `{version}` e preenchido pelo data-version. -->
     <a class="atualizacao" id="app-update" hidden target="_blank" rel="noopener noreferrer"
        data-i18n="update_available" data-i18n-title="update_tooltip"
-       href="https://github.com/iHumberto/qbit-guardian/tags"></a>
+       href="https://github.com/iHumberto/qbit-guardian/releases"></a>
   </footer>
 </div>
 
@@ -501,6 +501,7 @@
 <script>
 const API = '/api/config';
 const VERSION_API = '/api/version';
+const RELEASES_URL = 'https://github.com/iHumberto/qbit-guardian/releases';
 const DEFAULTS_API = '/api/defaults';
 
 // Titulos/templates padrao e variaveis por evento, servidos pelo backend.
@@ -746,6 +747,9 @@ async function loadVersion() {
     if (dados.update_available && dados.latest) {
       const aviso = document.getElementById('app-update');
       aviso.setAttribute('data-version', 'v' + dados.latest);
+      // Leva direto as notas daquela versao em vez da lista inteira. O href do
+      // HTML e so o destino de fallback, para antes desta linha rodar.
+      aviso.href = RELEASES_URL + '/tag/v' + dados.latest;
       aviso.hidden = false;
       // O walker escreve texto e tooltip no idioma ativo — e volta a escrever
       // sozinho a cada troca de idioma.

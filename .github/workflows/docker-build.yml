@@ -101,3 +101,35 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  # Release no GitHub a cada tag, com a secao do CHANGELOG como corpo.
+  #
+  # Depende do build: release apontando para uma imagem que nao subiu seria
+  # pior do que nao ter release. Usa o `gh`, que ja vem no runner, em vez de
+  # uma action de terceiro — uma dependencia a menos na cadeia de publicacao.
+  release:
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Notas do release (secao do CHANGELOG)
+        id: notas
+        run: |
+          python3 scripts/changelog_section.py "$GITHUB_REF_NAME" > /tmp/notas.md
+          echo "Corpo do release:"
+          cat /tmp/notas.md
+
+      - name: Publicar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file /tmp/notas.md \
+            --verify-tag
