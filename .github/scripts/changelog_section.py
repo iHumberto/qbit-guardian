@@ -3,6 +3,11 @@
 
 Uso: changelog_section.py 2.6.0 [caminho/do/CHANGELOG.md]
 
+Mora em `.github/scripts/` por ser maquinario de publicacao: so roda no runner,
+em push de tag, e nunca sai de la. A pasta `scripts/` da raiz e outra coisa —
+entregavel para o usuario copiar (o hook do qBittorrent), e misturar as duas
+apagaria essa distincao.
+
 Fica como script, e nao como regex dentro do YAML, por dois motivos: a suite
 consegue testar a extracao contra o CHANGELOG real, e um erro aqui falha com
 mensagem em vez de publicar um release com corpo vazio.
@@ -15,7 +20,8 @@ import os
 import re
 import sys
 
-RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# .github/scripts/<arquivo> -> sobe tres niveis para chegar a raiz do repo.
+RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PADRAO = r"(?m)^## \[%s\][^\n]*\n(.*?)(?=^## \[|\Z)"
 
 

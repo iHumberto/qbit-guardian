@@ -121,7 +121,7 @@ jobs:
       - name: Notas do release (secao do CHANGELOG)
         id: notas
         run: |
-          python3 scripts/changelog_section.py "$GITHUB_REF_NAME" > /tmp/notas.md
+          python3 .github/scripts/changelog_section.py "$GITHUB_REF_NAME" > /tmp/notas.md
           echo "Corpo do release:"
           cat /tmp/notas.md
 

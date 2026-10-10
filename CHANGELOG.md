@@ -5,6 +5,22 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] — 2026-10-10
+
+O extrator do CHANGELOG estava na pasta errada.
+
+### Alterado
+- `changelog_section.py` saiu de `scripts/` para **`.github/scripts/`**. A `scripts/` da raiz e pasta de **entregavel do usuario** — o `qbit-guardian-hook.sh` e copiado para a maquina de quem roda o qBittorrent. O extrator e o oposto: so existe em tempo de publicacao, roda no runner e nunca sai de la. Agora fica colado no unico arquivo que o consome.
+
+### Corrigido
+- **A mudanca de pasta quebraria o release em silencio**: o script calculava a raiz do repositorio subindo **dois** niveis a partir do proprio arquivo. De `.github/scripts/` isso aponta para `.github/`, e o `CHANGELOG.md` nao seria encontrado — o workflow chama sem passar caminho. Ajustado para tres niveis, com teste que roda o script como o workflow roda.
+- **O teste que protegia esse caminho nao protegia**: ele afirmava `"scripts/changelog_section.py" in texto`, e o caminho antigo e **substring** do novo — passaria com o arquivo em qualquer um dos dois lugares. Apertado para o caminho completo e conferido contra a versao errada.
+
+### Notas
+- `.github/scripts/**` **nao** entra no filtro de `paths` do build, de proposito: o job de release so roda em push de tag, e tag ignora `paths`. Incluir o caminho republicaria imagem identica a cada ajuste no script — exatamente o problema que a v2.3.2 consertou. Ha teste fixando isso.
+- Testes: 769 -> **772**.
+- De passagem: o `__pycache__` da raiz tinha `guardian.pyc` e `web.pyc` de **2026-06-18**, vespera do commit que criou `app/` (`ef4f5bd`, 2026-06-19). Residuo do layout antigo, nunca versionado, sem fonte correspondente na raiz hoje. Removido junto com o `scripts/__pycache__`, que era resto da suite importando o extrator.
+
 ## [2.6.0] — 2026-10-10
 
 Cada tag publicada vira um GitHub Release com as notas desta pagina.

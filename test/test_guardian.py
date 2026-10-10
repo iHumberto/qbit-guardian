@@ -12,6 +12,7 @@ import contextlib
 import json
 import os
 import re
+import sys
 import tempfile
 import time
 import base64
@@ -5056,7 +5057,8 @@ class TestWorkflowBuild:
             "o build reutiliza o test.yml como gate"
 
     @pytest.mark.parametrize("inerte", ["docs/**", "docs/", "README.md",
-                                        "CHANGELOG.md", "LICENSE", "test/**"])
+                                        "CHANGELOG.md", "LICENSE", "test/**",
+                                        ".github/scripts/**"])
     def test_arquivo_sem_efeito_na_imagem_nao_dispara_build(self, inerte):
         assert inerte not in self._paths_do_build()
 
@@ -5128,7 +5130,7 @@ class TestReleaseAutomatico:
     @staticmethod
     def _secao():
         import importlib.util
-        caminho = os.path.join(REPO_ROOT, "scripts", "changelog_section.py")
+        caminho = os.path.join(REPO_ROOT, ".github", "scripts", "changelog_section.py")
         spec = importlib.util.spec_from_file_location("changelog_section", caminho)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -5178,9 +5180,30 @@ class TestReleaseAutomatico:
         assert "needs: build-and-push" in bloco
 
     def test_release_usa_a_secao_do_changelog(self):
+        """Caminho completo: `scripts/...` e substring de `.github/scripts/...`,
+        entao a assercao frouxa passaria com o arquivo no lugar errado."""
         texto = _workflow("docker-build.yml")
-        assert "scripts/changelog_section.py" in texto
+        assert ".github/scripts/changelog_section.py" in texto
         assert "--notes-file" in texto, "release publicado sem corpo"
+
+    def test_script_mora_no_maquinario_de_ci(self):
+        """`scripts/` da raiz e entregavel do usuario (o hook do qBittorrent);
+        o extrator so roda no runner e nao deve se misturar com ele."""
+        assert os.path.isfile(
+            os.path.join(REPO_ROOT, ".github", "scripts", "changelog_section.py"))
+        assert not os.path.exists(
+            os.path.join(REPO_ROOT, "scripts", "changelog_section.py"))
+
+    def test_script_acha_o_changelog_sozinho(self):
+        """O workflow chama sem passar caminho: a raiz tem de resolver do novo
+        local. Mover a pasta sem ajustar o calculo quebra exatamente aqui."""
+        import subprocess
+        caminho = os.path.join(REPO_ROOT, ".github", "scripts",
+                               "changelog_section.py")
+        r = subprocess.run([sys.executable, caminho, APP_VERSION],
+                           capture_output=True, text=True, cwd=REPO_ROOT)
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip(), "release sairia com corpo vazio"
 
     def test_release_tem_permissao_de_escrita(self):
         """Sem contents: write o gh release create falha com 403."""
