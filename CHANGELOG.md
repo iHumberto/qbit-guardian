@@ -5,6 +5,19 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.2] — 2026-10-10
+
+O aviso de versao nova aparecia sempre, com o placeholder cru.
+
+### Corrigido
+- **O aviso do rodape nunca ficava escondido**, e mostrava `{version} disponivel` mesmo com a versao mais recente instalada. O atributo `hidden` so esconde por causa da regra `[hidden] { display: none }` do **navegador**, que perde para qualquer `display:` declarado na folha de estilo — e o aviso declara `display:inline-block`. Sem a guarda `.atualizacao[hidden]`, o elemento ficava visivel; e como o `applyTranslations()` escreve nele mesmo escondido, o `{version}` sem `data-version` ia para a tela. O `.modal-bg[hidden]` ja existia no arquivo pelo mesmo motivo.
+- O link do aviso aponta para `/tags` em vez de `/releases`: o repositorio cria **tags**, nao releases, entao a pagina de releases fica vazia. `/tags` lista exatamente o que a checagem compara.
+
+### Notas
+- Testes: 756 -> **759**. Um deles e generico: qualquer classe que declare `display:` e seja usada com o atributo `hidden` precisa da guarda `[hidden]`. Os tres foram conferidos contra o codigo bugado.
+- Verificado no navegador nos dois cenarios: sem versao nova o aviso fica com `display:none` e o rodape mostra so `v2.5.2`; com versao nova ele aparece e acompanha a troca de idioma.
+- O backend estava certo o tempo todo (`update_available: false`): o bug era so de apresentacao.
+
 ## [2.5.1] — 2026-10-10
 
 O aviso de versao nova ficava em ingles depois de trocar o idioma.

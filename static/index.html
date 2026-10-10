@@ -59,6 +59,10 @@
   .rodape .atualizacao { display:inline-block; margin-left:8px; padding:1px 8px;
                          border:1px solid var(--line); border-radius:var(--r-pill);
                          color:var(--text); text-decoration:none; }
+  /* O `[hidden]{display:none}` do navegador perde para o display acima — mesmo
+     motivo do `.modal-bg[hidden]`. Sem esta linha o aviso aparece sempre, e com
+     o placeholder cru, porque o applyTranslations() escreve nele mesmo escondido. */
+  .rodape .atualizacao[hidden] { display:none; }
   .rodape .atualizacao:hover { background:var(--card); }
 
   /* ── Cabecalho ── */
@@ -458,7 +462,7 @@
          carregamento. O `{version}` e preenchido pelo data-version. -->
     <a class="atualizacao" id="app-update" hidden target="_blank" rel="noopener noreferrer"
        data-i18n="update_available" data-i18n-title="update_tooltip"
-       href="https://github.com/iHumberto/qbit-guardian/releases"></a>
+       href="https://github.com/iHumberto/qbit-guardian/tags"></a>
   </footer>
 </div>
 

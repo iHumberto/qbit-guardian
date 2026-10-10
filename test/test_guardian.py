@@ -2217,6 +2217,52 @@ class TestWebUIRodape:
         for linha in re.findall(r"update_available: '([^']*)'", js):
             assert "{version}" in linha, f"traducao sem placeholder: {linha!r}"
 
+    def test_aviso_fica_realmente_escondido(self):
+        """Regressao: o aviso aparecia sempre, com o `{version}` cru na tela.
+
+        O atributo `hidden` so esconde por causa da regra `[hidden]{display:none}`
+        do navegador, que perde para qualquer `display:` declarado na folha. Com
+        `display:inline-block` e sem guarda, o elemento fica visivel — e o
+        applyTranslations() escreve nele mesmo escondido, entao o placeholder
+        sem `data-version` vai para a tela.
+        """
+        html = _read_static("index.html")
+        assert re.search(r"\.atualizacao\[hidden\]\s*\{[^}]*display:\s*none", html), \
+            "sem guarda [hidden]: o aviso aparece mesmo sem atualizacao"
+
+    def test_classe_com_display_usada_com_hidden_tem_guarda(self):
+        """A mesma armadilha para qualquer elemento que nasca `hidden`.
+
+        O `.modal-bg[hidden]` ja existia no arquivo pelo mesmo motivo; este
+        teste impede que o proximo elemento escondido repita o erro.
+        """
+        html = _read_static("index.html")
+        classes = set()
+        for tag in re.findall(r"<[a-z]+[^>]*\bhidden\b[^>]*>", html):
+            achado = re.search(r'class="([^"]+)"', tag)
+            if achado:
+                classes.update(achado.group(1).split())
+        assert classes, "nenhum elemento hidden com classe — seletor desatualizado?"
+
+        for classe in sorted(classes):
+            escapada = re.escape(classe)
+            define_display = re.search(
+                r"\.%s\b[^{]*\{[^}]*display:" % escapada, html)
+            if not define_display:
+                continue
+            guarda = re.search(
+                r"\.%s\[hidden\]\s*\{[^}]*display:\s*none" % escapada, html)
+            assert guarda, (
+                f".{classe} declara display e e usada com o atributo hidden, "
+                f"mas nao tem a guarda .{classe}[hidden]")
+
+    def test_link_do_aviso_aponta_para_o_que_a_checagem_le(self):
+        """O repo cria tags, nao releases: /releases fica vazia."""
+        html = _read_static("index.html")
+        aviso = re.search(r'<a class="atualizacao"[^>]*>', html, re.S).group(0)
+        assert "/tags" in aviso, \
+            "link do aviso nao leva as tags, que e o que a checagem compara"
+
     def test_link_do_aviso_abre_com_seguranca(self):
         """target=_blank sem rel deixa a aba nova com acesso a window.opener."""
         html = _read_static("index.html")
