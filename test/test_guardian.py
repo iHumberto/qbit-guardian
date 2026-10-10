@@ -21,6 +21,7 @@ from unittest import mock
 import pytest
 
 import app.guardian as g
+import app.updates as u
 from app.version import __version__ as APP_VERSION
 from app.web import app
 
@@ -2027,6 +2028,109 @@ class TestApiVersion:
         assert "version" not in dados
 
 
+class TestChecagemDeVersao:
+    """Comparacao com a ultima tag publicada — o que alimenta o aviso."""
+
+    @pytest.fixture(autouse=True)
+    def _cache_limpo(self):
+        u.limpar_cache()
+        yield
+        u.limpar_cache()
+
+    @pytest.mark.parametrize("instalada,publicada,espera", [
+        ("2.4.0", "2.5.0", True),
+        ("2.4.0", "2.4.1", True),
+        ("2.4.0", "2.4.0", False),
+        ("2.4.0", "2.0.5", False),      # repo parou de taguear: nao e downgrade
+        ("2.9.0", "2.10.0", True),      # texto diria que 2.10.0 < 2.9.0
+        ("2.4.0+a81f306", "2.4.0", False),  # sufixo de build nao conta
+        ("2.4.0", None, False),         # consulta falhou
+        ("2.4.0", "nightly", False),
+    ])
+    def test_compara_por_numero_nao_por_texto(self, instalada, publicada, espera):
+        assert u.ha_atualizacao(instalada, publicada) is espera
+
+    def test_maior_tag_ignora_o_que_nao_e_versao(self):
+        tags = [{"name": "v2.0.5"}, {"name": "nightly"}, {"name": "v2.10.0"},
+                {"name": "v2.9.0"}]
+        assert u._maior_tag(tags) == "2.10.0"
+
+    def test_sem_tag_valida_devolve_none(self):
+        assert u._maior_tag([{"name": "nightly"}]) is None
+
+    def test_erro_de_rede_vira_desconhecido(self):
+        """Painel de homelab abre sem internet: falha nao pode virar erro."""
+        with mock.patch.object(u.requests, "get",
+                               side_effect=requests.exceptions.ConnectionError("refused")):
+            assert u.ultima_versao() is None
+
+    def test_http_de_erro_vira_desconhecido(self):
+        resp = mock.Mock(status_code=403)
+        with mock.patch.object(u.requests, "get", return_value=resp):
+            assert u.ultima_versao() is None
+
+    def test_cache_evita_consulta_a_cada_pagina(self):
+        resp = mock.Mock(status_code=200)
+        resp.json.return_value = [{"name": "v2.5.0"}]
+        with mock.patch.object(u.requests, "get", return_value=resp) as m:
+            assert u.ultima_versao() == "2.5.0"
+            assert u.ultima_versao() == "2.5.0"
+            assert m.call_count == 1, "consultou a API duas vezes"
+
+    def test_cache_expira(self):
+        resp = mock.Mock(status_code=200)
+        resp.json.return_value = [{"name": "v2.5.0"}]
+        with mock.patch.object(u.requests, "get", return_value=resp) as m:
+            u.ultima_versao(agora=1000.0)
+            u.ultima_versao(agora=1000.0 + u.TTL_SEGUNDOS + 1)
+            assert m.call_count == 2
+
+    def test_desconhecido_tambem_fica_em_cache(self):
+        """Senao uma caixa offline paga o timeout a cada carregamento."""
+        with mock.patch.object(u.requests, "get",
+                               side_effect=requests.exceptions.Timeout("t")) as m:
+            assert u.ultima_versao() is None
+            assert u.ultima_versao() is None
+            assert m.call_count == 1
+
+    def test_consulta_tem_timeout(self):
+        """Sem timeout, a API fora do ar trava o carregamento do painel."""
+        resp = mock.Mock(status_code=200)
+        resp.json.return_value = []
+        with mock.patch.object(u.requests, "get", return_value=resp) as m:
+            u.ultima_versao()
+            assert m.call_args.kwargs.get("timeout") == u.TIMEOUT
+
+
+class TestApiVersionAtualizacao:
+    """/api/version entrega o veredito pronto para o rodape."""
+
+    @pytest.fixture(autouse=True)
+    def _cache_limpo(self):
+        u.limpar_cache()
+        yield
+        u.limpar_cache()
+
+    def test_anuncia_versao_nova(self, client, tmp_config):
+        with mock.patch.object(u, "ultima_versao", return_value="99.0.0"):
+            dados = client.get("/api/version").get_json()
+        assert dados["latest"] == "99.0.0"
+        assert dados["update_available"] is True
+
+    def test_em_dia_nao_anuncia(self, client, tmp_config):
+        with mock.patch.object(u, "ultima_versao", return_value=APP_VERSION):
+            dados = client.get("/api/version").get_json()
+        assert dados["update_available"] is False
+
+    def test_sem_internet_responde_200(self, client, tmp_config):
+        """Nao saber nao e erro: o painel carrega igual."""
+        with mock.patch.object(u, "ultima_versao", return_value=None):
+            r = client.get("/api/version")
+        assert r.status_code == 200
+        assert r.get_json()["latest"] is None
+        assert r.get_json()["update_available"] is False
+
+
 class TestWebUIRodape:
     """Rodape mostra a versao instalada, vinda do backend."""
 
@@ -2050,6 +2154,42 @@ class TestWebUIRodape:
         html = _read_static("index.html")
         assert APP_VERSION not in html, \
             f"versao {APP_VERSION} hardcoded no HTML — deve vir de /api/version"
+
+    def test_aviso_de_versao_nova_existe_escondido(self):
+        """Nasce `hidden`: so aparece quando o backend disser que ha versao nova."""
+        html = _read_static("index.html")
+        aviso = re.search(r'<a class="atualizacao" id="app-update"[^>]*>', html)
+        assert aviso, "sem o elemento do aviso de atualizacao"
+        assert "hidden" in aviso.group(0)
+
+    def test_aviso_fica_ao_lado_da_versao(self):
+        html = _read_static("index.html")
+        rodape = re.search(r"<footer class=\"rodape\">(.*?)</footer>", html, re.S)
+        assert rodape, "sem rodape"
+        assert rodape.group(1).index('id="app-version"') < \
+            rodape.group(1).index('id="app-update"'), \
+            "o aviso precisa vir depois da versao instalada"
+
+    def test_aviso_depende_do_veredito_do_backend(self):
+        html = _read_static("index.html")
+        assert "dados.update_available" in html, \
+            "o HTML decide sozinho se ha atualizacao em vez de usar o backend"
+
+    def test_aviso_usa_i18n(self):
+        """Texto do aviso traduzido — nao pode nascer so em portugues."""
+        html = _read_static("index.html")
+        assert "t('update_available')" in html
+        tables = _i18n_tables()
+        for lang, known in tables.items():
+            assert "update_available" in known, f"{lang} sem update_available"
+            assert "update_tooltip" in known, f"{lang} sem update_tooltip"
+
+    def test_link_do_aviso_abre_com_seguranca(self):
+        """target=_blank sem rel deixa a aba nova com acesso a window.opener."""
+        html = _read_static("index.html")
+        aviso = re.search(r'<a class="atualizacao"[^>]*>', html, re.S).group(0)
+        assert 'target="_blank"' in aviso
+        assert "noopener" in aviso
 
 
 class TestWebUINotifications:

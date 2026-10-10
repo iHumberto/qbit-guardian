@@ -66,7 +66,9 @@ const translations = {
         login_invalid: 'Usu\u00E1rio ou senha inv\u00E1lidos.',
         login_throttled: 'Tentativas demais. Aguarde alguns minutos e tente de novo.',
         login_hint: 'Primeiro acesso? A senha foi gerada no startup e aparece em `docker logs qbit-guardian`.',
-        btn_logout: 'Sair'
+        btn_logout: 'Sair',
+        update_available: '{version} dispon\u00EDvel',
+        update_tooltip: 'Uma vers\u00E3o mais nova foi publicada \u2014 atualize a imagem do container'
     },
     'en-US': {
         title: '\uD83D\uDEE1\uFE0F qbit-guardian',
@@ -128,7 +130,9 @@ const translations = {
         login_invalid: 'Invalid username or password.',
         login_throttled: 'Too many attempts. Wait a few minutes and try again.',
         login_hint: 'First time? The password was generated at startup and shows up in `docker logs qbit-guardian`.',
-        btn_logout: 'Sign out'
+        btn_logout: 'Sign out',
+        update_available: '{version} available',
+        update_tooltip: 'A newer version was published \u2014 update the container image'
     }
 };
 

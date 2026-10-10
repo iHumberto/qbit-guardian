@@ -54,6 +54,12 @@
      informacao de referencia, nao conteudo que compete com os controles. */
   .rodape { margin-top:28px; text-align:center; color:var(--muted); font-size:var(--fs-help); }
   .rodape .versao { letter-spacing:0.02em; }
+  /* O aviso nao usa --accent: aquela cor e reservada a :focus e ao toast de
+     erro. Versao nova nao e erro — destaca com contraste de texto e contorno. */
+  .rodape .atualizacao { display:inline-block; margin-left:8px; padding:1px 8px;
+                         border:1px solid var(--line); border-radius:var(--r-pill);
+                         color:var(--text); text-decoration:none; }
+  .rodape .atualizacao:hover { background:var(--card); }
 
   /* ── Cabecalho ── */
   .topbar { display:flex; justify-content:flex-end; align-items:center; gap:14px; min-height:42px; }
@@ -446,6 +452,8 @@
        seria uma terceira copia para sair de sincronia. -->
   <footer class="rodape">
     <span class="versao" id="app-version"></span>
+    <a class="atualizacao" id="app-update" hidden target="_blank" rel="noopener noreferrer"
+       href="https://github.com/iHumberto/qbit-guardian/releases"></a>
   </footer>
 </div>
 
@@ -723,6 +731,14 @@ async function loadVersion() {
     const dados = await r.json();
     if (dados.version) {
       document.getElementById('app-version').textContent = 'v' + dados.version;
+    }
+    // So aparece quando ha versao nova. `latest` nulo (sem internet, API fora)
+    // mantem o aviso escondido: nao saber nao e motivo para alarme.
+    if (dados.update_available && dados.latest) {
+      const aviso = document.getElementById('app-update');
+      aviso.textContent = t('update_available').replace('{version}', 'v' + dados.latest);
+      aviso.title = t('update_tooltip');
+      aviso.hidden = false;
     }
   } catch (err) {
     // Rodape e informativo: sem versao ele fica vazio, o painel segue util.

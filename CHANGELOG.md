@@ -5,6 +5,22 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] — 2026-10-10
+
+O rodape avisa quando ha versao nova publicada.
+
+### Adicionado
+- **Aviso de versao nova no rodape**, ao lado da versao instalada: `v2.4.0  [v2.5.0 disponivel]`, com link para os releases. Nos dois idiomas.
+- `app/updates.py`: compara a versao instalada com a **maior tag de release** do repositorio. Tag, e nao o label da imagem `:latest`, porque um build de `main` nao e um release — avisar a cada commit viraria ruido que o usuario aprende a ignorar.
+- `/api/version` passa a responder `latest` e `update_available`. O veredito sai pronto do backend: o HTML nao compara versao.
+
+### Notas
+- **A comparacao e por numero, nao por texto.** Em ordem alfabetica `"2.10.0" < "2.9.0"`, o que esconderia exatamente a atualizacao que importa. Ha teste para esse par.
+- **Tag mais velha que o instalado nao vira aviso de downgrade.** Caso real: o repo ficou em `v2.0.5` enquanto o codigo andou ate 2.4.0.
+- **O sufixo de build nao participa da comparacao**: `2.4.0+a81f306` e `2.4.0` sao a mesma versao, senao todo build de `main` se anunciaria como atualizacao de si mesmo.
+- **Falha de rede vira "nao sei", nunca erro na tela**: um painel de homelab precisa abrir sem internet. Resultado em cache por 6h, inclusive o "nao sei" — senao uma caixa offline paga o timeout a cada carregamento de pagina.
+- Testes: 728 -> **752**.
+
 ## [2.4.0] — 2026-10-10
 
 A imagem e a interface passam a dizer qual versao estao rodando.

@@ -19,6 +19,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.exceptions import HTTPException
 import app.guardian as guardian
 from app.version import __version__
+import app.updates as updates
 import app.auth as auth
 from app.logger import get_logger
 
@@ -474,13 +475,22 @@ def api_health():
 @app.route("/api/version")
 @requires_auth
 def api_version():
-    """Versao instalada, para o rodape da Web UI.
+    """Versao instalada e, quando se sabe, a ultima publicada.
 
     Atras de autenticacao de proposito: o /api/health e publico porque o
     healthcheck do container o consome, e anunciar a versao exata para quem
     nao esta logado so ajuda quem procura um alvo com versao conhecida.
+
+    `latest` vem `null` quando a consulta nao deu certo (sem internet, API
+    fora do ar, rate limit). O rodape simplesmente nao mostra aviso nenhum:
+    nao saber se ha versao nova nao e erro que mereca tela.
     """
-    return jsonify({"version": __version__})
+    ultima = updates.ultima_versao()
+    return jsonify({
+        "version": __version__,
+        "latest": ultima,
+        "update_available": updates.ha_atualizacao(__version__, ultima),
+    })
 
 
 @app.route("/api/trigger", methods=["POST"])
