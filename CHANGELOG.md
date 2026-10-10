@@ -5,6 +5,23 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] — 2026-10-10
+
+A imagem e a interface passam a dizer qual versao estao rodando.
+
+### Adicionado
+- `app/version.py` como **fonte unica da versao**. O projeto nao tinha a versao em lugar nenhum do codigo: existia no CHANGELOG e nas tags do git, e nada dentro da imagem sabia dizer qual versao era.
+- **Rodape na Web UI** com a versao instalada, centralizado, alimentado por `/api/version`. O numero **nao** e escrito no HTML: vem do backend, que le a mesma `app/version.py` que o CI usa para etiquetar a imagem, para nao haver uma terceira copia saindo de sincronia.
+- `GET /api/version`, atras de autenticacao. De proposito: o `/api/health`, que o healthcheck do container consome, continua publico **e sem a versao** — anunciar a versao exata para quem nao esta logado so ajuda quem procura alvo com versao conhecida.
+
+### Corrigido
+- **A imagem se anunciava como versao "latest".** O `docker/metadata-action` escreve `org.opencontainers.image.version` a partir do output `version` dele; num push para `main` a unica regra que dispara e `type=raw,value=latest`, entao o label saia literalmente `latest`. O build passa a **sobrescrever** o label com a versao do codigo (os labels do input entram depois dos automaticos, com dedup por chave last-wins).
+- Build de **tag** usa o numero limpo e **falha** quando a tag nao casa com `app/version.py`; build de **main** anexa o commit curto (`2.4.0+abc1234`), para duas imagens consecutivas nao se anunciarem com a mesma versao.
+
+### Notas
+- Testes: 716 -> **728**.
+- Os releases 2.1.0 a 2.3.3 **nunca foram tagueados** — e e por isso que a regra `type=semver` nunca disparava e toda imagem saia de push para `main`.
+
 ## [2.3.3] — 2026-10-07
 
 Modo webhook que nunca funcionou para quem roda o qBittorrent em container.

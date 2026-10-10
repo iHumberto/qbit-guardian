@@ -21,6 +21,7 @@ from unittest import mock
 import pytest
 
 import app.guardian as g
+from app.version import __version__ as APP_VERSION
 from app.web import app
 
 
@@ -1999,6 +2000,56 @@ class TestApiDefaults:
         auth = base64.b64encode(b"admin:secreta").decode()
         r = client.get("/api/defaults", headers={"Authorization": f"Basic {auth}"})
         assert r.status_code == 200
+
+
+class TestApiVersion:
+    """/api/version alimenta o rodape da Web UI."""
+
+    def test_retorna_a_versao_do_codigo(self, client, tmp_config):
+        r = client.get("/api/version")
+        assert r.status_code == 200
+        assert r.get_json()["version"] == APP_VERSION
+
+    def test_exige_autenticacao(self, client, tmp_config):
+        """A versao exata nao e informacao para quem nao esta logado."""
+        cfg = g.load_config()
+        cfg["webui"] = {"user": "admin", "password": "secreta"}
+        g.save_config(cfg)
+        assert client.get("/api/version").status_code == 401
+
+        auth = base64.b64encode(b"admin:secreta").decode()
+        r = client.get("/api/version", headers={"Authorization": f"Basic {auth}"})
+        assert r.status_code == 200
+
+    def test_health_continua_sem_versao(self, client, tmp_config):
+        """O /api/health e publico — nao deve vazar a versao."""
+        dados = client.get("/api/health").get_json()
+        assert "version" not in dados
+
+
+class TestWebUIRodape:
+    """Rodape mostra a versao instalada, vinda do backend."""
+
+    def test_rodape_existe_centralizado(self):
+        html = _read_static("index.html")
+        assert re.search(r'<footer class="rodape">', html), "sem rodape no HTML"
+        assert re.search(r"\.rodape\s*\{[^}]*text-align:center", html), \
+            "rodape sem centralizacao no CSS"
+
+    def test_rodape_tem_o_alvo_da_versao(self):
+        html = _read_static("index.html")
+        assert 'id="app-version"' in html
+
+    def test_rodape_busca_a_versao_na_api(self):
+        html = _read_static("index.html")
+        assert "'/api/version'" in html, "o HTML nao consome /api/version"
+        assert "loadVersion()" in html, "loadVersion nunca e chamada"
+
+    def test_versao_nao_esta_escrita_no_html(self):
+        """Numero no HTML seria uma copia a mais para sair de sincronia."""
+        html = _read_static("index.html")
+        assert APP_VERSION not in html, \
+            f"versao {APP_VERSION} hardcoded no HTML — deve vir de /api/version"
 
 
 class TestWebUINotifications:
@@ -4795,6 +4846,52 @@ class TestWorkflowBuild:
         texto = _workflow("docker-build.yml")
         assert "uses: ./.github/workflows/test.yml" in texto
         assert "needs: test" in texto
+
+
+class TestVersaoDaImagem:
+    """A imagem publicada tem de se anunciar com a versao do codigo.
+
+    Sem isto o label `org.opencontainers.image.version` vinha do
+    metadata-action, que num push para main so tem a tag `latest` para
+    oferecer: a imagem se anunciava como versao "latest" e a notificacao do
+    Watchtower nao tinha o que mostrar alem do digest.
+    """
+
+    @staticmethod
+    def _versao_do_changelog():
+        """Primeira versao listada no CHANGELOG.md (a mais recente)."""
+        with open(os.path.join(REPO_ROOT, "CHANGELOG.md"), encoding="utf-8") as f:
+            achado = re.search(r"(?m)^## \[(\d+\.\d+\.\d+)\]", f.read())
+        assert achado, "CHANGELOG.md sem entrada de versao no formato `## [x.y.z]`"
+        return achado.group(1)
+
+    def test_version_py_e_semver(self):
+        assert re.fullmatch(r"\d+\.\d+\.\d+", APP_VERSION), \
+            f"__version__ = {APP_VERSION!r}: use x.y.z"
+
+    def test_version_py_bate_com_changelog(self):
+        """Duas fontes da mesma verdade: subir uma sem a outra e drift."""
+        assert APP_VERSION == self._versao_do_changelog(), \
+            "app/version.py e o topo do CHANGELOG.md discordam"
+
+    def test_workflow_le_a_versao_do_codigo(self):
+        """O CI nao pode voltar a inventar a versao a partir da tag."""
+        texto = _workflow("docker-build.yml")
+        assert "app/version.py" in texto, \
+            "o build nao le a versao do codigo"
+
+    def test_workflow_sobrescreve_o_label_de_versao(self):
+        """O label automatico do metadata-action e o que precisa ser vencido."""
+        texto = _workflow("docker-build.yml")
+        assert re.search(
+            r"org\.opencontainers\.image\.version=\$\{\{\s*steps\.appver\.outputs\.version\s*\}\}",
+            texto), "o build nao sobrescreve org.opencontainers.image.version"
+
+    def test_workflow_exige_tag_casando_com_o_codigo(self):
+        """Release tagueado com numero diferente do codigo publica versao errada."""
+        texto = _workflow("docker-build.yml")
+        assert "GITHUB_REF_TYPE" in texto and "nao casa com __version__" in texto, \
+            "o build de tag nao confere a tag contra app/version.py"
 
 
 class TestWorkflowTestes:

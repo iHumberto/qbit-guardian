@@ -18,6 +18,7 @@ from flask import Flask, request, jsonify, send_from_directory, Response, redire
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.exceptions import HTTPException
 import app.guardian as guardian
+from app.version import __version__
 import app.auth as auth
 from app.logger import get_logger
 
@@ -468,6 +469,18 @@ def api_defaults():
 @app.route("/api/health")
 def api_health():
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/version")
+@requires_auth
+def api_version():
+    """Versao instalada, para o rodape da Web UI.
+
+    Atras de autenticacao de proposito: o /api/health e publico porque o
+    healthcheck do container o consome, e anunciar a versao exata para quem
+    nao esta logado so ajuda quem procura um alvo com versao conhecida.
+    """
+    return jsonify({"version": __version__})
 
 
 @app.route("/api/trigger", methods=["POST"])

@@ -53,6 +53,32 @@ jobs:
           username: ihumberto
           password: ${{ secrets.GHCR_TOKEN }}
 
+      # A versao da imagem sai do codigo, nao do nome da tag do git. Sem isto o
+      # metadata-action usa a sua propria "version" — que num push para main e
+      # a string `latest` — e a imagem se anuncia como versao "latest".
+      #
+      # Build de tag: usa o numero limpo e exige que a tag case com o codigo.
+      # Build de main: anexa o commit curto, para duas imagens consecutivas
+      # nao se anunciarem com a mesma versao.
+      - name: Versao da aplicacao
+        id: appver
+        run: |
+          v=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' app/version.py)
+          if [ -z "$v" ]; then
+            echo "::error file=app/version.py::sem __version__ legivel"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "$tag" != "$v" ]; then
+              echo "::error::tag $GITHUB_REF_NAME nao casa com __version__ $v"
+              exit 1
+            fi
+            echo "version=$v" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$v+${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
@@ -61,6 +87,11 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
+          # Sobrescreve o label gerado pela action: os labels do input entram
+          # depois dos automaticos e a deduplicacao por chave e last-wins
+          # (metadata-action, src/meta.ts > getOCIAnnotationsWithCustoms).
+          labels: |
+            org.opencontainers.image.version=${{ steps.appver.outputs.version }}
 
       - name: Build and push multi-arch
         uses: docker/build-push-action@v6

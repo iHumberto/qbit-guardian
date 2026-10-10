@@ -49,6 +49,12 @@
 
   .container { width:100%; max-width:calc(var(--col) * 3 + var(--gutter) * 2); margin:0 auto; }
 
+  /* ── Rodape ──
+     Centralizado na mesma grade dos cards. `--muted` porque a versao e
+     informacao de referencia, nao conteudo que compete com os controles. */
+  .rodape { margin-top:28px; text-align:center; color:var(--muted); font-size:var(--fs-help); }
+  .rodape .versao { letter-spacing:0.02em; }
+
   /* ── Cabecalho ── */
   .topbar { display:flex; justify-content:flex-end; align-items:center; gap:14px; min-height:42px; }
 
@@ -434,6 +440,13 @@
   <div class="btn-row">
     <button class="btn-save" onclick="saveConfig()" data-i18n="btn_save">💾 Salvar Configurações</button>
   </div>
+
+  <!-- A versao nao e escrita aqui: vem de /api/version, que le a mesma
+       app/version.py que o CI usa para etiquetar a imagem. Numero no HTML
+       seria uma terceira copia para sair de sincronia. -->
+  <footer class="rodape">
+    <span class="versao" id="app-version"></span>
+  </footer>
 </div>
 
 <!-- Modal de credenciais. A senha atual e sempre exigida: e a prova de
@@ -470,6 +483,7 @@
 <script src="/i18n.js"></script>
 <script>
 const API = '/api/config';
+const VERSION_API = '/api/version';
 const DEFAULTS_API = '/api/defaults';
 
 // Titulos/templates padrao e variaveis por evento, servidos pelo backend.
@@ -702,8 +716,22 @@ credForm.addEventListener('submit', async e => {
   }
 });
 
+async function loadVersion() {
+  try {
+    const r = await fetch(VERSION_API);
+    if (!r.ok) return;
+    const dados = await r.json();
+    if (dados.version) {
+      document.getElementById('app-version').textContent = 'v' + dados.version;
+    }
+  } catch (err) {
+    // Rodape e informativo: sem versao ele fica vazio, o painel segue util.
+  }
+}
+
 initI18N();
 loadConfig();
+loadVersion();
 </script>
 </body>
 </html>
