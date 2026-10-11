@@ -76,7 +76,21 @@ NOTIFICATION_VARIABLES = {
 
 # ── Config loader ──────────────────────────────────────────────────────
 _config = None
+_config_mtime = None
 _config_lock = threading.Lock()
+
+
+def _marca_mtime():
+    """Registra o mtime do config.json recem-lido/escrito.
+
+    Guardar isso e o que permite ao `get_config` saber que o arquivo mudou por
+    fora (edicao manual, outro processo) sem reler o JSON a cada chamada.
+    """
+    global _config_mtime
+    try:
+        _config_mtime = os.path.getmtime(CONFIG_PATH)
+    except OSError:
+        _config_mtime = None
 
 
 def load_config():
@@ -125,18 +139,40 @@ def load_config():
             with open(CONFIG_PATH, "w") as f:
                 json.dump(default, f, indent=2)
             _config = default
+            _marca_mtime()
             log.info("config.json criado com valores default — configure pela Web UI")
             return _config
         with open(CONFIG_PATH, "r") as f:
             _config = json.load(f)
+        _marca_mtime()
     return _config
 
 
 def get_config():
-    """Retorna config em cache ou recarrega."""
+    """Retorna a config, recarregando quando o arquivo mudou no disco.
+
+    Antes isto devolvia o cache e so tocava o disco com `_config is None`.
+    Consequencia: edicao feita no `config.json` fora da Web UI nao surtia
+    efeito nenhum ate reiniciar o container — e o loop trazia o comentario
+    "Recarrega config a cada iteracao para detectar mudancas no intervalo",
+    descrevendo uma recarga que nao acontecia. Mudanca pela Web UI funcionava
+    porque `save_config` atualiza o cache, o que escondia o defeito.
+
+    A invalidacao e por `mtime`, nao por releitura cega: `stat` e ordens de
+    grandeza mais barato que abrir e parsear o JSON, e isto e chamado uma vez
+    por torrent em `analyze_torrent`/`is_stalled`. Com o arquivo parado — o
+    caso normal — o custo e uma syscall por chamada.
+    """
     global _config
     if _config is None:
         return load_config()
+    try:
+        if os.path.getmtime(CONFIG_PATH) != _config_mtime:
+            return load_config()
+    except OSError:
+        # arquivo sumiu ou ilegivel: segue com o que esta em memoria, que e
+        # melhor que estourar no meio de um ciclo
+        pass
     return _config
 
 
@@ -148,6 +184,9 @@ def save_config(data):
             json.dump(data, f, indent=2)
         global _config
         _config = data
+        # sem isto, a propria gravacao pela Web UI deixaria o cache "velho"
+        # aos olhos do get_config, forcando uma releitura inutil em seguida
+        _marca_mtime()
 
 
 # ── qBitTorrent session ────────────────────────────────────────────────
@@ -924,6 +963,7 @@ def guardian_loop():
             pass
 
         # Recarrega config a cada iteracao para detectar mudancas no intervalo
+        # (`get_config` invalida o cache por mtime — ver a funcao)
         cfg = get_config()
         interval = cfg["guardian"].get("check_interval_seconds", 300)
         if interval == 0:

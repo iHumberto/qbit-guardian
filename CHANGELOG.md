@@ -5,6 +5,24 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.2] — 2026-10-11
+
+Editar o `config.json` na mao passa a valer sem reiniciar o container.
+
+### Corrigido
+- **`get_config()` devolvia o cache e so tocava o disco com `_config is None`.** Consequencia: ajustar qualquer coisa no `config.json` fora da Web UI nao surtia efeito ate reiniciar o container — e o loop trazia o comentario *"Recarrega config a cada iteracao para detectar mudancas no intervalo"*, descrevendo uma recarga que nao acontecia. Mudanca pela Web UI funcionava porque `save_config` atualiza o cache, o que escondia o defeito. Agora o cache e invalidado por **`mtime`**: `stat` e ordens de grandeza mais barato que abrir e parsear o JSON, e isto e chamado uma vez por torrent em `analyze_torrent`/`is_stalled` — com o arquivo parado, o custo e uma syscall.
+
+### Notas
+- A correcao ficou dentro do `get_config()` de proposito, em vez de trocar as chamadas nos loops por `load_config()`. Trocar nos loops teria duas consequencias ruins: reler e parsear o JSON a cada ciclo mesmo sem mudanca, e **quebrar o `_LoopHarness` da suite**, que encerra `guardian_loop` interceptando `get_config` — com o loop consultando outra funcao, ele nunca sairia, e a suite passava de 29 s para travada. Invalidar por mtime corrige na raiz sem mexer em interface nenhuma.
+- `load_config` e `save_config` passam a registrar o mtime; sem isso a propria gravacao pela Web UI deixaria o cache "velho" aos olhos do `get_config`, forcando uma releitura inutil em seguida.
+- Falha de `stat` (arquivo removido ou ilegivel) nao interrompe o ciclo: segue com o que esta em memoria.
+
+### Testes
+- 784 -> **787**. Cobrem os dois lados do contrato: com o arquivo parado, `get_config()` **nao** dispara releitura (o caminho quente continua barato); com o arquivo alterado por fora, a mudanca e vista sem restart.
+- **Dois testes do loop de reavaliacao foram blindados.** Eles chamavam `_reevaluate_loop()` — que tem `while True` — contando apenas com a leitura da config para sair. Se essa leitura falhasse, o loop entrava em `wait(300)`, estourava no ciclo com um mock nao-iteravel, caia no `except Exception` e **voltava ao laco**, girando indefinidamente com o pytest pendurado. Agora o `wait` e mockado para devolver `True`, o que serve de rede de seguranca e de assercao ao mesmo tempo: se o loop chegou a esperar, nao saiu pelo caminho previsto e o teste falha.
+- Removidos tres testes redundantes que cobriam exatamente a mesma releitura de config.
+- `conftest` passa a limpar o `Event` `_parar_reevaluate` entre testes: era global de modulo e vazava, podendo encerrar o loop do teste seguinte na primeira espera sem deixar rastro do motivo.
+
 ## [2.7.1] — 2026-10-11
 
 A prioridade dos arquivos voltou a ser aplicada em torrent que entra na fila sem metadados.

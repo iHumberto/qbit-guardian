@@ -3347,14 +3347,82 @@ class TestReavaliacaoPeriodica:
         cfg["guardian"]["reevaluate_interval_seconds"] = "nao-numero"
         assert g._reevaluate_interval(cfg) == 300, "valor invalido cai no default"
 
+    # ── cache de config: invalidacao por mtime ─────────────────────────
+
+    def test_get_config_serve_cache_enquanto_o_arquivo_nao_muda(self, tmp_config):
+        """O caminho quente nao pode reler o JSON a cada chamada.
+
+        `get_config()` e chamado uma vez por torrent em `analyze_torrent` e
+        `is_stalled`. Com o arquivo parado, o custo precisa ser so o `stat` da
+        checagem de mtime — nunca abrir e parsear o arquivo.
+        """
+        g.load_config()
+        with mock.patch.object(g, "load_config") as m_load:
+            for _ in range(5):
+                g.get_config()
+        assert not m_load.called, "arquivo parado nao deve disparar releitura"
+
+    def test_get_config_recarrega_quando_o_arquivo_muda_por_fora(self, tmp_config):
+        """Edicao fora da Web UI passa a valer sem restart.
+
+        Era o defeito: `get_config()` devolvia o cache e so tocava o disco com
+        `_config is None`, entao editar o `config.json` na mao nao surtia efeito
+        nenhum ate reiniciar o container. Mudanca pela Web UI funcionava porque
+        `save_config` atualiza o cache — o que escondia o problema.
+        """
+        cfg = g.load_config()
+        cfg["guardian"]["reevaluate_interval_seconds"] = 300
+        g.save_config(cfg)
+        assert g.get_config()["guardian"]["reevaluate_interval_seconds"] == 300
+
+        # edicao externa: escreve direto no arquivo, sem passar por save_config
+        with open(g.CONFIG_PATH) as f:
+            bruto = json.load(f)
+        bruto["guardian"]["reevaluate_interval_seconds"] = 7
+        with open(g.CONFIG_PATH, "w") as f:
+            json.dump(bruto, f)
+        os.utime(g.CONFIG_PATH, (0, 0))   # mtime distinto, sem depender da resolucao do FS
+
+        assert g.get_config()["guardian"]["reevaluate_interval_seconds"] == 7, \
+            "mudanca no arquivo precisa ser vista sem restart"
+
+    def test_loop_ve_intervalo_alterado_por_fora(self, tmp_config):
+        """O loop encerra ao ler do arquivo um intervalo 0 que o cache nao tinha."""
+        cfg = g.load_config()
+        cfg["guardian"]["reevaluate_interval_seconds"] = 300
+        g.save_config(cfg)
+
+        with open(g.CONFIG_PATH) as f:
+            bruto = json.load(f)
+        bruto["guardian"]["reevaluate_interval_seconds"] = 0
+        with open(g.CONFIG_PATH, "w") as f:
+            json.dump(bruto, f)
+        os.utime(g.CONFIG_PATH, (0, 0))
+
+        with mock.patch.object(g._parar_reevaluate, "wait", return_value=True) as m_wait, \
+             mock.patch.object(g, "get_torrents") as m_get:
+            g._reevaluate_loop()
+        assert not m_wait.called, "deveria sair pelo intervalo 0 lido do arquivo"
+        assert not m_get.called
+
     def test_intervalo_zero_encerra_o_loop(self, tmp_config):
         """Com 0 o loop sai em vez de girar — e nao chama o qBittorrent."""
         cfg = g.load_config()
         cfg["guardian"]["reevaluate_interval_seconds"] = 0
         g.save_config(cfg)
-        with mock.patch.object(g, "get_torrents") as m_get:
+        # O mock do `wait` e rede de seguranca E asercao: `_reevaluate_loop` tem
+        # `while True`, e a unica saida natural aqui e o `intervalo <= 0`. Com o
+        # wait devolvendo True, o loop encerra mesmo se a leitura da config
+        # falhar — em vez de girar a cada 300s com o pytest pendurado. E se o
+        # wait tiver sido chamado, o teste falha: significa que nao saiu pelo
+        # caminho do intervalo zero.
+        with mock.patch.object(g._parar_reevaluate, "wait", return_value=True) as m_wait, \
+             mock.patch.object(g, "get_torrents") as m_get:
             g._reevaluate_loop()
+        assert not m_wait.called, "deveria sair antes de esperar, pelo intervalo 0"
         assert not m_get.called
+
+
 
 
 # ── Corpo do guardian_loop ─────────────────────────────────────────────

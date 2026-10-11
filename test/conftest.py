@@ -29,6 +29,9 @@ def reset_guardian_globals():
         g._check_count = 0
         g._qbit_session = None
         g._qbit_base = None
+        # Event de modulo: se um teste o deixa setado, o loop de reavaliacao do
+        # teste seguinte encerra na primeira espera e o motivo fica invisivel.
+        g._parar_reevaluate.clear()
 
     _limpar()
     yield
