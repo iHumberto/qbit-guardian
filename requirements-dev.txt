@@ -2,4 +2,6 @@
 # o Dockerfile instala apenas requirements.txt.
 -r requirements.txt
 pytest>=8.0
+# Rede de seguranca para os `while True` do guardian: ver pytest.ini
+pytest-timeout>=2.3
 coverage>=7.0

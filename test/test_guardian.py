@@ -5495,3 +5495,43 @@ class TestWorkflowTestes:
 
     def test_exposto_para_reuso(self):
         assert re.search(r"(?m)^  workflow_call:", _workflow("test.yml"))
+
+
+class TestTimeoutDaSuite:
+    """A suite precisa de teto de tempo por teste.
+
+    O codigo tem `while True` (`guardian_loop`, `_reevaluate_loop`) e a suite os
+    chama. Um teste cuja condicao de parada falhe entra em espera, cai no
+    `except Exception` do ciclo e volta ao laco — ficando pendurado ate alguem
+    notar, em vez de falhar. Ja aconteceu: trocar `get_config` por
+    `load_config` nos loops deixou o `_LoopHarness` sem efeito e levou a suite
+    de 29 s para travada.
+    """
+
+    def _ler(self, nome):
+        with open(os.path.join(REPO_ROOT, nome), encoding="utf-8") as f:
+            return f.read()
+
+    def test_pytest_ini_define_timeout_por_teste(self):
+        ini = self._ler("pytest.ini")
+        m = re.search(r"(?m)^\s*timeout\s*=\s*(\d+)", ini)
+        assert m, "pytest.ini sem `timeout`: a suite volta a poder pendurar"
+        segundos = int(m.group(1))
+        # A suite inteira roda em ~29 s e nenhum teste passa de 1 s. Teto baixo
+        # demais tornaria a suite instavel em maquina lenta; alto demais deixa o
+        # travamento passar por lentidao.
+        assert 20 <= segundos <= 120, \
+            f"timeout = {segundos}s esta fora da faixa util"
+
+    def test_pytest_timeout_declarado_em_dev(self):
+        assert "pytest-timeout" in self._ler("requirements-dev.txt"), \
+            "o teto de tempo depende do plugin; declare-o em requirements-dev.txt"
+
+    def test_pytest_timeout_fora_da_imagem(self):
+        """Dependencia de teste nao entra no runtime.
+
+        O `requirements.txt` e o que o Dockerfile instala. Plugin de pytest ali
+        engorda a imagem do RPi sem servir para nada em producao.
+        """
+        assert "pytest" not in self._ler("requirements.txt").lower(), \
+            "requirements.txt (runtime) nao deve conter dependencia de teste"

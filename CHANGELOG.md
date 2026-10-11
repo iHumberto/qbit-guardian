@@ -5,6 +5,18 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Nao lancado]
+
+Mudancas de infraestrutura de teste. **Nao geram release**: nao tocam nada que o Dockerfile copia, logo a imagem publicada seria identica — e taguear republicaria no GHCR, fazendo o Watchtower trocar o container em producao por nada (o problema que a v2.3.2 consertou). Entram na proxima release que mexer em codigo.
+
+### Adicionado
+- **`pytest-timeout` com teto de 45 s por teste** (`pytest.ini`, `requirements-dev.txt`). O codigo tem `while True` (`guardian_loop`, `_reevaluate_loop`) e a suite os chama: um teste cuja condicao de parada falhe entra em espera, cai no `except Exception` do ciclo e volta ao laco, ficando **pendurado** em vez de falhar. Ja aconteceu — trocar `get_config` por `load_config` nos loops deixou o `_LoopHarness` sem efeito e levou a suite de 29 s para travada. A suite inteira roda em ~29 s e nenhum teste passa de 1 s, entao 45 s nao incomoda teste legitimo. Validado com um teste descartavel que dorme 50 s: `Failed: Timeout (>45.0s) from pytest-timeout` em 45,01 s.
+- Testes de paridade da propria rede de seguranca: `pytest.ini` precisa declarar `timeout` dentro de uma faixa util, o plugin precisa estar em `requirements-dev.txt`, e **nao** pode estar em `requirements.txt` (dependencia de teste nao engorda a imagem do RPi).
+
+### Corrigido
+- **Vazamento de threads na suite, introduzido na v2.7.0.** `guardian_loop` em modo webhook chama `_start_reevaluate_loop`, e cinco testes exercitam esse caminho — mas so um mockava a funcao. Os outros quatro deixavam para tras uma thread daemon parada em `Event.wait()`, que sobrevivia ao teste, podia acordar quando outro teste setava o Event e estourava ao encontrar o `CONFIG_PATH` do temporario ja removido. Aparecia como `PytestUnhandledThreadExceptionWarning` **intermitente** — flaky porque dependia da ordem de execucao. O `conftest` passa a neutralizar a criacao da thread por default; quem precisa verificar que o loop subiu faz seu proprio patch.
+- Testes: 787 -> **790**. Tres rodadas consecutivas sem nenhum warning.
+
 ## [2.7.2] — 2026-10-11
 
 Editar o `config.json` na mao passa a valer sem reiniciar o container.

@@ -39,6 +39,23 @@ def reset_guardian_globals():
 
 
 @pytest.fixture(autouse=True)
+def nao_sobe_thread_de_reavaliacao(monkeypatch):
+    """Impede que os testes criem a thread real do loop de reavaliacao.
+
+    `guardian_loop` em modo webhook chama `_start_reevaluate_loop`, e varios
+    testes exercitam esse caminho. Sem isto, cada um deixa para tras uma thread
+    daemon parada em `Event.wait()`: ela sobrevive ao teste, pode acordar quando
+    outro teste seta o Event e entao estoura ao encontrar o CONFIG_PATH do
+    temporario ja removido. Aparecia como PytestUnhandledThreadExceptionWarning
+    intermitente — flaky, porque depende da ordem em que os testes rodam.
+
+    Quem precisa verificar que o loop foi iniciado faz seu proprio patch e
+    inspeciona a chamada; quem so passa pelo caminho nao paga uma thread.
+    """
+    monkeypatch.setattr(g, "_start_reevaluate_loop", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def protege_config_do_repositorio():
     """Falha o teste que gravar no config.json versionado.
 
