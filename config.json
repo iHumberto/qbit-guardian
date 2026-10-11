@@ -13,6 +13,7 @@
   },
   "guardian": {
     "check_interval_seconds": 300,
+    "reevaluate_interval_seconds": 300,
     "retry_interval_seconds": 120,
     "valid_media_extensions": [
       ".mkv",

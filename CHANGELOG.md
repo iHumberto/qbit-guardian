@@ -5,6 +5,24 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] — 2026-10-11
+
+Torrent na fila deixa de ser confundido com torrent sem seeders, e o modo webhook volta a reavaliar stalled sozinho.
+
+### Corrigido
+- **`queuedDL` saiu do criterio de remocao por "sem seeds".** Um torrent na fila nao conectou ao tracker, logo `num_complete == 0` nele significa "ainda nao perguntei", nao "nao existem seeders". Com `MaxActiveDownloads` baixo e a fila cheia, o guardian considerava sem-seeds todo download que ainda nao tinha tido a vez: em producao, **51 de 54** torrents enfileirados se qualificavam para remocao de uma vez. E como a remocao chama `block_and_search`, o Radarr marcaria falha e buscaria outro release — com `autoRedownloadFailed`, um ciclo.
+- **O limiar de tempo media a IDADE do torrent, nao o tempo parado.** `added_on` no lugar de `last_activity` invertia a regra: um torrent baixado ha semanas que perdeu os seeders agora era removido de imediato, e um adicionado ha cinco minutos e parado desde o inicio nunca era. Novo helper `tempo_parado()` usa `last_activity` — o campo que o qBittorrent atualiza a cada chunk — com `added_on` como fallback.
+- **Em modo webhook (`check_interval_seconds: 0`) nada era reavaliado.** O "pass 2", que reavalia stalled/sem-seeds de todos os torrents, vivia apenas dentro do loop (que o modo webhook nao executa) e no handler de `/api/trigger` — e o trigger e disparado pelo hook do qBittorrent ao **adicionar** torrent. Consequencia: sem torrent novo entrando, um torrent que ficava stalled nunca era reavaliado, independente do limiar configurado.
+
+### Adicionado
+- **`guardian.reevaluate_interval_seconds`** (padrao `300`, `0` desliga): ritmo do pass 2, agora separado do `check_interval_seconds`. O que o modo webhook evita e o ciclo **completo** — `analyze_torrent` faz uma chamada HTTP por torrent sem metadados, e com a fila cheia isso vira dezenas de requisicoes por ciclo. O pass 2 nao tem esse custo: uma chamada (`get_torrents`) e o resto e leitura de JSON. Em modo webhook o guardian sobe um loop proprio so para ele.
+
+### Notas
+- A espera do loop novo usa `Event.wait()` em vez de `time.sleep()`: fica interrompivel e nao se confunde com o sleep do retry de conexao, que a suite verifica isoladamente.
+- Com `last_activity` **e** `added_on` zerados o torrent segue tratado como muito antigo, e nao como recem-visto — comportamento preservado de proposito, porque parte da suite usa `"added_on": 0` como atalho para "antigo". Na pratica o qBittorrent sempre preenche os dois: nos 53 torrents medidos em producao, nenhum vinha sem.
+- `remove_stalled` nao mudou de escopo: segue alcancando `stalledDL`, `stalledUP` e `metaDL`, e `check_stalled_and_remove` continua pulando estados UP (download concluido em seeding nao e removido).
+- Testes: 774 -> **781**.
+
 ## [2.6.2] — 2026-10-10
 
 `latest` passa a significar "ultima release", e a versao publicada para de oscilar.

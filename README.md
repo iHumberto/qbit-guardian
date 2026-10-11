@@ -136,6 +136,7 @@ All settings live in `config.json` and can be edited through the Web UI or direc
   },
   "guardian": {
     "check_interval_seconds": 300,
+    "reevaluate_interval_seconds": 300,
     "retry_interval_seconds": 120,
     "valid_media_extensions": [
       ".mkv",
@@ -206,7 +207,7 @@ All settings live in `config.json` and can be edited through the Web UI or direc
 | **qbit**        | `url` (scheme + host + port), `api_key` — connection to your qBittorrent instance |
 | **sonarr**      | `url`, `api_key` — optional, leave blank to disable                      |
 | **radarr**      | `url`, `api_key` — optional, leave blank to disable                      |
-| **guardian**    | `check_interval_seconds` (0 = webhook mode), `retry_interval_seconds`, extension lists, stalled/seedless rules, file priorities |
+| **guardian**    | `check_interval_seconds` (0 = webhook mode), `reevaluate_interval_seconds` (how often stalled/seedless is re-checked — this is the only periodic work left in webhook mode; 0 disables it), `retry_interval_seconds`, extension lists, stalled/seedless rules, file priorities |
 | **notifications** | `apprise_url` — Apprise-compatible URL (see [Apprise docs](https://github.com/caronc/apprise)) |
 | **webui**       | `user`, `password`, `secret_key` — provisioned on first startup. The password is stored as a PBKDF2 hash; `secret_key` signs the session cookie |
 

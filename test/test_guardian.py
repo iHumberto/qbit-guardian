@@ -174,6 +174,62 @@ class TestIsStalled:
         stalled, reason = g.is_stalled(t, cfg)
         assert not stalled
 
+    # ── regressao: fila nao e "sem seeds" ──────────────────────────────
+
+    def test_queued_nunca_removido_por_sem_seeds(self, tmp_config):
+        """`queuedDL` fora do criterio de sem-seeds.
+
+        Um torrent na fila nao conectou ao tracker, logo `num_complete == 0`
+        nele significa "ainda nao perguntei", nao "nao existem seeders". Com
+        MaxActiveDownloads baixo e a fila cheia, incluir esse estado removia em
+        massa downloads que nunca tiveram chance de comecar — foi o que
+        aconteceu com 51 de 54 torrents enfileirados em producao.
+        """
+        cfg = g.load_config()
+        cfg["guardian"]["remove_no_seeds"] = True
+        cfg["guardian"]["no_seeds_time"] = 15
+        cfg["guardian"]["no_seeds_unit"] = "minutes"
+        g.save_config(cfg)
+        antigo = time.time() - 7200
+        t = self.make_torrent("queuedDL", antigo, num_complete=0)
+        assert not g.is_stalled(t, cfg)[0]
+        # os estados que de fato tentaram conectar seguem valendo
+        assert g.is_stalled(self.make_torrent("downloading", antigo, num_complete=0), cfg)[0]
+        assert g.is_stalled(self.make_torrent("stalledDL", antigo, num_complete=0), cfg)[0]
+
+    # ── regressao: tempo parado != idade do torrent ────────────────────
+
+    def test_usa_last_activity_e_nao_a_idade_do_torrent(self, tmp_config):
+        """O limiar mede tempo PARADO, nao idade.
+
+        Com `added_on`, um torrent baixado a semanas e que parou agora era
+        removido de imediato, e um recem-adicionado e parado desde o inicio
+        nunca era. `last_activity` inverte isso para o lado certo.
+        """
+        cfg = g.load_config()
+        cfg["guardian"]["remove_stalled"] = True
+        cfg["guardian"]["stalled_time"] = 1
+        cfg["guardian"]["stalled_unit"] = "hours"
+        g.save_config(cfg)
+
+        # antigo, mas transferiu algo ha 1 minuto -> NAO deve ser removido
+        t = self.make_torrent("stalledDL", time.time() - 7 * 86400)
+        t["last_activity"] = time.time() - 60
+        assert not g.is_stalled(t, cfg)[0]
+
+        # recente, porem sem transferir nada ha 2 horas -> deve ser removido
+        t2 = self.make_torrent("stalledDL", time.time() - 300)
+        t2["last_activity"] = time.time() - 7200
+        assert g.is_stalled(t2, cfg)[0]
+
+    def test_tempo_parado_cai_para_added_on(self, tmp_config):
+        """Sem `last_activity`, o calculo usa `added_on`."""
+        agora = time.time()
+        t = {"added_on": agora - 3600}
+        assert 3590 <= g.tempo_parado(t) <= 3610
+        t2 = {"added_on": agora - 3600, "last_activity": agora - 120}
+        assert 110 <= g.tempo_parado(t2) <= 130
+
 
 # ── analyze_torrent ────────────────────────────────────────────────────
 
@@ -3190,6 +3246,61 @@ class TestPassDoisContagem:
 
         assert r.get_json()["new"] == 0
         assert avaliados == ["a", "b", "c"]
+
+
+# ── reavaliacao periodica em modo webhook ──────────────────────────────
+
+class TestReavaliacaoPeriodica:
+    """O modo webhook tambem precisa reavaliar stalled sozinho.
+
+    Era o furo: o Pass 2 rodava no ciclo completo e dentro de /api/trigger, e
+    o trigger e disparado pelo hook do qBittorrent ao ADICIONAR torrent. Com
+    `check_interval_seconds: 0` e nenhum torrent novo entrando, um torrent que
+    ficava stalled nunca era reavaliado — ficava parado indefinidamente,
+    independente do limiar configurado.
+    """
+
+    TORRENTS = [{"hash": "a", "name": "A"}, {"hash": "b", "name": "B"}]
+
+    def test_modo_webhook_sobe_o_loop_de_reavaliacao(self, tmp_config):
+        cfg = g.load_config()
+        cfg["guardian"]["check_interval_seconds"] = 0
+        g.save_config(cfg)
+        with mock.patch.object(g, "qbit_login"), \
+             mock.patch.object(g, "write_heartbeat"), \
+             mock.patch.object(g, "_start_reevaluate_loop") as m_loop:
+            g.guardian_loop()
+        assert m_loop.called, "modo webhook deve subir a reavaliacao periodica"
+
+    def test_reevaluate_stalled_avalia_todos_e_conta(self, tmp_config):
+        avaliados = []
+
+        def fake(t):
+            avaliados.append(t["hash"])
+            return t["hash"] == "b"
+
+        with mock.patch.object(g, "get_torrents", return_value=self.TORRENTS), \
+             mock.patch.object(g, "check_stalled_and_remove", side_effect=fake):
+            assert g.reevaluate_stalled() == 1
+        assert avaliados == ["a", "b"]
+
+    def test_intervalo_le_config_e_aceita_zero(self, tmp_config):
+        cfg = g.load_config()
+        cfg["guardian"]["reevaluate_interval_seconds"] = 90
+        assert g._reevaluate_interval(cfg) == 90
+        cfg["guardian"]["reevaluate_interval_seconds"] = 0
+        assert g._reevaluate_interval(cfg) == 0
+        cfg["guardian"]["reevaluate_interval_seconds"] = "nao-numero"
+        assert g._reevaluate_interval(cfg) == 300, "valor invalido cai no default"
+
+    def test_intervalo_zero_encerra_o_loop(self, tmp_config):
+        """Com 0 o loop sai em vez de girar — e nao chama o qBittorrent."""
+        cfg = g.load_config()
+        cfg["guardian"]["reevaluate_interval_seconds"] = 0
+        g.save_config(cfg)
+        with mock.patch.object(g, "get_torrents") as m_get:
+            g._reevaluate_loop()
+        assert not m_get.called
 
 
 # ── Corpo do guardian_loop ─────────────────────────────────────────────

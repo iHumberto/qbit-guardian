@@ -90,6 +90,7 @@ def load_config():
                 "radarr": {"url": "", "api_key": ""},
                 "guardian": {
                     "check_interval_seconds": 300,
+                    "reevaluate_interval_seconds": 300,
                     "retry_interval_seconds": 120,
                     "valid_media_extensions": [
                         ".mkv", ".mp4", ".avi", ".mov", ".m4v",
@@ -501,28 +502,52 @@ def block_and_search(torrent_hash, torrent_name):
 
 # ── Analise de torrent ─────────────────────────────────────────────────
 
+def tempo_parado(torrent):
+    """Segundos desde a ultima transferencia real do torrent.
+
+    `added_on` mede a IDADE do torrent, nao o tempo parado, e usar um no lugar
+    do outro inverte a regra: um torrent adicionado ha uma hora que perdeu os
+    seeders agora era removido de imediato, enquanto um adicionado ha cinco
+    minutos e parado desde o inicio nunca era.
+
+    `last_activity` e o campo que o qBittorrent atualiza a cada chunk baixado
+    ou enviado — e portanto o que "parado por X" quer dizer. Cai para
+    `added_on` quando `last_activity` vem ausente ou zerado.
+
+    Com os dois campos zerados o torrent e tratado como muito antigo (desde a
+    epoca Unix), e nao como recem-visto: comportamento preservado do codigo
+    anterior, do qual a suite depende. Na pratica o qBittorrent sempre preenche
+    os dois — nos 53 torrents medidos em producao, nenhum vinha sem.
+    """
+    ultima = torrent.get("last_activity") or 0
+    if ultima <= 0:
+        ultima = torrent.get("added_on", 0) or 0
+    return max(0.0, time.time() - ultima)
+
+
 def is_stalled(torrent, cfg):
     """Verifica se torrent deve ser removido por stalled/no-seeds."""
     g = cfg["guardian"]
     state = torrent.get("state", "")
+    parado = tempo_parado(torrent)
 
     # Stalled (parado por X tempo)
     if g.get("remove_stalled") and state in ("stalledDL", "stalledUP", "metaDL"):
         seconds = _time_to_seconds(g.get("stalled_time", 0), g.get("stalled_unit", "hours"))
-        if seconds > 0:
-            added_on = torrent.get("added_on", 0)
-            if time.time() - added_on >= seconds:
-                return True, f"stalled ({state}) por >{g['stalled_time']}{g['stalled_unit'][0]}"
+        if seconds > 0 and parado >= seconds:
+            return True, f"stalled ({state}) por >{g['stalled_time']}{g['stalled_unit'][0]}"
 
-    # Sem seeds
-    if g.get("remove_no_seeds") and state in ("stalledDL", "downloading", "queuedDL"):
+    # Sem seeds. `queuedDL` ficou DE FORA de proposito: um torrent na fila nao
+    # conectou ao tracker, logo `num_complete == 0` nele significa "ainda nao
+    # perguntei", nao "nao existem seeders". Com MaxActiveDownloads baixo e
+    # muitos torrents enfileirados, incluir esse estado removia em massa
+    # downloads que nunca tiveram chance de comecar.
+    if g.get("remove_no_seeds") and state in ("stalledDL", "downloading"):
         seeds = torrent.get("num_complete", -1)
         if seeds == 0:
             seconds = _time_to_seconds(g.get("no_seeds_time", 0), g.get("no_seeds_unit", "hours"))
-            if seconds > 0:
-                added_on = torrent.get("added_on", 0)
-                if time.time() - added_on >= seconds:
-                    return True, "0 seeds"
+            if seconds > 0 and parado >= seconds:
+                return True, "0 seeds"
 
     return False, ""
 
@@ -685,6 +710,7 @@ def write_heartbeat():
 
 _processed = set()
 _check_count = 0
+_parar_reevaluate = threading.Event()
 
 
 def _prune_processed(current_hashes):
@@ -738,6 +764,72 @@ def _connect_with_retry():
             time.sleep(retry_interval)
 
 
+def _reevaluate_interval(cfg):
+    """Intervalo do Pass 2, em segundos (0 desliga)."""
+    g = cfg.get("guardian") or {}
+    try:
+        return max(0, int(g.get("reevaluate_interval_seconds", 300)))
+    except (TypeError, ValueError):
+        return 300
+
+
+def reevaluate_stalled():
+    """Pass 2 isolado: reavalia stalled/no-seeds de todos os torrents.
+
+    Retorna quantos foram removidos. Uma chamada HTTP so (`get_torrents`): o
+    resto e leitura de campos do JSON, sem requisicao por torrent.
+    """
+    torrents = get_torrents()
+    removidos = 0
+    for t in torrents:
+        if check_stalled_and_remove(t):
+            removidos += 1
+    return removidos
+
+
+def _reevaluate_loop():
+    """Reavaliacao periodica de stalled/no-seeds no modo webhook.
+
+    O que o modo webhook evita e o ciclo COMPLETO: `analyze_torrent` faz uma
+    chamada HTTP por torrent sem metadados, e com a fila cheia isso vira
+    dezenas de requisicoes por ciclo. O Pass 2 nao tem esse custo — e uma
+    chamada so, e o resto e leitura de JSON.
+
+    Sem este loop o Pass 2 rodava apenas dentro de `/api/trigger`, que o hook
+    do qBittorrent dispara ao ADICIONAR torrent. Consequencia: um torrent que
+    ficava stalled depois de processado so era reavaliado se outro torrent
+    fosse adicionado — e se nenhum entrasse, ficava parado indefinidamente,
+    independente do limiar configurado.
+    """
+    while True:
+        cfg = get_config()
+        intervalo = _reevaluate_interval(cfg)
+        if intervalo <= 0:
+            log.info("reevaluate_interval_seconds=0 — reavaliacao periodica desligada.")
+            return
+        # Event.wait em vez de time.sleep: a espera fica interrompivel (um
+        # `_parar_reevaluate.set()` encerra na hora em vez de esperar o
+        # intervalo inteiro) e nao se confunde com o sleep do retry de conexao,
+        # que a suite verifica isoladamente.
+        if _parar_reevaluate.wait(intervalo):
+            return
+        try:
+            removidos = reevaluate_stalled()
+            if removidos:
+                log.info(f"Reavaliacao periodica: {removidos} torrent(s) removidos")
+            write_heartbeat()
+        except TRANSPORT_ERRORS:
+            log.warning("qBittorrent inacessivel na reavaliacao periodica")
+        except Exception as e:
+            log.error(f"Erro na reavaliacao periodica: {e}")
+
+
+def _start_reevaluate_loop():
+    t = threading.Thread(target=_reevaluate_loop, daemon=True)
+    t.start()
+    return t
+
+
 def guardian_loop():
     global _check_count
     load_config()
@@ -751,8 +843,11 @@ def guardian_loop():
     interval = cfg["guardian"].get("check_interval_seconds", 300)
 
     if interval == 0:
-        log.info("Guardian iniciado em modo webhook (intervalo=0). Aguardando chamadas /api/trigger.")
-        return  # sem loop — so responde a /api/trigger
+        reeval = _reevaluate_interval(cfg)
+        log.info("Guardian iniciado em modo webhook (intervalo=0). "
+                 f"Aguardando /api/trigger; reavaliacao de stalled a cada {reeval}s.")
+        _start_reevaluate_loop()
+        return  # sem ciclo completo — so responde a /api/trigger
 
     log.info(f"Guardian iniciado. Intervalo: {interval}s")
 
