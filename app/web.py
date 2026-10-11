@@ -503,26 +503,11 @@ def api_trigger():
     """
     try:
         guardian.load_config()
-        torrents = guardian.get_torrents()
-        current = {t["hash"] for t in torrents}
-        new = [t for t in torrents if t["hash"] not in guardian._processed]
-        count = len(new)
-        for t in new:
-            # So marca como processado se a analise foi concluida (torrents sem
-            # metadados sao reavaliados no proximo ciclo).
-            if guardian.analyze_torrent(t):
-                guardian._processed.add(t["hash"])
-
-        # Pass 2: reavalia stalled/no-seeds para TODOS os torrents
-        stalled_removed = 0
-        for t in torrents:
-            if guardian.check_stalled_and_remove(t):
-                stalled_removed += 1
-
-        guardian._prune_processed(current)
+        r = guardian.executar_ciclo()
         guardian.write_heartbeat()
-        return jsonify({"status": "ok", "checked": len(torrents), "new": count,
-                       "stalled_removed": stalled_removed})
+        return jsonify({"status": "ok", "checked": r["total"], "new": r["pendentes"],
+                       "stalled_removed": r["removidos"],
+                       "sem_metadados": r["restantes"]})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 

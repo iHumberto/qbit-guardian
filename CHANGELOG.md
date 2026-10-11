@@ -5,6 +5,23 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.1] — 2026-10-11
+
+A prioridade dos arquivos voltou a ser aplicada em torrent que entra na fila sem metadados.
+
+### Corrigido
+- **O ciclo periodico do modo webhook so reavaliava stalled, nunca a fila de pendentes.** A v2.7.0 trouxe o loop de volta, mas ele rodava apenas o pass 2. Resultado observado em producao: 47 torrents adicionados em lote entraram em `queuedDL` sem metadados, `analyze_torrent` recusou a analise (correto — nao havia arquivos para avaliar), e **ninguem voltava neles**: os `.mkv` ficaram em `priority=1` em vez do `priority_media=7` configurado, e o `.jpg` em 1 em vez do `priority_skip=0`. O qBittorrent **nao busca metadados de torrent enfileirado**, entao com `MaxActiveDownloads` baixo a janela entre "adicionado" e "tem metadados" pode ser de horas — e o unico gatilho era o webhook de *torrent adicionado*, que ja tinha passado.
+
+### Alterado
+- **Ciclo unico em `executar_ciclo()`**, usado pelos tres chamadores (loop completo, loop do modo webhook e `/api/trigger`). O pass 2 estava duplicado em tres lugares; agora ha uma implementacao so, e o loop do modo webhook executa o **ciclo completo** — drena a fila de pendentes e reavalia stalled.
+- A "fila de pendentes" nao e estrutura nova: e o complemento de `_processed`, onde `analyze_torrent` deixa de fora quem recusou. O custo se ajusta ao que falta fazer — com pendentes, uma requisicao por torrent da fila; com a fila vazia, o pass 1 nao faz requisicao nenhuma e o ciclo custa apenas o `get_torrents()`. Nao ha modo a alternar.
+- `/api/trigger` passa a devolver tambem **`sem_metadados`**: quantos seguem pendentes depois do ciclo.
+
+### Notas
+- O log do ciclo periodico fica em silencio quando nao houve nada a fazer. Com a fila vazia o loop roda a cada intervalo sem produzir trabalho, e logar isso seriam 288 linhas por dia sem informacao.
+- Enquanto houver torrent enfileirado sem metadados, cada ciclo gasta uma requisicao por pendente (local, ao proprio qBittorrent). E o custo inerente de descobrir se os metadados chegaram.
+- Testes: 781 -> **784**.
+
 ## [2.7.0] — 2026-10-11
 
 Torrent na fila deixa de ser confundido com torrent sem seeders, e o modo webhook volta a reavaliar stalled sozinho.

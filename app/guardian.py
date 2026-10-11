@@ -773,33 +773,73 @@ def _reevaluate_interval(cfg):
         return 300
 
 
-def reevaluate_stalled():
-    """Pass 2 isolado: reavalia stalled/no-seeds de todos os torrents.
+def executar_ciclo(torrents=None):
+    """Um ciclo de analise: pendentes (pass 1) + reavaliacao de stalled (pass 2).
 
-    Retorna quantos foram removidos. Uma chamada HTTP so (`get_torrents`): o
-    resto e leitura de campos do JSON, sem requisicao por torrent.
+    A "fila de pendentes" nao e estrutura separada: e o complemento de
+    `_processed`. `analyze_torrent` so devolve True quando a analise concluiu,
+    e um torrent sem metadados devolve False — ficando de fora de `_processed`
+    e, portanto, pendente para o proximo ciclo.
+
+    Isso importa porque o qBittorrent **nao busca metadados de torrent
+    enfileirado**: com `MaxActiveDownloads` baixo, um torrent fica em
+    `queuedDL` sem arquivo nenhum e so ganha metadados quando chega a vez dele.
+    A prioridade dos arquivos (`priority_media`/`priority_skip`) nao pode ser
+    aplicada antes disso.
+
+    Quando a fila de pendentes esvazia, o pass 1 nao faz requisicao nenhuma e o
+    ciclo custa a unica chamada de `get_torrents()`.
+
+    Retorna um dict com as metricas do ciclo.
     """
-    torrents = get_torrents()
+    if torrents is None:
+        torrents = get_torrents()
+
+    pendentes = [t for t in torrents if t["hash"] not in _processed]
+    analisados = 0
+    for t in pendentes:
+        if analyze_torrent(t):
+            _processed.add(t["hash"])
+            analisados += 1
+
+    # Pass 2: reavalia stalled/no-seeds para TODOS os torrents
+    # (torrents ja em _processed podem ter ficado stalled depois)
     removidos = 0
     for t in torrents:
         if check_stalled_and_remove(t):
             removidos += 1
-    return removidos
+
+    current_hashes = {t["hash"] for t in torrents}
+    fora_do_historico = len([h for h in _processed if h not in current_hashes])
+    _prune_processed(current_hashes)
+
+    return {
+        "total": len(torrents),
+        "pendentes": len(pendentes),
+        "analisados": analisados,
+        "restantes": len(pendentes) - analisados,
+        "removidos": removidos,
+        "fora_do_historico": fora_do_historico,
+    }
 
 
 def _reevaluate_loop():
-    """Reavaliacao periodica de stalled/no-seeds no modo webhook.
+    """Ciclo periodico no modo webhook: drena a fila de pendentes e reavalia stalled.
 
-    O que o modo webhook evita e o ciclo COMPLETO: `analyze_torrent` faz uma
-    chamada HTTP por torrent sem metadados, e com a fila cheia isso vira
-    dezenas de requisicoes por ciclo. O Pass 2 nao tem esse custo — e uma
-    chamada so, e o resto e leitura de JSON.
+    Sem este loop, o unico gatilho era `/api/trigger`, que o hook do
+    qBittorrent dispara ao ADICIONAR torrent. Duas consequencias, as duas
+    observadas em producao:
 
-    Sem este loop o Pass 2 rodava apenas dentro de `/api/trigger`, que o hook
-    do qBittorrent dispara ao ADICIONAR torrent. Consequencia: um torrent que
-    ficava stalled depois de processado so era reavaliado se outro torrent
-    fosse adicionado — e se nenhum entrasse, ficava parado indefinidamente,
-    independente do limiar configurado.
+    1. Um torrent que ficava stalled depois de processado so era reavaliado se
+       outro torrent fosse adicionado — sem isso, ficava parado indefinidamente.
+    2. Torrent adicionado em lote entrava em `queuedDL` sem metadados, a analise
+       era recusada, e **a prioridade dos arquivos nunca era aplicada**: quando
+       os metadados finalmente chegavam, nao havia mais quem olhasse.
+
+    O custo se ajusta sozinho ao que falta fazer: com pendentes, o ciclo gasta
+    uma requisicao por torrent da fila; com a fila vazia, gasta apenas o
+    `get_torrents()`. Nao ha modo a alternar — o loop fica barato quando nao ha
+    trabalho, e volta a trabalhar quando um lote novo entra.
     """
     while True:
         cfg = get_config()
@@ -814,9 +854,15 @@ def _reevaluate_loop():
         if _parar_reevaluate.wait(intervalo):
             return
         try:
-            removidos = reevaluate_stalled()
-            if removidos:
-                log.info(f"Reavaliacao periodica: {removidos} torrent(s) removidos")
+            r = executar_ciclo()
+            # Silencio quando nao houve nada a fazer: com a fila vazia este
+            # loop roda a cada intervalo sem produzir trabalho, e logar isso
+            # viraria ruido de 288 linhas por dia.
+            if r["analisados"] or r["removidos"] or r["restantes"]:
+                log.info(f"Reavaliacao periodica: {r['total']} torrents, "
+                         f"{r['analisados']} analisados, "
+                         f"{r['removidos']} removidos, "
+                         f"{r['restantes']} ainda sem metadados")
             write_heartbeat()
         except TRANSPORT_ERRORS:
             log.warning("qBittorrent inacessivel na reavaliacao periodica")
@@ -857,33 +903,13 @@ def guardian_loop():
         new_this_check = 0
 
         try:
-            torrents = get_torrents()
-            total = len(torrents)
-            new = [t for t in torrents if t["hash"] not in _processed]
-
-            if new:
-                new_this_check = len(new)
-                for t in new:
-                    # So marca como processado se a analise foi concluida:
-                    # torrents sem metadados voltam a ser avaliados no proximo
-                    # ciclo, quando os arquivos ja existirem.
-                    if analyze_torrent(t):
-                        _processed.add(t["hash"])
-
-            # Pass 2: reavalia stalled/no-seeds para TODOS os torrents
-            # (torrents ja em _processed podem ter ficado stalled depois)
-            stalled_removed = 0
-            for t in torrents:
-                if check_stalled_and_remove(t):
-                    stalled_removed += 1
-
-            current_hashes = {t["hash"] for t in torrents}
-            removed_this_check = len([h for h in _processed if h not in current_hashes])
-            _prune_processed(current_hashes)
+            r = executar_ciclo()
+            new_this_check = r["pendentes"]
+            removed_this_check = r["fora_do_historico"]
 
             # ── Log INFO: resumo da verificacao ──
-            log.info(f"Verificacao #{_check_count}: {total} torrents, "
-                     f"{new_this_check} novos, {stalled_removed} stalled removidos, "
+            log.info(f"Verificacao #{_check_count}: {r['total']} torrents, "
+                     f"{new_this_check} novos, {r['removidos']} stalled removidos, "
                      f"{removed_this_check} removidos do historico")
 
         except TRANSPORT_ERRORS:

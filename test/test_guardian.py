@@ -3272,17 +3272,71 @@ class TestReavaliacaoPeriodica:
             g.guardian_loop()
         assert m_loop.called, "modo webhook deve subir a reavaliacao periodica"
 
-    def test_reevaluate_stalled_avalia_todos_e_conta(self, tmp_config):
+    def test_ciclo_avalia_stalled_em_todos_e_conta(self, tmp_config):
         avaliados = []
 
         def fake(t):
             avaliados.append(t["hash"])
             return t["hash"] == "b"
 
+        g._processed.update({"a", "b"})
         with mock.patch.object(g, "get_torrents", return_value=self.TORRENTS), \
              mock.patch.object(g, "check_stalled_and_remove", side_effect=fake):
-            assert g.reevaluate_stalled() == 1
+            r = g.executar_ciclo()
+        assert r["removidos"] == 1
         assert avaliados == ["a", "b"]
+
+    def test_ciclo_reanalisa_pendentes_ate_os_metadados_chegarem(self, tmp_config):
+        """A fila de pendentes e o complemento de `_processed`.
+
+        O qBittorrent nao busca metadados de torrent enfileirado: com
+        `MaxActiveDownloads` baixo, um torrent fica em `queuedDL` sem arquivo
+        nenhum e so ganha metadados quando chega a vez dele. Se o ciclo nao
+        voltar nele, a prioridade dos arquivos nunca e aplicada — foi o que
+        aconteceu em producao, com os `.mkv` ficando em `priority=1` em vez do
+        `priority_media=7` configurado.
+        """
+        g._processed.clear()
+        tentativas = []
+        # recusa na primeira passada (sem metadados), aceita na segunda
+        def fake_analyze(t):
+            tentativas.append(t["hash"])
+            return tentativas.count(t["hash"]) > 1
+
+        with mock.patch.object(g, "get_torrents", return_value=self.TORRENTS), \
+             mock.patch.object(g, "check_stalled_and_remove", return_value=False), \
+             mock.patch.object(g, "analyze_torrent", side_effect=fake_analyze):
+            r1 = g.executar_ciclo()
+            assert r1["pendentes"] == 2 and r1["analisados"] == 0
+            assert r1["restantes"] == 2, "sem metadados segue pendente"
+
+            r2 = g.executar_ciclo()
+            assert r2["pendentes"] == 2, "voltou a tentar os mesmos dois"
+            assert r2["analisados"] == 2 and r2["restantes"] == 0
+
+            r3 = g.executar_ciclo()
+            assert r3["pendentes"] == 0, "fila drenada: ninguem mais e reanalisado"
+
+        assert tentativas == ["a", "b", "a", "b"]
+
+    def test_ciclo_com_fila_vazia_nao_chama_analyze(self, tmp_config):
+        """Fila drenada: o pass 1 nao gasta requisicao nenhuma."""
+        g._processed.update({"a", "b"})
+        with mock.patch.object(g, "get_torrents", return_value=self.TORRENTS), \
+             mock.patch.object(g, "check_stalled_and_remove", return_value=False), \
+             mock.patch.object(g, "analyze_torrent") as m_an:
+            r = g.executar_ciclo()
+        assert not m_an.called
+        assert r["pendentes"] == 0 and r["analisados"] == 0
+
+    def test_ciclo_aceita_torrents_ja_obtidos(self, tmp_config):
+        """Chamador que ja tem a lista nao paga um segundo get_torrents."""
+        g._processed.update({"a", "b"})
+        with mock.patch.object(g, "get_torrents") as m_get, \
+             mock.patch.object(g, "check_stalled_and_remove", return_value=False):
+            r = g.executar_ciclo(torrents=self.TORRENTS)
+        assert not m_get.called
+        assert r["total"] == 2
 
     def test_intervalo_le_config_e_aceita_zero(self, tmp_config):
         cfg = g.load_config()
