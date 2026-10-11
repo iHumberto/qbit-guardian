@@ -5,6 +5,20 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.2] — 2026-10-11
+
+Espera na fila deixa de contar como inatividade do torrent.
+
+### Corrigido
+- **Falso positivo na remocao por stalled, especialmente em `metaDL`.** Com `max_active_downloads` baixo, um torrent passa horas em `queuedDL` — estado que nenhuma regra avalia. No instante em que finalmente entra em `metaDL`, o `tempo_parado` ja acumulou **toda** a espera da fila, porque para quem nunca transferiu nada o calculo cai em `added_on`. Resultado: removido na hora, sem ter tido um segundo de chance real de buscar metadados. Medido em producao: **36 de 37** enfileirados com `time_active == 0` e **290 min** de idade. Mesmo defeito conceitual que a v2.7.0 corrigiu para `queuedDL` no criterio de sem-seeds, entrando por outra porta.
+- Agora ha um **piso de `time_active`**: nao basta estar parado ha X, o torrent precisa ter tido X de tempo **ativo**. Vale para o criterio de stalled e para o de sem-seeds.
+
+### Notas
+- `time_active` e o contador do proprio qBittorrent — zero enquanto o torrent espera em `queuedDL`, crescendo so quando ele tem slot. Ja vem em `/torrents/info`, entao nao custa chamada extra.
+- **Por que `time_active` e nao os limites da fila**, que era a sugestao inicial: ele e **por torrent** em vez de global (mesmo com a fila folgada, um torrent recem-ativado nao deve ser julgado), mede o que de fato aconteceu em vez de inferir de um limite saturado, e dispensa consultar `/app/preferences`. A intuicao de que a fila era a causa estava certa; o dado certo e outro.
+- **Campo ausente nao e zero**: `tempo_ativo()` devolve `None` quando `time_active` nao veio, e nesse caso o piso nao se aplica. Em producao o qBittorrent sempre envia; a distincao existe para que teste focado em outro criterio nao precise declarar o campo.
+- Testes: 810 -> **815**. Cobrem o `metaDL` recem-ativado sendo poupado, o `metaDL` com tempo ativo suficiente ainda sendo removido (o piso nao pode virar imunidade), o piso no criterio de sem-seeds, a distincao entre ausente e zero, e a preservacao do comportamento anterior quando o campo nao vem.
+
 ## [2.8.1] — 2026-10-11
 
 O blocklist no Radarr/Sonarr nao acontecia quando a fila passava de 10 itens.

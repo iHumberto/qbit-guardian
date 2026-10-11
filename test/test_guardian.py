@@ -197,6 +197,79 @@ class TestIsStalled:
         assert g.is_stalled(self.make_torrent("downloading", antigo, num_complete=0), cfg)[0]
         assert g.is_stalled(self.make_torrent("stalledDL", antigo, num_complete=0), cfg)[0]
 
+    # ── regressao: espera na fila nao e inatividade do torrent ─────────
+
+    def test_metadl_recem_ativado_nao_e_removido(self, tmp_config):
+        """O falso positivo que o Humberto suspeitou, e que era real.
+
+        Com `max_active_downloads` baixo, um torrent passa horas em `queuedDL`
+        — estado que nenhuma regra avalia. No instante em que entra em
+        `metaDL`, o `tempo_parado` ja acumulou TODA a espera da fila (porque
+        quem nunca transferiu cai em `added_on`), e ele seria removido na hora,
+        sem ter tido um segundo de chance real.
+
+        Medido em producao: 36 de 37 enfileirados com `time_active == 0` e
+        290 min de idade.
+        """
+        cfg = g.load_config()
+        cfg["guardian"]["remove_stalled"] = True
+        cfg["guardian"]["stalled_time"] = 15
+        cfg["guardian"]["stalled_unit"] = "minutes"
+        g.save_config(cfg)
+
+        t = self.make_torrent("metaDL", time.time() - 290 * 60)   # 4,8 h de idade
+        t["time_active"] = 0                                      # nunca teve slot
+        assert not g.is_stalled(t, cfg)[0], \
+            "espera na fila nao pode contar como inatividade do torrent"
+
+    def test_metadl_com_tempo_ativo_suficiente_e_removido(self, tmp_config):
+        """O piso nao pode virar imunidade: quem teve chance e julgado."""
+        cfg = g.load_config()
+        cfg["guardian"]["remove_stalled"] = True
+        cfg["guardian"]["stalled_time"] = 15
+        cfg["guardian"]["stalled_unit"] = "minutes"
+        g.save_config(cfg)
+
+        t = self.make_torrent("metaDL", time.time() - 290 * 60)
+        t["time_active"] = 3600        # uma hora ativo, e nada transferido
+        assert g.is_stalled(t, cfg)[0]
+
+    def test_piso_vale_tambem_para_sem_seeds(self, tmp_config):
+        cfg = g.load_config()
+        cfg["guardian"]["remove_no_seeds"] = True
+        cfg["guardian"]["no_seeds_time"] = 15
+        cfg["guardian"]["no_seeds_unit"] = "minutes"
+        g.save_config(cfg)
+
+        t = self.make_torrent("downloading", time.time() - 7200, num_complete=0)
+        t["time_active"] = 0
+        assert not g.is_stalled(t, cfg)[0], "recem-ativado sem seeds nao e culpa dele"
+        t["time_active"] = 7200
+        assert g.is_stalled(t, cfg)[0]
+
+    def test_tempo_ativo_distingue_ausente_de_zero(self, tmp_config):
+        """`None` e "desconhecido"; `0` e "nao teve tempo nenhum".
+
+        Em producao o campo sempre vem. A distincao existe para que teste
+        focado em outro criterio nao precise declarar `time_active`.
+        """
+        assert g.tempo_ativo({}) is None
+        assert g.tempo_ativo({"time_active": 0}) == 0
+        assert g.tempo_ativo({"time_active": 965}) == 965
+        assert g.tempo_ativo({"time_active": "abc"}) is None
+        assert g.tempo_ativo({"time_active": -5}) == 0
+
+    def test_campo_ausente_preserva_o_comportamento_anterior(self, tmp_config):
+        """Sem o campo nao ha base para o piso — a regra antiga vale."""
+        cfg = g.load_config()
+        cfg["guardian"]["remove_stalled"] = True
+        cfg["guardian"]["stalled_time"] = 1
+        cfg["guardian"]["stalled_unit"] = "hours"
+        g.save_config(cfg)
+        t = self.make_torrent("stalledDL", time.time() - 7200)
+        assert "time_active" not in t
+        assert g.is_stalled(t, cfg)[0]
+
     # ── regressao: tempo parado != idade do torrent ────────────────────
 
     def test_usa_last_activity_e_nao_a_idade_do_torrent(self, tmp_config):

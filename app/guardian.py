@@ -602,6 +602,39 @@ def tempo_parado(torrent):
     return max(0.0, time.time() - ultima)
 
 
+def tempo_ativo(torrent):
+    """Segundos que o torrent efetivamente passou ATIVO, fora da fila.
+
+    `time_active` e o contador do proprio qBittorrent: zero enquanto o torrent
+    espera em `queuedDL`, crescendo so quando ele tem slot. E a medida de
+    quanta chance real o torrent teve.
+
+    Existe para fechar um falso positivo: com `max_active_downloads` baixo, um
+    torrent pode passar horas em `queuedDL` — estado que nenhuma regra avalia —
+    e, no instante em que finalmente entra em `metaDL`, ser removido na hora,
+    porque `tempo_parado` (medido de `last_activity`, que para quem nunca
+    transferiu cai em `added_on`) ja acumulou toda a espera da fila. Medido em
+    producao: 36 de 37 enfileirados com `time_active == 0` e 290 min de idade.
+
+    Devolve **None** quando o campo nao veio: desconhecido nao e zero. Em
+    producao o qBittorrent sempre o envia, entao o piso sempre vale; a
+    distincao existe para que teste focado em outro criterio nao precise
+    declarar `time_active` para seguir valendo.
+    """
+    if "time_active" not in torrent:
+        return None
+    try:
+        return max(0, int(torrent.get("time_active") or 0))
+    except (TypeError, ValueError):
+        return None
+
+
+def _ativo_o_bastante(torrent, seconds):
+    """True quando o torrent teve tempo ativo suficiente para ser julgado."""
+    ativo = tempo_ativo(torrent)
+    return ativo is None or ativo >= seconds
+
+
 def is_stalled(torrent, cfg):
     """Verifica se torrent deve ser removido por stalled/no-seeds."""
     g = cfg["guardian"]
@@ -611,7 +644,10 @@ def is_stalled(torrent, cfg):
     # Stalled (parado por X tempo)
     if g.get("remove_stalled") and state in ("stalledDL", "stalledUP", "metaDL"):
         seconds = _time_to_seconds(g.get("stalled_time", 0), g.get("stalled_unit", "hours"))
-        if seconds > 0 and parado >= seconds:
+        # `tempo_ativo` como piso: nao basta estar parado ha X, o torrent
+        # precisa ter tido X de tempo ATIVO. Sem isso, a espera na fila conta
+        # como se fosse inatividade dele.
+        if seconds > 0 and parado >= seconds and _ativo_o_bastante(torrent, seconds):
             return True, f"stalled ({state}) por >{g['stalled_time']}{g['stalled_unit'][0]}"
 
     # Sem seeds. `queuedDL` ficou DE FORA de proposito: um torrent na fila nao
@@ -623,7 +659,7 @@ def is_stalled(torrent, cfg):
         seeds = torrent.get("num_complete", -1)
         if seeds == 0:
             seconds = _time_to_seconds(g.get("no_seeds_time", 0), g.get("no_seeds_unit", "hours"))
-            if seconds > 0 and parado >= seconds:
+            if seconds > 0 and parado >= seconds and _ativo_o_bastante(torrent, seconds):
                 return True, "0 seeds"
 
     return False, ""
