@@ -422,6 +422,29 @@ def _arr_match_by_name(items, torrent_name, title_field="title"):
     return None
 
 
+# Tamanho de pagina pedido na queue do Radarr/Sonarr. O default da API e 10,
+# pequeno demais para uma fila de dezenas de itens.
+ARR_QUEUE_PAGE_SIZE = 1000
+
+
+def _avisa_queue_truncada(arr_type, resposta):
+    """Avisa quando a queue tem mais itens do que uma pagina devolve.
+
+    Falha silenciosa e pior que falha barulhenta: sem este aviso, um blocklist
+    que nao acontece por truncamento e indistinguivel de um torrent que
+    legitimamente nao esta na fila.
+    """
+    try:
+        corpo = resposta.json()
+        total = corpo.get("totalRecords")
+        trazidos = len(corpo.get("records", []))
+    except Exception:
+        return
+    if isinstance(total, int) and total > trazidos:
+        log.warning(f"{arr_type}: queue tem {total} itens e a pagina trouxe "
+                    f"{trazidos} — aumente ARR_QUEUE_PAGE_SIZE")
+
+
 def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
     """Handler generico para Sonarr ou Radarr.
 
@@ -448,8 +471,18 @@ def _handle_arr(arr_type, config_key, torrent_hash, torrent_name):
         sess.headers.update(hdrs)
 
         # 1. Buscar na queue
-        log.debug(f"HTTP GET {base}/queue")
-        rq = sess.get(f"{base}/queue", timeout=10)
+        #
+        # `pageSize` explicito e obrigatorio: a API do Radarr/Sonarr pagina a
+        # queue e devolve **10** itens por default. Sem isto o guardian so via
+        # os 10 primeiros, e com a fila cheia o blocklist simplesmente nao
+        # acontecia — em silencio, porque "nao achei na queue" cai no fallback
+        # por nome e depois desiste sem erro. Medido em producao: 43 itens na
+        # queue, 10 retornados.
+        log.debug(f"HTTP GET {base}/queue?pageSize={ARR_QUEUE_PAGE_SIZE}")
+        rq = sess.get(f"{base}/queue",
+                      params={"pageSize": ARR_QUEUE_PAGE_SIZE},
+                      timeout=10)
+        _avisa_queue_truncada(arr_type, rq)
         item_id = None
         extra_ids = []  # Sonarr: episode_ids
 

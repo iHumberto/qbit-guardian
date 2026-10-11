@@ -5,6 +5,18 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.1] — 2026-10-11
+
+O blocklist no Radarr/Sonarr nao acontecia quando a fila passava de 10 itens.
+
+### Corrigido
+- **A queue do Arr era pedida sem `pageSize`, e a API devolve 10 itens por default.** Com a fila maior que isso, o torrent a bloquear ficava fora da primeira pagina, o `downloadId` nunca casava e o blocklist simplesmente nao acontecia. **A falha era silenciosa**: "nao achei na queue" cai no fallback por nome e depois desiste sem erro nenhum. Medido em producao ao validar a v2.8.0 — `totalRecords=43`, `records` retornados **10**, e o release removido por lentidao nao entrou no blocklist. Afeta **todas** as remocoes (stalled, sem-seeds e lentidao), nao so a feature nova; e um defeito que existia desde que o `_handle_arr` foi escrito.
+- Agora a queue e pedida com `pageSize=ARR_QUEUE_PAGE_SIZE` (1000), e um **aviso** sai no log quando `totalRecords` ainda excede o que a pagina trouxe — falha silenciosa e pior que falha barulhenta.
+
+### Notas
+- Limite conhecido que ficou de fora: o **fallback por nome** compara o nome do release com o titulo no Arr, e nao casa quando os dois estao em idiomas diferentes. No caso medido, o release era `Ballerina 2025 1080p...` e o titulo no Radarr, `Bailarina: Do Universo de John Wick`. Com a paginacao corrigida o caminho da queue resolve, e o fallback deixa de ser exercitado nesse cenario — mas segue frágil para torrent que o Arr nao rastreia mais.
+- Testes: 805 -> **810**. Cobrem o `pageSize` explicito na chamada, o alvo na posicao 40 de 43 sendo encontrado, o aviso de truncamento, e a ausencia de aviso quando a pagina cobre tudo.
+
 ## [2.8.0] — 2026-10-11
 
 Velocidade minima de download: torrent que fica lento por tempo demais sai da fila.

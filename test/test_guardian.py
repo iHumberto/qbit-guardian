@@ -1419,11 +1419,15 @@ class _FakeArrSession:
         self.verify = True
         self.headers = mock.MagicMock()
         self.gets = []
+        # (url, params) — separado de `gets` para nao quebrar quem compara
+        # `sess.gets` como lista de URLs.
+        self.get_calls = []
         self.deletes = []
         self.posts = []
 
     def get(self, url, **kwargs):
         self.gets.append(url)
+        self.get_calls.append((url, kwargs.get("params")))
         for suffix, payload in self._get_map.items():
             if url.endswith(suffix):
                 if isinstance(payload, Exception):
@@ -1545,6 +1549,79 @@ class TestHandleArrRadarr:
             g._handle_arr("Radarr", "radarr", "abc123", "Some.Movie.mkv")
 
         assert not m_sess.called
+
+
+class TestArrQueuePaginacao:
+    """A queue do Arr vem paginada, e o default de 10 escondia o blocklist.
+
+    Bug medido em producao: 43 itens na queue do Radarr, 10 retornados. O
+    torrent a bloquear estava fora da primeira pagina, entao o `downloadId`
+    nunca casava — e a falha era **silenciosa**, porque "nao achei na queue"
+    cai no fallback por nome e depois desiste sem erro.
+    """
+
+    BASE = "https://radarr.home.arpa/api/v3"
+
+    @pytest.fixture
+    def radarr_cfg(self, tmp_config):
+        g.load_config()
+        cfg = g.get_config()
+        cfg["radarr"]["url"] = "https://radarr.home.arpa/"
+        cfg["radarr"]["api_key"] = "rkey"
+        g.save_config(cfg)
+        return cfg
+
+    def test_queue_e_pedida_com_page_size_explicito(self, radarr_cfg):
+        get_map = {"/queue": {"records": [{"id": 42, "downloadId": "ABC123", "movieId": 77}]}}
+        with _run_handle_arr("Radarr", "radarr", get_map,
+                             "abc123", "Some.Movie.2020.mkv") as sess:
+            g._handle_arr("Radarr", "radarr", "abc123", "Some.Movie.2020.mkv")
+
+        queue_calls = [(u, p) for u, p in sess.get_calls if u.endswith("/queue")]
+        assert queue_calls, "a queue nem foi consultada"
+        _, params = queue_calls[0]
+        assert params and params.get("pageSize") == g.ARR_QUEUE_PAGE_SIZE, \
+            f"queue pedida sem pageSize: {params!r} — volta a ver so 10 itens"
+
+    def test_page_size_cobre_fila_de_dezenas(self, radarr_cfg):
+        """O valor pedido tem de ser maior que uma fila realista."""
+        assert g.ARR_QUEUE_PAGE_SIZE >= 100
+
+    def test_acha_item_que_estaria_fora_da_primeira_pagina(self, radarr_cfg):
+        """Com 43 itens e o alvo na posicao 40, o blocklist precisa acontecer."""
+        registros = [{"id": i, "downloadId": f"HASH{i:03d}", "movieId": i}
+                     for i in range(1, 44)]
+        registros[39] = {"id": 999, "downloadId": "ABC123", "movieId": 77}
+        get_map = {"/queue": {"totalRecords": 43, "records": registros}}
+        with _run_handle_arr("Radarr", "radarr", get_map,
+                             "abc123", "Some.Movie.2020.mkv") as sess:
+            g._handle_arr("Radarr", "radarr", "abc123", "Some.Movie.2020.mkv")
+
+        assert sess.deletes == [(f"{self.BASE}/queue/999",
+                                 {"blocklist": "true", "removeFromClient": "false"})]
+        assert sess.commands == [{"name": "MoviesSearch", "movieIds": [77]}]
+
+    def test_avisa_quando_a_pagina_trunca(self, radarr_cfg):
+        """Falha silenciosa e pior que barulhenta: tem de sair warning."""
+        get_map = {"/queue": {"totalRecords": 5000,
+                              "records": [{"id": 1, "downloadId": "X", "movieId": 1}]},
+                   "/movie": [],
+                   }
+        with mock.patch.object(g.log, "warning") as m_warn:
+            with _run_handle_arr("Radarr", "radarr", get_map,
+                                 "abc123", "Some.Movie.2020.mkv"):
+                g._handle_arr("Radarr", "radarr", "abc123", "Some.Movie.2020.mkv")
+        assert m_warn.called, "queue truncada deveria avisar"
+        assert "5000" in str(m_warn.call_args)
+
+    def test_nao_avisa_quando_a_pagina_cobre_tudo(self, radarr_cfg):
+        get_map = {"/queue": {"totalRecords": 1,
+                              "records": [{"id": 42, "downloadId": "ABC123", "movieId": 77}]}}
+        with mock.patch.object(g.log, "warning") as m_warn:
+            with _run_handle_arr("Radarr", "radarr", get_map,
+                                 "abc123", "Some.Movie.2020.mkv"):
+                g._handle_arr("Radarr", "radarr", "abc123", "Some.Movie.2020.mkv")
+        assert not m_warn.called
 
 
 class TestHandleArrSonarr:
