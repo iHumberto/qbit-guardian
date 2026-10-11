@@ -231,6 +231,151 @@ class TestIsStalled:
         assert 110 <= g.tempo_parado(t2) <= 130
 
 
+# ── is_slow: velocidade minima ─────────────────────────────────────────
+
+class TestVelocidadeMinima:
+    """Remocao por velocidade sustentada abaixo de um minimo.
+
+    Caso que motivou: um torrent de 2,5 GiB baixando a 2,2 KiB/s com ETA de
+    6 dias, ocupando um slot da fila indefinidamente.
+    """
+
+    KiB = 1024
+
+    def make(self, state="downloading", dlspeed=0, downloaded=0, h="abc123"):
+        return {"hash": h, "name": "test.torrent", "state": state,
+                "dlspeed": dlspeed, "downloaded": downloaded,
+                "added_on": time.time() - 3600}
+
+    def _cfg(self, speed=100, unit="KiB", tempo=15, tunit="minutes", on=True):
+        cfg = g.load_config()
+        gu = cfg["guardian"]
+        gu["remove_slow"] = on
+        gu["slow_speed"] = speed
+        gu["slow_speed_unit"] = unit
+        gu["slow_time"] = tempo
+        gu["slow_unit"] = tunit
+        g.save_config(cfg)
+        return cfg
+
+    # ── conversao de unidades ──
+
+    def test_converte_as_quatro_unidades(self, tmp_config):
+        assert g._speed_to_bytes(1, "KiB") == 1024
+        assert g._speed_to_bytes(1, "MiB") == 1024 ** 2
+        assert g._speed_to_bytes(1, "GiB") == 1024 ** 3
+        assert g._speed_to_bytes(1, "TiB") == 1024 ** 4
+
+    def test_unidade_desconhecida_cai_em_kib(self, tmp_config):
+        """Config corrompida nao deve virar limite absurdo."""
+        assert g._speed_to_bytes(10, "furlongs") == 10 * 1024
+
+    def test_valor_invalido_desliga_em_vez_de_estourar(self, tmp_config):
+        assert g._speed_to_bytes("abc", "KiB") == 0.0
+        assert g._speed_to_bytes(None, "KiB") == 0.0
+
+    def test_formata_na_maior_unidade_legivel(self, tmp_config):
+        assert g._fmt_speed(512) == "512 B/s"
+        assert g._fmt_speed(2219) == "2.17 KiB/s"
+        assert g._fmt_speed(5 * 1024 ** 2) == "5.00 MiB/s"
+
+    # ── o caminho principal ──
+
+    def test_remove_quando_a_media_fica_abaixo_pelo_tempo_limite(self, tmp_config):
+        cfg = self._cfg(speed=100, tempo=15, tunit="minutes")
+        # janela aberta 20 min atras, com 1 MiB baixado desde entao
+        # media = 1 MiB / 1200 s = ~0,85 KiB/s, bem abaixo de 100 KiB/s
+        g._lento_desde["abc123"] = (time.time() - 1200, 0)
+        lento, motivo = g.is_slow(self.make(downloaded=1024 ** 2), cfg)
+        assert lento
+        assert "media" in motivo and "minimo 100 KiB" in motivo
+
+    def test_nao_remove_antes_do_tempo_limite(self, tmp_config):
+        cfg = self._cfg(speed=100, tempo=15, tunit="minutes")
+        g._lento_desde["abc123"] = (time.time() - 60, 0)   # 1 min de janela
+        assert not g.is_slow(self.make(downloaded=1024), cfg)[0]
+
+    def test_recuperou_no_meio_descarta_a_janela(self, tmp_config):
+        """Media acima do limite = o torrent se recuperou; janela some.
+
+        Sem isto, um torrent que ficou lento por um momento carregaria a marca
+        para sempre e seria removido ao cruzar o tempo, mesmo baixando bem.
+        """
+        cfg = self._cfg(speed=100, tempo=15, tunit="minutes")
+        g._lento_desde["abc123"] = (time.time() - 1200, 0)
+        # 500 MiB em 1200 s = ~426 KiB/s, acima do minimo
+        lento, _ = g.is_slow(self.make(downloaded=500 * 1024 ** 2), cfg)
+        assert not lento
+        assert "abc123" not in g._lento_desde, "janela deveria ter sido descartada"
+
+    def test_primeira_observacao_so_abre_janela_se_ja_esta_lento(self, tmp_config):
+        cfg = self._cfg(speed=100, tempo=15, tunit="minutes")
+        # rapido: nao abre janela
+        assert not g.is_slow(self.make(dlspeed=500 * self.KiB), cfg)[0]
+        assert "abc123" not in g._lento_desde
+        # lento: abre, mas nao remove nesta passada
+        assert not g.is_slow(self.make(dlspeed=2 * self.KiB), cfg)[0]
+        assert "abc123" in g._lento_desde
+
+    # ── regressao: a licao do queuedDL ──
+
+    def test_queued_nunca_e_avaliado_por_velocidade(self, tmp_config):
+        """`queuedDL` tem 0 B/s por definicao — julgar isso e remover a fila.
+
+        Mesmo defeito que, no criterio de sem-seeds, qualificou 51 de 54
+        torrents enfileirados para remocao na v2.7.0.
+        """
+        cfg = self._cfg(speed=100, tempo=15, tunit="minutes")
+        g._lento_desde["abc123"] = (time.time() - 99999, 0)
+        lento, _ = g.is_slow(self.make(state="queuedDL"), cfg)
+        assert not lento
+        assert "abc123" not in g._lento_desde, "estado fora de download limpa a janela"
+
+    def test_outros_estados_tambem_ficam_fora(self, tmp_config):
+        cfg = self._cfg(speed=100, tempo=15, tunit="minutes")
+        for estado in ("stalledDL", "metaDL", "uploading", "stoppedUP", "checkingDL"):
+            g._lento_desde["abc123"] = (time.time() - 99999, 0)
+            assert not g.is_slow(self.make(state=estado), cfg)[0], estado
+
+    # ── desligado / mal configurado ──
+
+    def test_desligado_nao_remove(self, tmp_config):
+        cfg = self._cfg(speed=100, tempo=15, on=False)
+        g._lento_desde["abc123"] = (time.time() - 99999, 0)
+        assert not g.is_slow(self.make(downloaded=0), cfg)[0]
+
+    def test_limite_zero_desliga(self, tmp_config):
+        cfg = self._cfg(speed=0, tempo=15)
+        g._lento_desde["abc123"] = (time.time() - 99999, 0)
+        assert not g.is_slow(self.make(downloaded=0), cfg)[0]
+
+    def test_tempo_zero_desliga(self, tmp_config):
+        cfg = self._cfg(speed=100, tempo=0)
+        g._lento_desde["abc123"] = (time.time() - 99999, 0)
+        assert not g.is_slow(self.make(downloaded=0), cfg)[0]
+
+    # ── integracao e limpeza de estado ──
+
+    def test_check_stalled_and_remove_remove_por_lentidao(self, tmp_config):
+        cfg = self._cfg(speed=100, tempo=15, tunit="minutes")
+        cfg["guardian"]["remove_stalled"] = False
+        cfg["guardian"]["remove_no_seeds"] = False
+        g.save_config(cfg)
+        g._lento_desde["abc123"] = (time.time() - 1200, 0)
+        with mock.patch.object(g, "block_and_search") as m_block, \
+             mock.patch.object(g, "remove_torrent") as m_rm, \
+             mock.patch.object(g, "send_notification"):
+            assert g.check_stalled_and_remove(self.make(downloaded=1024))
+        assert m_block.called and m_rm.called
+
+    def test_prune_limpa_janelas_de_torrent_que_saiu(self, tmp_config):
+        """Sem isto o dict cresce indefinidamente conforme torrents vao e vem."""
+        g._lento_desde.update({"vivo": (time.time(), 0), "morto": (time.time(), 0)})
+        g._prune_processed({"vivo"})
+        assert "vivo" in g._lento_desde
+        assert "morto" not in g._lento_desde
+
+
 # ── analyze_torrent ────────────────────────────────────────────────────
 
 class TestAnalyzeTorrent:

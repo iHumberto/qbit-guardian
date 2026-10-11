@@ -170,6 +170,11 @@ Todas as opções ficam no arquivo `config.json` e podem ser editadas pela Web U
     "remove_no_seeds": false,
     "no_seeds_time": 0,
     "no_seeds_unit": "hours",
+    "remove_slow": false,
+    "slow_speed": 0,
+    "slow_speed_unit": "KiB",
+    "slow_time": 0,
+    "slow_unit": "minutes",
     "priority_media": 7,
     "priority_normal": 1,
     "priority_skip": 0
@@ -207,7 +212,7 @@ Todas as opções ficam no arquivo `config.json` e podem ser editadas pela Web U
 | **qbit**         | `url` (esquema + host + porta), `api_key` — conexão com sua instância do qBittorrent                 |
 | **sonarr**       | `url`, `api_key` — opcional, deixe em branco para desativar                                          |
 | **radarr**       | `url`, `api_key` — opcional, deixe em branco para desativar                                          |
-| **guardian**     | `check_interval_seconds` (0 = modo webhook), `reevaluate_interval_seconds` (de quanto em quanto tempo stalled/sem seeds é reavaliado — é o único trabalho periódico que sobra no modo webhook; 0 desliga), `retry_interval_seconds`, listas de extensões, regras de stalled/sem seeds, prioridades |
+| **guardian**     | `check_interval_seconds` (0 = modo webhook), `reevaluate_interval_seconds` (de quanto em quanto tempo stalled/sem seeds é reavaliado — é o único trabalho periódico que sobra no modo webhook; 0 desliga), `retry_interval_seconds`, listas de extensões, regras de stalled/sem seeds/lentidão (`remove_slow` + `slow_speed`/`slow_speed_unit` em KiB/MiB/GiB/TiB por segundo e `slow_time`/`slow_unit`), prioridades |
 | **notifications** | `apprise_url` — URL compatível com Apprise (veja [documentação do Apprise](https://github.com/caronc/apprise)) |
 | **webui**        | `user`, `password`, `secret_key` — provisionados no primeiro startup. A senha fica como hash PBKDF2; a `secret_key` assina o cookie de sessão |
 

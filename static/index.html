@@ -330,6 +330,16 @@
           <input id="check_interval" type="number" min="0" placeholder="300">
           <span class="help" data-i18n="help_check_interval">0 desativa o polling — use com o script de webhook no qBit</span>
         </div>
+        <div class="field">
+          <label for="reevaluate_interval" data-i18n="label_reevaluate_interval">Reavaliação da fila (segundos)</label>
+          <input id="reevaluate_interval" type="number" min="0" placeholder="300">
+          <span class="help" data-i18n="help_reevaluate_interval">Ritmo em que torrents sem metadados e critérios de remoção são revistos. É a granularidade dos limites de tempo acima — um limite menor que este nunca é atingido antes do próximo ciclo. 0 desliga.</span>
+        </div>
+        <div class="field">
+          <label for="retry_interval" data-i18n="label_retry_interval">Retentativa de conexão (segundos)</label>
+          <input id="retry_interval" type="number" min="1" placeholder="120">
+          <span class="help" data-i18n="help_retry_interval">Intervalo entre tentativas quando o qBittorrent está inacessível</span>
+        </div>
 
         <div class="field">
           <label for="valid_extensions" data-i18n="label_valid_extensions">Extensões de mídia válidas (uma por linha)</label>
@@ -402,6 +412,31 @@
               <option value="hours" selected data-i18n-option="unit_hours">horas</option>
             </select>
           </div>
+        </div>
+
+        <div class="toggle-block">
+          <div class="head">
+            <label for="remove_slow" data-i18n="label_remove_slow">Remover torrents abaixo da velocidade mínima</label>
+            <input type="checkbox" class="switch" id="remove_slow">
+          </div>
+          <div class="inline">
+            <input type="number" id="slow_speed" min="0" max="999999" value="0" placeholder="0">
+            <select id="slow_speed_unit">
+              <option value="KiB" selected data-i18n-option="unit_kib">KiB/s</option>
+              <option value="MiB" data-i18n-option="unit_mib">MiB/s</option>
+              <option value="GiB" data-i18n-option="unit_gib">GiB/s</option>
+              <option value="TiB" data-i18n-option="unit_tib">TiB/s</option>
+            </select>
+          </div>
+          <div class="inline">
+            <input type="number" id="slow_time" min="0" max="999" value="0" placeholder="0">
+            <select id="slow_unit">
+              <option value="seconds" data-i18n-option="unit_seconds">segundos</option>
+              <option value="minutes" selected data-i18n-option="unit_minutes">minutos</option>
+              <option value="hours" data-i18n-option="unit_hours">horas</option>
+            </select>
+          </div>
+          <span class="help" data-i18n="help_remove_slow">Julga a média na janela, não o pico instantâneo. Avalia só torrents em download — nunca os da fila.</span>
         </div>
       </div>
     </div>
@@ -570,6 +605,13 @@ async function loadConfig() {
     setVal('remove_no_seeds', c.guardian.remove_no_seeds);
     setVal('no_seeds_time', c.guardian.no_seeds_time);
     setVal('no_seeds_unit', c.guardian.no_seeds_unit);
+    setVal('remove_slow', c.guardian.remove_slow);
+    setVal('slow_speed', c.guardian.slow_speed);
+    setVal('slow_speed_unit', c.guardian.slow_speed_unit);
+    setVal('slow_time', c.guardian.slow_time);
+    setVal('slow_unit', c.guardian.slow_unit);
+    setVal('reevaluate_interval', c.guardian.reevaluate_interval_seconds);
+    setVal('retry_interval', c.guardian.retry_interval_seconds);
     setVal('priority_media', prioOrDefault(c.guardian.priority_media, 7));
     setVal('priority_normal', prioOrDefault(c.guardian.priority_normal, 1));
     setVal('priority_skip', prioOrDefault(c.guardian.priority_skip, 0));
@@ -618,6 +660,13 @@ async function saveConfig() {
       remove_no_seeds: getCheck('remove_no_seeds'),
       no_seeds_time: parseInt(getVal('no_seeds_time')) || 0,
       no_seeds_unit: getVal('no_seeds_unit'),
+      remove_slow: getCheck('remove_slow'),
+      slow_speed: parseFloat(getVal('slow_speed')) || 0,
+      slow_speed_unit: getVal('slow_speed_unit'),
+      slow_time: parseInt(getVal('slow_time')) || 0,
+      slow_unit: getVal('slow_unit'),
+      reevaluate_interval_seconds: (v => isNaN(v = parseInt(getVal('reevaluate_interval'))) ? 300 : v)(),
+      retry_interval_seconds: (v => isNaN(v = parseInt(getVal('retry_interval'))) ? 120 : v)(),
       priority_media: (v => isNaN(v = parseInt(getVal('priority_media'))) ? 7 : v)(),
       priority_normal: (v => isNaN(v = parseInt(getVal('priority_normal'))) ? 1 : v)(),
       priority_skip: (v => isNaN(v = parseInt(getVal('priority_skip'))) ? 0 : v)()

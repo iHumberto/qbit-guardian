@@ -47,6 +47,11 @@
     "remove_no_seeds": false,
     "no_seeds_time": 0,
     "no_seeds_unit": "hours",
+    "remove_slow": false,
+    "slow_speed": 0,
+    "slow_speed_unit": "KiB",
+    "slow_time": 0,
+    "slow_unit": "minutes",
     "priority_media": 7,
     "priority_normal": 1,
     "priority_skip": 0

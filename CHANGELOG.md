@@ -5,9 +5,25 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Nao lancado]
+## [2.8.0] — 2026-10-11
 
-Mudancas de infraestrutura de teste. **Nao geram release**: nao tocam nada que o Dockerfile copia, logo a imagem publicada seria identica — e taguear republicaria no GHCR, fazendo o Watchtower trocar o container em producao por nada (o problema que a v2.3.2 consertou). Entram na proxima release que mexer em codigo.
+Velocidade minima de download: torrent que fica lento por tempo demais sai da fila.
+
+### Adicionado
+- **Remocao por velocidade sustentada abaixo de um minimo.** Cinco chaves novas: `remove_slow`, `slow_speed`, `slow_speed_unit` (`KiB`/`MiB`/`GiB`/`TiB`), `slow_time` e `slow_unit`. O caso que motivou: um torrent de 2,5 GiB baixando a **2,2 KiB/s** com ETA de **6 dias**, ocupando um slot da fila indefinidamente — um filme nessa taxa nunca termina, e com `MaxActiveDownloads` baixo ele trava o que vem atras. Como as outras remocoes, passa por `block_and_search`: o release e marcado como falho no Radarr/Sonarr, que buscam outro.
+- **`reevaluate_interval_seconds` e `retry_interval_seconds` expostos na Web UI.** Existiam desde a v2.7.0 e a v2.0.6 respectivamente, mas so no `config.json` — e ate a v2.7.2 editar o arquivo nao surtia efeito sem restart. O primeiro deixou de ser conveniencia e passou a ser **requisito** da velocidade minima: ele e a granularidade de todos os limites de tempo, e um limite menor que o intervalo nunca e atingido antes do ciclo seguinte. O rotulo na UI diz isso.
+
+### Notas
+- **A velocidade julgada e a media na janela**, nao o `dlspeed` instantaneo: `(baixado_agora - baixado_no_inicio) / tempo_decorrido`, medida desde o instante em que o torrent ficou lento. O `dlspeed` oscila demais para decidir remocao — um download de 2 KiB/s tem picos momentaneos acima de qualquer limite razoavel. Se o torrent recupera no meio, a media sobe, a janela e descartada e ele escapa.
+- **Avalia somente `state == "downloading"`.** `queuedDL` ficou fora de proposito: torrent na fila tem 0 B/s por definicao, e incluir esse estado repetiria o defeito que qualificou 51 de 54 torrents enfileirados para remocao na v2.7.0. Ha teste de regressao fixando isso, e outro cobrindo `stalledDL`, `metaDL`, `uploading`, `stoppedUP` e `checkingDL`. `stalledDL` tambem fica fora por ja ser coberto por `remove_stalled`.
+- **Unidades em base 1024 com rotulos KiB/MiB/GiB/TiB**, que e exatamente como o qBittorrent exibe velocidade na propria interface: o numero digitado aqui e comparavel ao que se le na lista de torrents, sem conversao mental. O campo `dlspeed` da API ja vem em bytes/s. Unidade desconhecida na config cai em KiB em vez de virar limite absurdo, e valor nao numerico desliga a regra em vez de estourar.
+- A remocao reaproveita o evento de notificacao `stalled`, cujo template ja expoe `{{reason}}` — a mensagem informa a media medida, a janela e o minimo configurado (ex.: `2.17 KiB/s de media por >15m (minimo 100 KiB/s)`). Nao foi criado evento novo para nao mexer na superficie de notificacoes.
+- `_lento_desde` (o estado das janelas) entra no `_prune_processed`: torrent removido ou concluido nao tem janela a manter, e sem isso o dict cresceria indefinidamente.
+- Testes: 790 -> **805**.
+
+### Infraestrutura de teste (vinha de `[Nao lancado]`)
+- **`pytest-timeout` com teto de 45 s por teste** (`pytest.ini`, `requirements-dev.txt`). O codigo tem `while True` e a suite os chama: um teste cuja condicao de parada falhe fica **pendurado** em vez de falhar. Ja aconteceu — trocar `get_config` por `load_config` nos loops deixou o `_LoopHarness` sem efeito e levou a suite de 29 s para travada. Validado com um teste descartavel de 50 s: falhou em 45,01 s. Ha paridade exigindo o teto no `pytest.ini`, o plugin em `requirements-dev.txt` e a **ausencia** dele em `requirements.txt`.
+- **Vazamento de threads na suite, introduzido na v2.7.0.** Cinco testes exercitam o ramo webhook do `guardian_loop`, que chama `_start_reevaluate_loop`; so um mockava. Os outros quatro deixavam uma thread daemon parada em `Event.wait()`, que acordava quando outro teste setava o Event e estourava com o `CONFIG_PATH` do temporario ja removido — `PytestUnhandledThreadExceptionWarning` intermitente. O `conftest` passa a neutralizar a criacao por default.
 
 ### Adicionado
 - **`pytest-timeout` com teto de 45 s por teste** (`pytest.ini`, `requirements-dev.txt`). O codigo tem `while True` (`guardian_loop`, `_reevaluate_loop`) e a suite os chama: um teste cuja condicao de parada falhe entra em espera, cai no `except Exception` do ciclo e volta ao laco, ficando **pendurado** em vez de falhar. Ja aconteceu — trocar `get_config` por `load_config` nos loops deixou o `_LoopHarness` sem efeito e levou a suite de 29 s para travada. A suite inteira roda em ~29 s e nenhum teste passa de 1 s, entao 45 s nao incomoda teste legitimo. Validado com um teste descartavel que dorme 50 s: `Failed: Timeout (>45.0s) from pytest-timeout` em 45,01 s.

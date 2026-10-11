@@ -121,6 +121,11 @@ def load_config():
                     "remove_no_seeds": False,
                     "no_seeds_time": 0,
                     "no_seeds_unit": "hours",
+                    "remove_slow": False,
+                    "slow_speed": 0,
+                    "slow_speed_unit": "KiB",
+                    "slow_time": 0,
+                    "slow_unit": "minutes",
                     "priority_media": 7,
                     "priority_normal": 1,
                     "priority_skip": 0
@@ -600,6 +605,103 @@ def _time_to_seconds(value, unit):
         return int(value) * 3600
 
 
+_UNIDADES_VELOCIDADE = {
+    "KiB": 1024,
+    "MiB": 1024 ** 2,
+    "GiB": 1024 ** 3,
+    "TiB": 1024 ** 4,
+}
+
+
+def _speed_to_bytes(valor, unidade):
+    """Converte o par (valor, unidade) da config para bytes por segundo.
+
+    Base 1024 e rotulos KiB/MiB/GiB/TiB de proposito: e exatamente como o
+    qBittorrent exibe velocidade na propria interface, entao o numero que o
+    usuario digita aqui e comparavel ao que ele le na lista de torrents sem
+    fazer conta. O campo `dlspeed` da API ja vem em bytes/s.
+    """
+    try:
+        valor = float(valor)
+    except (TypeError, ValueError):
+        return 0.0
+    return valor * _UNIDADES_VELOCIDADE.get(unidade, _UNIDADES_VELOCIDADE["KiB"])
+
+
+def _fmt_speed(bytes_por_s):
+    """Formata bytes/s na maior unidade que ainda deixa o numero legivel."""
+    valor = float(bytes_por_s)
+    for unidade in ("TiB", "GiB", "MiB"):
+        fator = _UNIDADES_VELOCIDADE[unidade]
+        if valor >= fator:
+            return f"{valor / fator:.2f} {unidade}/s"
+    if valor >= 1024:
+        return f"{valor / 1024:.2f} KiB/s"
+    return f"{valor:.0f} B/s"
+
+
+def is_slow(torrent, cfg):
+    """Verifica se o torrent deve ser removido por velocidade abaixo do minimo.
+
+    **Esta funcao tem efeito colateral**, diferente de `is_stalled`: mantem
+    `_lento_desde` para saber desde quando o torrent esta lento. Sem esse
+    ponto de partida nao da para medir "x minutos abaixo de y" — so dava para
+    olhar o `dlspeed` instantaneo, que oscila demais (um download de 2 KiB/s
+    tem picos momentaneos acima de qualquer limite razoavel).
+
+    A velocidade julgada e a **media na janela**: `(baixado_agora -
+    baixado_no_inicio) / tempo_decorrido`. Se o torrent recupera no meio, a
+    media sobe, a janela e descartada e ele escapa — que e o comportamento
+    justo.
+
+    Avalia **somente** `state == "downloading"`. `queuedDL` esta fora de
+    proposito: torrent na fila tem 0 B/s por definicao, e incluir esse estado
+    repetiria o defeito que qualificou 51 de 54 torrents enfileirados para
+    remocao na v2.7.0. `stalledDL` tambem fica fora, por ja ser coberto por
+    `remove_stalled`.
+    """
+    g = cfg["guardian"]
+    h = torrent.get("hash")
+
+    if torrent.get("state") != "downloading":
+        _lento_desde.pop(h, None)
+        return False, ""
+
+    if not g.get("remove_slow"):
+        return False, ""
+
+    limite = _speed_to_bytes(g.get("slow_speed", 0), g.get("slow_speed_unit", "KiB"))
+    segundos = _time_to_seconds(g.get("slow_time", 0), g.get("slow_unit", "minutes"))
+    if limite <= 0 or segundos <= 0:
+        return False, ""
+
+    agora = time.time()
+    baixado = torrent.get("downloaded", 0) or 0
+
+    if h not in _lento_desde:
+        # Abre a janela so quando a leitura instantanea ja sugere lentidao:
+        # marcar todo torrent saudavel encheria o dict sem necessidade.
+        if (torrent.get("dlspeed") or 0) < limite:
+            _lento_desde[h] = (agora, baixado)
+        return False, ""
+
+    inicio, bytes_inicio = _lento_desde[h]
+    decorrido = agora - inicio
+    if decorrido <= 0:
+        return False, ""
+
+    media = (baixado - bytes_inicio) / decorrido
+    if media >= limite:
+        _lento_desde.pop(h, None)
+        return False, ""
+    if decorrido >= segundos:
+        _lento_desde.pop(h, None)
+        return True, (f"{_fmt_speed(media)} de media por "
+                      f">{g.get('slow_time')}{str(g.get('slow_unit', 'minutes'))[0]} "
+                      f"(minimo {g.get('slow_speed')} {g.get('slow_speed_unit', 'KiB')}/s)")
+    return False, ""
+
+
 def _stalled_threshold(cfg):
     """Limiar configurado de stalled, como texto ("15 minutes").
 
@@ -628,6 +730,12 @@ def check_stalled_and_remove(torrent):
         return False
 
     stalled, stalled_reason = is_stalled(torrent, cfg)
+    if not stalled:
+        # Avaliado depois do stalled de proposito: um torrent que ja esta
+        # `stalledDL` sai pelo criterio de stalled, com a mensagem propria.
+        # `is_slow` so julga `downloading`, entao nao ha sobreposicao real —
+        # a ordem apenas garante a mensagem mais especifica.
+        stalled, stalled_reason = is_slow(torrent, cfg)
     if stalled:
         hash_ = torrent["hash"]
         name = torrent["name"]
@@ -751,10 +859,22 @@ _processed = set()
 _check_count = 0
 _parar_reevaluate = threading.Event()
 
+# hash -> (instante em que ficou lento, bytes baixados naquele instante).
+# Guardar o PONTO DE PARTIDA, e nao a ultima medicao, e o que permite medir
+# velocidade media na janela inteira de lentidao em vez de confiar no `dlspeed`
+# instantaneo, que oscila demais para decidir remocao.
+_lento_desde = {}
+
 
 def _prune_processed(current_hashes):
-    """Limpa _processed: remove hashes ausentes e aplica hard cap."""
+    """Limpa _processed: remove hashes ausentes e aplica hard cap.
+
+    Limpa tambem `_lento_desde`: torrent removido ou concluido nao tem janela
+    de lentidao a manter, e sem isso o dict cresceria indefinidamente.
+    """
     _processed.intersection_update(current_hashes)
+    for h in [h for h in _lento_desde if h not in current_hashes]:
+        _lento_desde.pop(h, None)
     if len(_processed) > MAX_PROCESSED_SIZE:
         excess = len(_processed) - MAX_PROCESSED_SIZE
         remove = set(list(_processed)[:excess])

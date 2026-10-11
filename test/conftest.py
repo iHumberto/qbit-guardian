@@ -32,6 +32,9 @@ def reset_guardian_globals():
         # Event de modulo: se um teste o deixa setado, o loop de reavaliacao do
         # teste seguinte encerra na primeira espera e o motivo fica invisivel.
         g._parar_reevaluate.clear()
+        # Janelas de lentidao: um teste que deixa hash marcado como lento faria
+        # o seguinte remover torrent que nunca ficou lento.
+        g._lento_desde.clear()
 
     _limpar()
     yield
