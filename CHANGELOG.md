@@ -5,6 +5,37 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] — 2026-10-11
+
+Retrabalho da home: grade assimetrica, card central em duas colunas e a ajuda inline movida para a documentacao.
+
+### Mudado
+- **A grade de tres colunas deixou de ser simetrica.** Era 365 / 365 / 365; agora e **274 / 548 / 320** — nenhuma coluna igual a outra, e cada uma por um motivo: a esquerda tem campos de uma linha, a central abriga duas colunas internas, e a direita tem caixas de texto que se edita de verdade. A largura de conteudo foi de 1151 para **1198px**. A proporcao e declarada em `fr` (`274fr 548fr 320fr`) e nao em largura fixa, para encolher junto em vez de estourar a viewport; os numeros repetem os tokens porque `<flex>` nao aceita `calc()`, e ha teste de paridade entre os dois.
+- **O card do Guardian virou duas colunas internas.** Ele tinha onze campos empilhados. Como a grade estica as tres colunas juntas, a altura dele virava a altura das outras duas, e os cards de qBittorrent/Radarr/Sonarr e o de Notificacoes — que tem pouca coisa — ficavam com vazio acumulado no rodape. Dividido, o card perdeu **cerca de 40% da altura** e as outras colunas encolheram junto. Os campos preenchem linha a linha: Polling | Reavaliar fila, Reconexao | Prioridade midia, e assim por diante.
+- **Rotulos curtos.** `Intervalo de verificacao (segundos, 0 = modo webhook)` virou **Polling**; `Reavaliacao da fila (segundos)` virou **Reavaliar fila**; `Retentativa de conexao (segundos)` virou **Reconexao**; `Prioridade para arquivos de midia (0, 1, 6 ou 7)` virou **Prioridade midia**. Os tres rotulos de remocao perderam o `Remover torrents`, que subiu uma vez so para o cabecalho do grupo.
+- **A unidade saiu do rotulo e foi para o lado da caixa** (`300` `s`). Tirar o `(segundos)` sem isso levaria embora uma informacao que nao e ajuda: e parte do campo.
+- **As caixas de Polling, Reavaliar fila e Reconexao ocupam a coluna** (223px), sobrando so o espaco da unidade. Elas chegaram a ter 88px fixos, o que deixava um vazio de 150px dentro da propria coluna.
+- Rotulos do card de Notificacoes encurtados para caber em uma linha na coluna estreita: **Otimizado**, **Removido (perigoso)**, **Removido (parado)**. A palavra "Mensagem" era redundante com a caixa de texto logo abaixo.
+- **Os controles de velocidade minima sao centralizados**; o rotulo e o liga/desliga seguem nas bordas do bloco, que e onde marcam onde ele comeca e termina. A frase atravessa as duas colunas e e curta demais para encher a largura — alinhada a esquerda, ficava pendurada com um vazio de ~130px a direita.
+- `--col` deu lugar a `--col-side`, `--col-main` e `--col-notif`; a largura de formulario curto (modal de conta e tela de login) virou **`--col-form`**, mesmo token nos dois lugares.
+
+### Removido
+- **Os textos de ajuda embaixo dos campos.** Eram cinco, um deles com tres linhas, e disputavam atencao com os proprios controles. Tudo o que eles diziam esta agora em `docs/*/USAGE.md`, numa **referencia de campos** que o painel nao tinha: cada campo, o que faz, e a chave correspondente no `config.json` — a ligacao entre rotulo da tela e chave do arquivo nao estava documentada em lugar nenhum.
+- A unica ajuda que sobrou na tela e a do modal de conta, que e regra do formulario (a senha atual e sempre obrigatoria) e nao explicacao de para que serve o campo.
+
+### Adicionado
+- **Tooltip de variaveis nas caixas de mensagem.** A lista de `{{variaveis}}` ocupava uma linha fixa sob cada caixa; agora abre num `{ }` ao lado do rotulo, em hover ou com o teclado. E a unica ajuda que ficou na tela, de proposito: quem ajusta o texto de uma mensagem precisa dos nomes na mao e nao vai abrir a documentacao so para reordenar duas linhas. O icone e `{ }` e nao `?` porque nomeia o que entrega e ja mostra o formato do que vai na caixa.
+- `prefers-reduced-motion` respeitado — a UI tem transicao em switch e em tooltip e nao oferecia saida.
+
+### Notas
+- **Acessibilidade do tooltip:** `aria-describedby` alem do `aria-label`. So com o rotulo, um leitor de tela anuncia "Variaveis que esta mensagem aceita, botao" e para — as variaveis nunca chegam a quem nao ve a tela. O `{ }` leva `aria-hidden` para nao ser lido duas vezes.
+- **O fundo do tooltip e `--bg`, nao `--card`:** ele abre *sobre* o card, e a cor do card nao separaria um do outro.
+- **O titulo dos cards da coluna 1 voltou a alinhar com os vizinhos.** O `space-evenly` que distribuia a sobra punha ar *acima* do `<h2>` tambem, e o titulo descia alguns pixels. `space-between` mantem o titulo no topo e reparte a sobra entre os campos.
+- **O breakpoint acompanhou a largura do conteudo.** Com a grade em 1198px (1238 com o padding do body) e o breakpoint parado em 1199, existiria uma faixa de 1200 a 1238 em que a grade continuaria em tres colunas sem caber — e a pagina ganharia rolagem horizontal. Passou para 1245px, e ha teste que amarra um ao outro.
+- Validado no navegador em pt-BR e en-US, a 1920px, a 1210px e empilhado: nenhum rotulo quebra em tres linhas, nenhum controle estoura a borda do card, nenhuma rolagem horizontal, e as tres colunas medem **274 / 548 / 320** terminando na mesma altura.
+- Nada mudou no motor: `guardian.py` nao foi tocado. As chaves do `config.json` sao as mesmas — quem atualizar nao precisa mexer em configuracao.
+- Testes: 815 -> **870**. Travam a proporcao da grade, a ordem dos campos nas duas colunas, a presenca da unidade ao lado das caixas de tempo, a ausencia de ajuda inline no card central, o tooltip (escondido por padrao, abre em hover e em foco, contrasta com o card, tem nome acessivel) e a exigencia de que a documentacao cubra cada campo que perdeu a explicacao na tela.
+
 ## [2.8.2] — 2026-10-11
 
 Espera na fila deixa de contar como inatividade do torrent.
@@ -47,11 +78,7 @@ Velocidade minima de download: torrent que fica lento por tempo demais sai da fi
 - `_lento_desde` (o estado das janelas) entra no `_prune_processed`: torrent removido ou concluido nao tem janela a manter, e sem isso o dict cresceria indefinidamente.
 - Testes: 790 -> **805**.
 
-### Infraestrutura de teste (vinha de `[Nao lancado]`)
-- **`pytest-timeout` com teto de 45 s por teste** (`pytest.ini`, `requirements-dev.txt`). O codigo tem `while True` e a suite os chama: um teste cuja condicao de parada falhe fica **pendurado** em vez de falhar. Ja aconteceu — trocar `get_config` por `load_config` nos loops deixou o `_LoopHarness` sem efeito e levou a suite de 29 s para travada. Validado com um teste descartavel de 50 s: falhou em 45,01 s. Ha paridade exigindo o teto no `pytest.ini`, o plugin em `requirements-dev.txt` e a **ausencia** dele em `requirements.txt`.
-- **Vazamento de threads na suite, introduzido na v2.7.0.** Cinco testes exercitam o ramo webhook do `guardian_loop`, que chama `_start_reevaluate_loop`; so um mockava. Os outros quatro deixavam uma thread daemon parada em `Event.wait()`, que acordava quando outro teste setava o Event e estourava com o `CONFIG_PATH` do temporario ja removido — `PytestUnhandledThreadExceptionWarning` intermitente. O `conftest` passa a neutralizar a criacao por default.
-
-### Adicionado
+### Adicionado (infraestrutura de teste, vinha de `[Nao lancado]`)
 - **`pytest-timeout` com teto de 45 s por teste** (`pytest.ini`, `requirements-dev.txt`). O codigo tem `while True` (`guardian_loop`, `_reevaluate_loop`) e a suite os chama: um teste cuja condicao de parada falhe entra em espera, cai no `except Exception` do ciclo e volta ao laco, ficando **pendurado** em vez de falhar. Ja aconteceu — trocar `get_config` por `load_config` nos loops deixou o `_LoopHarness` sem efeito e levou a suite de 29 s para travada. A suite inteira roda em ~29 s e nenhum teste passa de 1 s, entao 45 s nao incomoda teste legitimo. Validado com um teste descartavel que dorme 50 s: `Failed: Timeout (>45.0s) from pytest-timeout` em 45,01 s.
 - Testes de paridade da propria rede de seguranca: `pytest.ini` precisa declarar `timeout` dentro de uma faixa util, o plugin precisa estar em `requirements-dev.txt`, e **nao** pode estar em `requirements.txt` (dependencia de teste nao engorda a imagem do RPi).
 

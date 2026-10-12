@@ -2063,6 +2063,21 @@ def _read_static(name):
                   lambda m: chr(int(m.group(1), 16)), raw)
 
 
+def _bloco_balanceado(html, inicio):
+    """Recorta de `inicio` ate o </div> que fecha a <div> aberta ali.
+
+    Substitui os regex que casavam `\n        </div>` — indentacao exata. Com
+    os blocos dentro do grid de duas colunas do card central a indentacao
+    mudou, e um teste ancorado nela procura um fechamento que nao existe.
+    """
+    nivel = 0
+    for m in re.finditer(r"<div\b|</div>", html[inicio:]):
+        nivel += 1 if m.group(0).startswith("<div") else -1
+        if nivel == 0:
+            return html[inicio:inicio + m.end()]
+    raise AssertionError("<div> sem fechamento a partir de %d" % inicio)
+
+
 def _i18n_tables():
     """Extrai as tabelas pt-BR / en-US do static/i18n.js.
 
@@ -2170,7 +2185,9 @@ class TestWebUILayout:
         ], secoes
 
     @pytest.mark.parametrize("token,valor", [
-        ("--col", "365px"),
+        ("--col-side", "274px"),
+        ("--col-main", "548px"),
+        ("--col-notif", "320px"),
         ("--gutter", "28px"),
         ("--r-card", "15px"),
         ("--r-pill", "13px"),
@@ -2186,10 +2203,85 @@ class TestWebUILayout:
         assert re.search(re.escape(token) + r":\s*" + re.escape(valor) + r"\s*;", m.group(1)), \
             f"{token} deveria ser {valor}"
 
-    def test_largura_do_container_deriva_dos_tokens(self):
-        """A largura maxima e 3 colunas + 2 gutters, nao um numero solto."""
+    def _tokens_de_coluna(self):
         html = _read_static("index.html")
-        assert re.search(r"\.container\s*\{[^}]*max-width:\s*calc\(var\(--col\)\s*\*\s*3", html)
+        root = re.search(r":root\s*\{(.*?)\}", html, re.S).group(1)
+        return [int(re.search(r"--col-%s:\s*(\d+)px" % nome, root).group(1))
+                for nome in ("side", "main", "notif")]
+
+    def test_largura_do_container_deriva_dos_tokens(self):
+        """A largura maxima e a soma das tres colunas + 2 gutters.
+
+        Numero solto aqui sai de sincronia na primeira vez que uma coluna
+        mudar de largura — foi o que aconteceu quando Notificacoes passou de
+        274 para 320.
+        """
+        html = _read_static("index.html")
+        assert re.search(r"\.container\s*\{[^}]*max-width:\s*calc\(\s*"
+                         r"var\(--col-side\)\s*\+\s*"
+                         r"var\(--col-main\)\s*\+\s*var\(--col-notif\)\s*"
+                         r"\+\s*var\(--gutter\)\s*\*\s*2\s*\)", html, re.S)
+
+    def test_as_tres_colunas_tem_larguras_diferentes(self):
+        """Nenhuma coluna e igual a outra, e cada uma tem um motivo.
+
+        A esquerda tem campos de uma linha; a central abriga duas colunas
+        internas; a direita tem caixas de texto que se edita de verdade.
+        """
+        lado, centro, notif = self._tokens_de_coluna()
+        assert centro == lado * 2, f"a central ({centro}) deveria caber duas colunas internas"
+        assert notif > lado, f"Notificacoes ({notif}) nao pode ser mais estreita que a esquerda"
+
+    def test_proporcao_em_fr_bate_com_os_tokens_em_px(self):
+        """Os `fr` da grade repetem os numeros dos tokens porque `<flex>` nao
+        aceita `calc()`. Esta e a amarra que impede os dois de divergirem.
+        """
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.grid\s*\{(.*?)\}", html, re.S)
+        assert m, "regra .grid nao encontrada"
+        fr = re.search(r"grid-template-columns:\s*(\d+)fr\s+(\d+)fr\s+(\d+)fr", m.group(1))
+        assert fr, m.group(1)
+        assert [int(v) for v in fr.groups()] == self._tokens_de_coluna(), \
+            f"grid-template-columns {fr.groups()} != tokens {self._tokens_de_coluna()}"
+
+    def test_grade_nao_usa_largura_fixa(self):
+        """Com `px` em vez de `fr` a grade estoura a viewport antes do
+        breakpoint em vez de encolher junto."""
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.grid\s*\{(.*?)\}", html, re.S)
+        assert not re.search(r"grid-template-columns:[^;]*\dpx", m.group(1)), m.group(1)
+
+    def test_breakpoint_acompanha_a_largura_do_conteudo(self):
+        """O breakpoint nao pode ficar ABAIXO da largura do conteudo.
+
+        Se ficar, existe uma faixa de viewports entre os dois em que a grade
+        continua em tres colunas sem caber — e a pagina ganha rolagem
+        horizontal. Quando Notificacoes foi de 274 para 320, o conteudo passou
+        de 1152 para 1198 px (1238 com o padding do body) e o breakpoint parado
+        em 1199 abriria exatamente essa faixa, de 1200 a 1238.
+
+        Empilhar um pouco antes e deliberado: na folga o layout caberia, mas
+        encostado nas bordas da janela.
+        """
+        html = _read_static("index.html")
+        conteudo = sum(self._tokens_de_coluna()) + 28 * 2
+        m = re.search(r"@media \(max-width:(\d+)px\) \{\s*\.grid \{ grid-template-columns:1fr", html)
+        assert m, "breakpoint da grade nao encontrado"
+        corpo = re.search(r"body \{(.*?)\}", html, re.S).group(1)
+        padding = re.search(r"padding:\s*\d+px\s+(\d+)px", corpo)
+        total = conteudo + int(padding.group(1)) * 2
+        assert int(m.group(1)) >= total, \
+            f"empilha em {m.group(1)}px, mas o conteudo so para de caber em {total}px"
+
+    def test_modal_nao_segue_a_coluna_da_grade(self):
+        """A lateral virou 274px: estreita para um formulario de tres campos.
+
+        Mesmo token da tela de login — e a mesma coisa: largura confortavel
+        para um formulario curto, que nao deriva da grade de cards.
+        """
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.modal\s*\{(.*?)\}", html, re.S)
+        assert m and "var(--col-form)" in m.group(1), m.group(1) if m else None
 
     def test_todo_campo_tem_label_associado(self):
         """REGRESSAO: 13 campos ficaram sem `for`, sem leitor de tela conseguir ler."""
@@ -2256,22 +2348,21 @@ class TestWebUIEspacamento:
         """Espaco sobrando na coluna 3 vira area de edicao, nao vazio."""
         assert "flex:1" in self._regra(".msg textarea")
 
-    @pytest.mark.parametrize("lid", ["remove_stalled", "remove_no_seeds"])
+    def _blocos_de_remocao(self):
+        html = _read_static("index.html")
+        achados = [_bloco_balanceado(html, m.start())
+                   for m in re.finditer(r'<div class="toggle-block[^"]*">', html)]
+        assert achados, "nenhum bloco de remocao encontrado"
+        return achados
+
+    @pytest.mark.parametrize("lid", ["remove_stalled", "remove_no_seeds", "remove_slow"])
     def test_toggle_de_remocao_fica_na_linha_do_rotulo(self, lid):
         """REGRESSAO: o toggle vinha depois da unidade e sobrava espaco a direita.
 
         Mesma anatomia dos blocos de mensagem — rotulo a esquerda, liga/desliga
         encostado na borda direita, controles na linha de baixo.
         """
-        html = _read_static("index.html")
-        bloco = re.search(
-            r'<div class="toggle-block">\s*<div class="head">(.*?)</div>(.*?)</div>\s*</div>',
-            html, re.S)
-        assert bloco, "bloco de remocao nao segue a estrutura head + inline"
-
-        m = re.search(r'<div class="toggle-block">(.*?)\n        </div>', html, re.S)
-        blocos = re.findall(r'<div class="toggle-block">(.*?)\n        </div>', html, re.S)
-        alvo = next((b for b in blocos if f'id="{lid}"' in b), None)
+        alvo = next((b for b in self._blocos_de_remocao() if f'id="{lid}"' in b), None)
         assert alvo, f"bloco de {lid} nao encontrado"
 
         cabeca = re.search(r'<div class="head">(.*?)</div>', alvo, re.S).group(1)
@@ -2283,6 +2374,290 @@ class TestWebUIEspacamento:
     def test_layout_antigo_de_linha_unica_nao_voltou(self):
         html = _read_static("index.html")
         assert "toggle-row" not in html
+
+
+class TestWebUICardCentral:
+    """O card do Guardian e o unico com duas colunas internas.
+
+    Ele tinha onze campos empilhados numa coluna. Como a grade estica as tres
+    colunas juntas, a altura dele virava a altura das outras duas: os cards de
+    qBittorrent/Radarr/Sonarr e o de Notificacoes, que tem pouca coisa, ficavam
+    com um vazio enorme no rodape. Dividir em duas colunas corta a altura pela
+    metade e as outras encolhem junto.
+    """
+
+    def _duo(self):
+        html = _read_static("index.html")
+        i = html.find('<div class="duo">')
+        assert i >= 0, "grid de duas colunas nao encontrado"
+        return _bloco_balanceado(html, i)
+
+    def test_tem_grid_de_duas_colunas(self):
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.duo\s*\{([^}]*)\}", html)
+        assert m, "falta a regra .duo"
+        assert "repeat(2," in m.group(1).replace(" ", ""), m.group(1)
+
+    def test_so_o_card_central_se_divide(self):
+        """As laterais tem um campo por linha: dividir deixaria tudo apertado."""
+        html = _read_static("index.html")
+        assert html.count('<div class="duo">') == 1
+
+    def test_ordem_dos_campos_preenche_linha_a_linha(self):
+        """Polling | Reavaliar fila, depois Reconexao | Prioridade midia.
+
+        A ordem e o layout: o grid preenche da esquerda para a direita, entao
+        trocar a ordem no HTML move o campo de lugar na tela.
+        """
+        campos = re.findall(r'<(?:input|select|textarea) id="(\w+)"', self._duo())
+        assert campos[:8] == [
+            "check_interval", "reevaluate_interval",
+            "retry_interval", "priority_media",
+            "priority_normal", "priority_skip",
+            "valid_extensions", "dangerous_extensions",
+        ], campos[:8]
+
+    def test_campos_de_tempo_declaram_a_unidade(self):
+        """O rotulo perdeu o "(segundos)" — a unidade foi para o lado da caixa.
+
+        Sem isto a limpeza dos rotulos levaria embora a informacao de que o
+        numero e em segundos, que nao e ajuda: e parte do campo.
+        """
+        duo = self._duo()
+        for cid in ("check_interval", "reevaluate_interval", "retry_interval"):
+            assert re.search(r'<div class="num">\s*<input id="' + cid + r'".*?'
+                             r'data-i18n="unit_s"', duo, re.S), \
+                f"{cid} sem a unidade ao lado da caixa"
+
+    def test_caixa_de_tempo_ocupa_a_coluna(self):
+        """A caixa cresce com a coluna; sobra so o espaco da unidade.
+
+        Ela ja teve 88px fixos — curta demais, com um vazio de 150px a direita
+        dentro da propria coluna.
+        """
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.field \.num input\s*\{([^}]*)\}", html)
+        assert m, "falta a regra da caixa numerica"
+        regra = m.group(1).replace(" ", "")
+        assert "flex:1" in regra, regra
+        assert not re.search(r"(?<!min-)width:\d+px", regra), \
+            "largura fixa volta a deixar vazio dentro da coluna"
+
+    def test_caixa_de_tempo_encolhe_abaixo_do_tamanho_intrinseco(self):
+        """Item de flex nao encolhe abaixo do conteudo sem `min-width:0`.
+
+        Um <input> tem ~170px de largura intrinseca; sem isto o par
+        caixa + unidade estoura a coluna de 240px.
+        """
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.field \.num input\s*\{([^}]*)\}", html)
+        assert "min-width:0" in m.group(1).replace(" ", ""), m.group(1)
+
+    def test_unidade_nao_estica_junto(self):
+        """O `s` ocupa so o que precisa — quem cresce e a caixa."""
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.num \.unidade\s*\{([^}]*)\}", html)
+        assert m and "flex:0 0 auto" in m.group(1), m.group(1) if m else None
+
+    def test_controles_da_velocidade_sao_centralizados(self):
+        """A frase atravessa as duas colunas e e curta demais para encher a
+        largura: centralizada ela fica sob o meio do bloco em vez de pendurada
+        na esquerda com um vazio a direita."""
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.toggle-block\.span2 > \.inline\s*\{([^}]*)\}", html)
+        assert m, "falta a regra que centraliza os controles de velocidade"
+        assert "justify-content:center" in m.group(1).replace(" ", ""), m.group(1)
+
+    def test_rotulo_da_velocidade_nao_acompanha_a_centralizacao(self):
+        """O rotulo e o toggle marcam as bordas do bloco: centraliza-los
+        tiraria a referencia de onde o bloco comeca e termina."""
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.head\s*\{([^}]*)\}", html)
+        assert m and "space-between" in m.group(1), m.group(1) if m else None
+
+    def test_bloco_de_velocidade_atravessa_as_duas_colunas(self):
+        """Os dois pares formam uma frase — abaixo de X por Y. Em colunas
+        separadas o limite perderia a janela em que ele vale."""
+        duo = self._duo()
+        i = duo.index('id="remove_slow"')
+        abertura = duo.rindex('<div class="toggle-block', 0, i)
+        assert "span2" in duo[abertura:i], "o bloco de velocidade deveria ser span2"
+
+    def test_frase_da_velocidade_tem_conector(self):
+        """Sem o "por", os quatro controles viram uma fileira de caixas sem
+        relacao declarada entre os dois pares."""
+        duo = self._duo()
+        assert 'data-i18n="conector_por"' in duo
+
+    def test_span2_tem_regra_de_grid(self):
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.duo > \.span2\s*\{([^}]*)\}", html)
+        assert m, "falta a regra .duo > .span2"
+        assert "1 / -1" in m.group(1), m.group(1)
+
+    def test_blocos_vizinhos_alinham_os_controles(self):
+        """Os rotulos dos dois blocos tem alturas diferentes (um quebra em duas
+        linhas). Sem empurrar os controles para a base, as caixas ficam em
+        degrau dentro da mesma linha do grid."""
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.duo > \.toggle-block\s*\{([^}]*)\}", html)
+        assert m, "falta a regra que alinha os blocos de remocao"
+        assert "space-between" in m.group(1), m.group(1)
+
+    def test_verbo_remover_subiu_para_o_grupo(self):
+        """Era repetido nos tres rotulos."""
+        assert '<h3 class="span2" data-i18n="section_remove">' in _read_static("index.html")
+
+    @pytest.mark.parametrize("chave", ["label_remove_stalled", "label_remove_no_seeds",
+                                       "label_remove_slow"])
+    def test_rotulo_de_remocao_so_declara_a_condicao(self, chave):
+        """Com o verbo no cabecalho do grupo, cada linha diz so a condicao."""
+        js = _read_static("i18n.js")
+        valores = re.findall(chave + r":\s*'([^']*)'", js)
+        assert len(valores) == 2, f"{chave} deveria existir nos dois idiomas"
+        for valor in valores:
+            assert "Remover" not in valor and "Remove" not in valor, valor
+
+
+class TestWebUIAjudaSaiuDaTela:
+    """A home nao explica mais campo por campo: a documentacao faz isso.
+
+    Os textos embaixo de cada campo disputavam atencao com os proprios
+    controles — e um deles tinha tres linhas. Os nomes das variaveis de
+    mensagem sao a unica excecao e viraram tooltip, porque quem edita o texto
+    precisa deles na mao e nao vai abrir a doc para mudar um layout.
+    """
+
+    HELPS_REMOVIDOS = ["help_check_interval", "help_reevaluate_interval",
+                       "help_retry_interval", "help_priority_media",
+                       "help_remove_slow"]
+
+    @pytest.mark.parametrize("chave", HELPS_REMOVIDOS)
+    @pytest.mark.parametrize("fonte", ["index.html", "i18n.js"])
+    def test_chave_de_ajuda_nao_sobrou(self, fonte, chave):
+        """Chave orfa no i18n volta para a tela no proximo copiar e colar."""
+        assert chave not in _read_static(fonte), f"{chave} ainda em {fonte}"
+
+    def test_nenhum_campo_do_guardian_tem_ajuda_embaixo(self):
+        html = _read_static("index.html")
+        duo = _bloco_balanceado(html, html.index('<div class="duo">'))
+        assert 'class="help"' not in duo, "voltou texto de ajuda no card central"
+
+    def test_a_unica_ajuda_que_fica_e_a_do_modal(self):
+        """`help_cred` fica: a senha atual ser obrigatoria e regra do
+        formulario, nao explicacao de para que serve o campo."""
+        html = _read_static("index.html")
+        assert html.count('class="help"') == 1, \
+            "a home voltou a explicar campo na tela"
+        assert 'data-i18n="help_cred"' in html
+
+    def test_a_doc_cobre_os_campos_que_perderam_a_ajuda(self):
+        """A UI limpa so funciona se o conhecimento tiver outro lugar.
+
+        Cada campo que perdeu a explicacao na tela precisa aparecer na
+        referencia de campos da documentacao, nos dois idiomas.
+        """
+        campos = ["check_interval_seconds", "reevaluate_interval_seconds",
+                  "retry_interval_seconds", "priority_media",
+                  "priority_normal", "priority_skip",
+                  "valid_media_extensions", "dangerous_extensions",
+                  "remove_stalled", "remove_no_seeds", "remove_slow",
+                  "slow_speed_unit", "slow_unit"]
+        for lang in ("pt-BR", "en-US"):
+            caminho = os.path.join(REPO_ROOT, "docs", lang, "USAGE.md")
+            with open(caminho, encoding="utf-8") as f:
+                texto = f.read()
+            for campo in campos:
+                assert campo in texto, f"docs/{lang}/USAGE.md nao cobre {campo}"
+
+
+class TestWebUITooltipDeVariaveis:
+    """As variaveis de template viraram tooltip ao lado do rotulo."""
+
+    EVENTOS = ["optimized", "removed", "stalled"]
+
+    @pytest.mark.parametrize("ev", EVENTOS)
+    def test_variaveis_ficam_dentro_do_tooltip(self, ev):
+        html = _read_static("index.html")
+        assert re.search(r'<button type="button" class="dica".*?id="vars_' + ev + r'"',
+                         html, re.S), f"vars_{ev} deveria estar dentro do botao de dica"
+
+    @pytest.mark.parametrize("ev", EVENTOS)
+    def test_lista_nao_ficou_embaixo_da_caixa(self, ev):
+        """REGRESSAO: a lista ocupava uma linha fixa sob cada caixa de texto."""
+        html = _read_static("index.html")
+        assert f'<span class="help vars" id="vars_{ev}">' not in html
+
+    def test_so_as_mensagens_tem_tooltip(self):
+        """Lembrete rapido e para quem edita texto; o resto e documentacao."""
+        html = _read_static("index.html")
+        assert html.count('class="dica"') == len(self.EVENTOS)
+
+    def test_tooltip_comeca_escondido(self):
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.dica-tip\s*\{(.*?)\}", html, re.S)
+        assert m, "falta a regra .dica-tip"
+        assert "visibility:hidden" in m.group(1).replace(" ", "")
+
+    def test_tooltip_abre_no_hover_e_no_foco(self):
+        """`:focus` e nao so `:focus-visible`: em toque o navegador foca sem
+        marcar como visible, e o lembrete tem que abrir no dedo tambem."""
+        html = _read_static("index.html")
+        assert re.search(r"\.dica:hover \.dica-tip", html)
+        assert re.search(r"\.dica:focus \.dica-tip", html)
+
+    def test_tooltip_contrasta_com_o_card(self):
+        """Ele abre SOBRE o card: com `--card` de fundo nao se separaria dele."""
+        html = _read_static("index.html")
+        m = re.search(r"(?m)^\s*\.dica-tip\s*\{(.*?)\}", html, re.S)
+        assert "background:var(--bg)" in m.group(1).replace(" ", "")
+
+    def test_botao_tem_nome_acessivel(self):
+        """O icone `{ }` nao e texto que um leitor de tela saiba anunciar."""
+        html = _read_static("index.html")
+        botoes = re.findall(r'<button type="button" class="dica"(.*?)>', html, re.S)
+        assert len(botoes) == len(self.EVENTOS)
+        for b in botoes:
+            assert 'data-i18n-aria="vars_tooltip"' in b, b
+
+    @pytest.mark.parametrize("ev", EVENTOS)
+    def test_variaveis_sao_anunciadas_e_nao_so_o_botao(self, ev):
+        """O rotulo diz que ha variaveis; a descricao diz quais.
+
+        Sem `aria-describedby` um leitor de tela anuncia "Variaveis que esta
+        mensagem aceita, botao" e para — o conteudo do tooltip nunca chega a
+        quem nao ve a tela.
+        """
+        html = _read_static("index.html")
+        m = re.search(r'<button type="button" class="dica"([^>]*)>\s*'
+                      r'<span class="dica-ico"[^>]*>[^<]*</span>\s*'
+                      r'<span class="dica-tip vars" role="tooltip" id="vars_' + ev + r'"',
+                      html, re.S)
+        assert m, f"estrutura do botao de {ev} mudou"
+        assert f'aria-describedby="vars_{ev}"' in m.group(1), m.group(1)
+
+    def test_icone_e_escondido_do_leitor_de_tela(self):
+        """O nome acessivel ja esta no botao: o `{ }` seria lido duas vezes."""
+        html = _read_static("index.html")
+        icones = re.findall(r'<span class="dica-ico"(.*?)>', html)
+        assert len(icones) == len(self.EVENTOS)
+        for i in icones:
+            assert 'aria-hidden="true"' in i, i
+
+    def test_renderizacao_das_variaveis_nao_mudou_de_alvo(self):
+        """O renderVars() escreve em `vars_<evento>`; o tooltip e so o lugar
+        onde esse span passou a morar."""
+        html = _read_static("index.html")
+        assert "getElementById('vars_' + ev)" in html
+
+
+class TestWebUIMovimento:
+    """Transicoes respeitam quem pediu menos movimento."""
+
+    def test_reduced_motion_e_respeitado(self):
+        html = _read_static("index.html")
+        assert "prefers-reduced-motion" in html, \
+            "a UI tem transicao em switch e tooltip e nao oferece saida"
 
 
 class TestWebUIDocsLink:
@@ -2647,10 +3022,9 @@ class TestWebUINotifications:
     @pytest.mark.parametrize("ev", EVENTOS)
     def test_cada_evento_tem_toggle_caixa_e_variaveis(self, ev):
         html = _read_static("index.html")
-        bloco = re.search(r'<div class="msg" id="msg_' + ev + r'_wrap">(.*?)</div>\n\n',
-                          html, re.S)
-        assert bloco, f"bloco de {ev} nao encontrado"
-        corpo = bloco.group(1)
+        i = html.find(f'<div class="msg" id="msg_{ev}_wrap">')
+        assert i >= 0, f"bloco de {ev} nao encontrado"
+        corpo = _bloco_balanceado(html, i)
         assert f'id="msg_{ev}_enabled"' in corpo and 'class="switch"' in corpo
         assert f'<textarea id="msg_{ev}"' in corpo
         assert f'id="vars_{ev}"' in corpo
@@ -5113,11 +5487,17 @@ class TestWebUILogin:
         assert "docker logs qbit-guardian" in js
 
     def test_usa_os_tokens_do_design_system(self):
-        """Mesma paleta do painel — a tela de login nao e uma ilha."""
+        """Mesma paleta do painel — a tela de login nao e uma ilha.
+
+        `--col-form` e o mesmo token do modal de conta: largura confortavel
+        para um formulario curto. Ele se chamava `--col` enquanto a grade do
+        painel tinha tres colunas iguais de 365px — hoje a grade e 274/548/274
+        e o nome antigo prometia um parentesco que nao existe mais.
+        """
         html = self.html
         for token, valor in [("--bg", "#1a1a2e"), ("--card", "#16213e"),
                              ("--field", "#ffffff"), ("--accent", "#e94560"),
-                             ("--col", "365px"), ("--r-card", "15px")]:
+                             ("--col-form", "365px"), ("--r-card", "15px")]:
             assert re.search(r"%s:\s*%s" % (re.escape(token), re.escape(valor)), html), token
 
     def test_tem_seletor_de_idioma(self):

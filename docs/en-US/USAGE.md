@@ -128,6 +128,57 @@ With the integration active, whenever qbit-guardian removes a problematic torren
 
 ---
 
+## Panel field reference
+
+The panel shows the fields, not their explanation. The screen is deliberately clean — help text under every box competes for attention with the controls themselves — and **this section is where that explanation lives**.
+
+The **key** column is the field's name in `config.json`, handy when you need to edit the file directly instead of using the panel.
+
+### 🔗 qBittorrent, 🎬 Radarr and 📺 Sonarr
+
+| Field | Key | What it does |
+|---|---|---|
+| **URL** | `url` | Full address of the service, with `http://` and port. qBittorrent's is required; Radarr and Sonarr are optional. |
+| **API Key** | `api_key` | The key that lets the guardian talk to the service. See **Essential configuration** for where to find each one. |
+
+### 🛡️ Guardian
+
+The first three fields are times, all in seconds — that's what the `s` next to the box means.
+
+| Field | Key | What it does |
+|---|---|---|
+| **Polling** | `check_interval_seconds` | How often the guardian sweeps the whole torrent list. `0` disables the sweep and leaves the guardian reacting only to qBittorrent's webhook — see **Operating modes**. |
+| **Queue recheck** | `reevaluate_interval_seconds` | How often the guardian revisits torrents that had no metadata yet and reapplies the removal criteria. This is the granularity of every time limit in this section: **a limit shorter than this is never reached before the next cycle**. `0` disables the recheck. |
+| **Reconnect** | `retry_interval_seconds` | How long to wait between attempts while qBittorrent is unreachable. It needn't be short: the guardian retries forever. |
+| **Media priority** | `priority_media` | Download priority for the torrent's video files. See **File priorities**. |
+| **Auxiliary priority** | `priority_normal` | Priority for the files that come along with the media — subtitles (`.srt`), artwork (`.jpg`), metadata (`.nfo`). |
+| **Other priority** | `priority_skip` | Priority for everything that is neither media nor auxiliary. The default is `0` (skip), which is how the guardian saves bandwidth on torrent clutter. |
+| **Media extensions** | `valid_media_extensions` | One extension per line, with the dot (`.mkv`). Defines what counts as media for the priorities above. |
+| **Dangerous extensions** | `dangerous_extensions` | One per line, with the dot. A torrent containing any of them is removed whole. See **Dangerous extensions**. |
+
+The three removal rules sit under the **Remove torrents** heading — the verb is in the heading, and each line states only the condition. Each rule's switch is independent: switched off, the rule isn't evaluated, and the value stays saved for when you switch it back on.
+
+| Rule | Keys | When it fires |
+|---|---|---|
+| **Stalled longer than** | `remove_stalled`, `stalled_time`, `stalled_unit` | The torrent has made no progress for longer than the limit. See **Removing stalled torrents**. |
+| **Seedless longer than** | `remove_no_seeds`, `no_seeds_time`, `no_seeds_unit` | No seeds available for longer than the limit. See **Removing seedless torrents**. |
+| **Below the minimum speed** | `remove_slow`, `slow_speed`, `slow_speed_unit`, `slow_time`, `slow_unit` | The **average** download speed stayed below the limit for the whole window. |
+
+> **📘 Why the average and not the current speed:** a healthy torrent fluctuates. One averaging 20 KiB/s may read 2 KiB/s at the exact moment the guardian looks, and would be removed for nothing. The guardian measures how much the torrent actually downloaded over the period and divides by the time — it only removes what is genuinely slow.
+
+> ⚠️ The speed rule only evaluates torrents that are **downloading**. A torrent waiting in qBittorrent's queue isn't slow: it hasn't started. The same goes for one still fetching metadata.
+
+### 🔔 Notifications
+
+| Field | Key | What it does |
+|---|---|---|
+| **Apprise URL** | `apprise_url` | Where the messages go. See **Notifications**. |
+| **Message for…** | `events.<event>.template` | The text of each alert. Every box has a `{ }` next to its title: hover it (or **Tab** to it) to see the variables that message accepts. |
+
+> 💡 The `{ }` is the only reminder left on screen, and that's deliberate: someone adjusting a message's text needs the variable names at hand, and won't open the documentation just to reorder two lines. What each variable means is in **Editing the messages**.
+
+---
+
 ## Notifications
 
 qbit-guardian can alert you on your phone or computer whenever something important happens. It uses **Apprise** — a system that delivers messages to 100+ different services (Telegram, Discord, Slack, Pushover, email and many more).

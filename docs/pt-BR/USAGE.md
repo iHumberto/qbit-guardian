@@ -128,6 +128,57 @@ Com essa integração ativa, sempre que o qbit-guardian remover um torrent probl
 
 ---
 
+## Referência dos campos do painel
+
+O painel mostra os campos, não a explicação deles. A tela ficou limpa de propósito — explicação embaixo de cada caixa disputa atenção com os próprios controles — e **esta seção é o lugar dessa explicação**.
+
+A coluna **chave** é o nome que o campo tem no `config.json`, útil quando você precisa editar o arquivo direto em vez de usar o painel.
+
+### 🔗 qBittorrent, 🎬 Radarr e 📺 Sonarr
+
+| Campo | Chave | O que faz |
+|---|---|---|
+| **URL** | `url` | Endereço completo do serviço, com `http://` e porta. O do qBittorrent é obrigatório; Radarr e Sonarr são opcionais. |
+| **API Key** | `api_key` | A chave que autoriza o guardião a conversar com o serviço. Veja **Configuração essencial** para onde encontrar cada uma. |
+
+### 🛡️ Guardian
+
+Os três primeiros campos são tempos, todos em segundos — é o que o `s` ao lado da caixa indica.
+
+| Campo | Chave | O que faz |
+|---|---|---|
+| **Polling** | `check_interval_seconds` | De quanto em quanto tempo o guardião varre a lista inteira de torrents. `0` desliga a varredura e deixa o guardião reagindo só ao webhook do qBittorrent — veja **Modos de operação**. |
+| **Reavaliar fila** | `reevaluate_interval_seconds` | Ritmo em que o guardião revisita os torrents que ainda não tinham metadados e reaplica os critérios de remoção. É a granularidade dos limites de tempo desta seção: **um limite menor que este nunca é alcançado antes do próximo ciclo**. `0` desliga a reavaliação. |
+| **Reconexão** | `retry_interval_seconds` | Quanto esperar entre tentativas enquanto o qBittorrent estiver inacessível. Não precisa ser curto: o guardião tenta para sempre. |
+| **Prioridade mídia** | `priority_media` | Prioridade de download dos arquivos de vídeo do torrent. Veja **Prioridades de arquivos**. |
+| **Prioridade auxiliares** | `priority_normal` | Prioridade dos arquivos que acompanham a mídia — legendas (`.srt`), capas (`.jpg`), metadados (`.nfo`). |
+| **Prioridade outros** | `priority_skip` | Prioridade de tudo o que não é mídia nem auxiliar. O padrão é `0` (não baixar), que é como o guardião economiza banda com lixo de torrent. |
+| **Extensões de mídia** | `valid_media_extensions` | Uma extensão por linha, com o ponto (`.mkv`). Define o que conta como mídia para as prioridades acima. |
+| **Extensões perigosas** | `dangerous_extensions` | Uma por linha, com o ponto. Torrent que contém qualquer uma delas é removido inteiro. Veja **Extensões perigosas**. |
+
+As três regras de remoção ficam embaixo do título **Remover torrents** — o verbo está no título, e cada linha declara só a condição. O liga/desliga de cada uma é independente: desligada, a regra não é avaliada, e o valor fica guardado para quando você religar.
+
+| Regra | Chaves | Quando dispara |
+|---|---|---|
+| **Parados (stalled) há mais de** | `remove_stalled`, `stalled_time`, `stalled_unit` | O torrent está sem progresso há mais tempo que o limite. Veja **Remoção de torrents parados (stalled)**. |
+| **Sem seeds há mais de** | `remove_no_seeds`, `no_seeds_time`, `no_seeds_unit` | Nenhum seed disponível por mais tempo que o limite. Veja **Remoção de torrents sem seeds**. |
+| **Abaixo da velocidade mínima** | `remove_slow`, `slow_speed`, `slow_speed_unit`, `slow_time`, `slow_unit` | A **média** de download na janela ficou abaixo do limite durante a janela inteira. |
+
+> **📘 Por que média, e não a velocidade do momento:** torrent saudável oscila. Um que está em 20 KiB/s de média pode marcar 2 KiB/s no instante em que o guardião olha, e seria removido à toa. O guardião mede quanto o torrent baixou de fato no período e divide pelo tempo — só remove quem ficou lento de verdade.
+
+> ⚠️ A regra de velocidade só avalia torrents **em download**. Torrent esperando na fila do qBittorrent não é lento: ele não começou. O mesmo vale para quem ainda está buscando metadados.
+
+### 🔔 Notificações
+
+| Campo | Chave | O que faz |
+|---|---|---|
+| **Apprise URL** | `apprise_url` | Para onde as mensagens vão. Veja **Notificações**. |
+| **Mensagem para…** | `events.<evento>.template` | O texto de cada aviso. Cada caixa tem um `{ }` ao lado do título: passe o mouse (ou dê **Tab** até ele) para ver as variáveis que aquela mensagem aceita. |
+
+> 💡 O `{ }` é o único lembrete que ficou na tela, e de propósito: quem está ajustando o texto de uma mensagem precisa dos nomes das variáveis na mão, e não vai abrir a documentação só para mudar a ordem de duas linhas. O que cada variável significa está em **Editando as mensagens**.
+
+---
+
 ## Notificações
 
 O qbit-guardian pode te avisar pelo celular ou computador sempre que uma ação importante acontecer. Para isso, ele usa o **Apprise** — um sistema que envia mensagens para mais de 100 serviços diferentes (Telegram, Discord, Slack, Pushover, e-mail e muitos outros).

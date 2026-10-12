@@ -9,7 +9,10 @@
   /* ── Tokens ──────────────────────────────────────────────────────────
      Valores medidos no prototipo Penpot. Referencia durável no vault:
      DevOpsExpert/qbit-guardian/conceitos/design-system-webui.md
-     A grade e 3 colunas de 365px com gutters de 28px (365*3 + 28*2 = 1151).
+     A grade e assimetrica: 274 + 548 + 320, com gutters de 28 (total 1198).
+     A central abriga duas colunas internas de campos. A direita e mais larga
+     que a esquerda porque o conteudo dela e diferente: a esquerda tem campos
+     de uma linha, a direita tem caixas de texto que se edita de verdade.
   */
   :root {
     --bg: #1a1a2e;
@@ -21,8 +24,14 @@
     --muted: #cfd3e0;
     --accent: #e94560;        /* so em :focus e no toast de erro */
 
-    --col: 365px;
+    /* 274 = 75% da coluna antiga (365); 548 = 150%, e tambem 274 * 2. */
+    --col-side: 274px;
+    --col-main: 548px;
+    --col-notif: 320px;
     --gutter: 28px;
+    /* Largura de formulario curto. Nao deriva da grade: o modal de conta tem
+       tres campos e nao acompanha a coluna, que agora e estreita demais. */
+    --col-form: 365px;
     --card-pad-x: 26px;
     --card-pad-y: 14px;
 
@@ -47,7 +56,9 @@
     padding:24px 20px 40px;
   }
 
-  .container { width:100%; max-width:calc(var(--col) * 3 + var(--gutter) * 2); margin:0 auto; }
+  .container { width:100%; margin:0 auto;
+               max-width:calc(var(--col-side) + var(--col-main) + var(--col-notif)
+                              + var(--gutter) * 2); }
 
   /* ── Rodape ──
      Centralizado na mesma grade dos cards. `--muted` porque a versao e
@@ -115,7 +126,7 @@
   .modal-bg[hidden] { display:none; }
   .modal {
     background:var(--card); border:1px solid var(--line); border-radius:var(--r-card);
-    padding:var(--card-pad-y) var(--card-pad-x); width:100%; max-width:var(--col);
+    padding:var(--card-pad-y) var(--card-pad-x); width:100%; max-width:var(--col-form);
     display:flex; flex-direction:column; gap:14px;
   }
   .modal h2 { font-size:var(--fs-base); font-weight:400; }
@@ -131,14 +142,21 @@
   .modal-actions button:hover { background:#1d2a4d; }
   .modal-actions button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
-  /* ── Grade de 3 colunas ── */
-  .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:var(--gutter); align-items:stretch; }
+  /* ── Grade de 3 colunas, nenhuma igual a outra ──
+     Proporcao em `fr` e nao largura fixa: nos 1198px de conteudo da 274 / 548 /
+     320, e abaixo disso encolhe mantendo a proporcao em vez de estourar.
+     Os numeros repetem os tokens acima porque `<flex>` nao aceita `calc()` —
+     ha teste de paridade entre os dois (TestWebUILayout). */
+  .grid { display:grid; grid-template-columns:274fr 548fr 320fr;
+          gap:var(--gutter); align-items:stretch; }
   .col { display:flex; flex-direction:column; gap:29px; min-width:0; }
   .col > .card { flex:1; }
   /* A coluna 1 tem tres cards pequenos e acompanha a altura da coluna mais
-     alta (Guardian). Sem isto a sobra se acumula no rodape de cada card —
-     eram 60 px de vazio em cada um. Distribuida, o card fica preenchido. */
-  .col:first-child > .card { justify-content:space-evenly; }
+     alta. Sem isto a sobra se acumula no rodape de cada card — eram 60 px de
+     vazio em cada um. `space-between` e nao `space-evenly`: evenly punha ar
+     ACIMA do <h2> tambem, e o titulo descia alguns pixels em relacao ao dos
+     cards vizinhos, quebrando a linha de topo da grade. */
+  .col:first-child > .card { justify-content:space-between; }
 
   /* ── Card ── */
   .card {
@@ -147,6 +165,27 @@
     display:flex; flex-direction:column; gap:14px;
   }
   .card h2 { font-size:var(--fs-base); font-weight:400; color:var(--text); }
+
+  /* ── Duas colunas internas (card central) ──
+     Os campos preenchem linha a linha, da esquerda para a direita. Sem isto a
+     coluna central crescia sozinha e, como a grade estica todas as colunas
+     juntas, as laterais herdavam a altura e sobrava vazio nelas. */
+  .duo { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px 18px; }
+  /* O card encolheu tanto que deixou de ser o mais alto da grade — e passou a
+     receber a sobra das outras duas. `flex:1` faz o grid tomar essa sobra e
+     `space-between` a reparte entre as linhas, em vez de empoca-la no rodape. */
+  .card > .duo { flex:1; align-content:space-between; }
+  /* As listas de extensao sao o unico campo do card que ganha com altura: sao
+     listas de verdade, e 88px mostravam quatro itens de uma dezena. */
+  .duo textarea { min-height:104px; }
+  .duo > .span2 { grid-column:1 / -1; }
+  /* Rotulo de grupo. `--muted` em vez de caixa alta ou negrito: subordina ao
+     <h2> do card sem virar um segundo titulo competindo por atencao. */
+  .duo > h3 { font-size:var(--fs-base); font-weight:400; color:var(--muted); }
+  /* Os dois blocos que dividem a linha tem rotulos de alturas diferentes (um
+     quebra em duas linhas, o outro nao). Empurrar os controles para a base
+     alinha as caixas entre si em vez de deixa-las em degrau. */
+  .duo > .toggle-block { justify-content:space-between; }
 
   /* ── Campos ── */
   .field label { display:block; font-size:var(--fs-base); color:var(--text); margin-bottom:5px; }
@@ -166,6 +205,15 @@
     outline:2px solid var(--accent); outline-offset:0;
   }
   .field input::placeholder, .field textarea::placeholder { color:#7b8098; }
+
+  /* A caixa ocupa a coluna e a unidade fica logo depois dela, ocupando so o
+     que precisa. A unidade e separada do rotulo de proposito: o rotulo nomeia
+     o campo, a unidade qualifica o numero. */
+  .num { display:flex; align-items:center; gap:8px; }
+  /* `min-width:0` porque item de flex nao encolhe abaixo do tamanho intrinseco
+     de um <input> (~170px) sem isso, e a coluna de 240 ficaria estourada. */
+  .field .num input { flex:1; min-width:0; }
+  .num .unidade { color:var(--muted); flex:0 0 auto; }
 
   .help { font-size:var(--fs-help); color:var(--text); margin-top:4px; display:block; }
 
@@ -189,6 +237,31 @@
     background:rgba(255,255,255,.12); border-radius:4px; padding:1px 5px; color:var(--text);
   }
 
+  /* ── Lembrete de variaveis ──
+     A unica ajuda que sobrou na tela. Quem edita o texto de uma mensagem
+     precisa dos nomes na mao; todo o resto e assunto da documentacao.
+     O icone e `{ }` e nao "?": nomeia o que o tooltip entrega e ja mostra o
+     formato do que vai dentro da caixa. */
+  .head-fim { display:flex; align-items:center; gap:10px; flex:0 0 auto; }
+  .dica { position:relative; display:flex; padding:0; border:none; background:none;
+          color:var(--muted); cursor:help; font-family:inherit; }
+  .dica:hover { color:var(--text); }
+  .dica:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
+  .dica-ico { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px;
+              line-height:1; letter-spacing:-.05em; }
+  .dica-tip {
+    position:absolute; top:calc(100% + 8px); right:0; width:max-content; max-width:252px;
+    /* `--bg` e nao `--card`: o tooltip abre sobre o card, e a cor do card nao
+       separaria um do outro. */
+    background:var(--bg); border:1px solid var(--line); border-radius:var(--r-card);
+    padding:10px 12px; font-size:var(--fs-help); text-align:left; line-height:1.4;
+    opacity:0; visibility:hidden; transition:opacity .15s linear, visibility .15s;
+    z-index:20; pointer-events:none;
+  }
+  /* `:focus` e nao so `:focus-visible` — em toque o navegador foca sem marcar
+     como visible, e o lembrete tem que abrir no dedo tambem. */
+  .dica:hover .dica-tip, .dica:focus .dica-tip { opacity:1; visibility:visible; }
+
   /* ── Bloco de remocao (stalled, sem seeds) ──
      Mesma anatomia dos blocos de mensagem: rotulo a esquerda e liga/desliga
      a direita na primeira linha, controles embaixo. Antes o toggle ficava
@@ -208,6 +281,14 @@
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%231a1a2e'/%3E%3C/svg%3E");
     background-repeat:no-repeat; background-position:right 10px center; }
   .inline input:focus, .inline select:focus { outline:2px solid var(--accent); }
+  /* "abaixo de X por Y" e uma frase: sem o conector os quatro controles viram
+     uma fileira de caixas sem relacao declarada entre os dois pares. */
+  .inline .conector { color:var(--muted); flex:0 0 auto; }
+  /* A frase atravessa as duas colunas e e curta demais para encher a largura.
+     Centralizada ela fica sob o meio do bloco em vez de pendurada na esquerda
+     com um vazio de 130px a direita. O rotulo e o toggle do cabecalho nao
+     acompanham: eles marcam as bordas do bloco. */
+  .toggle-block.span2 > .inline { justify-content:center; }
 
   /* Switch: substitui o checkbox nativo em toda a UI (padrao do prototipo).
      CSS puro sobre o proprio input, entao `checked`, teclado e <label for>
@@ -226,7 +307,7 @@
   .switch:checked::after { transform:translateX(14px); background:var(--card); }
   .switch:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
-  .card > hr { margin:0; border:none; border-top:1px solid rgba(255,255,255,.25); }
+  .card hr { margin:0; border:none; border-top:1px solid rgba(255,255,255,.25); }
 
   /* ── Botao salvar ── */
   .btn-row { display:flex; justify-content:center; margin-top:28px; }
@@ -246,11 +327,24 @@
   .toast.err { background:var(--accent); }
 
   /* ── Responsivo ──
-     A grade de 3 colunas e desenhada para 1151px de conteudo. Abaixo disso
-     empilha: espremer 365px em telas menores quebra os rotulos longos. */
-  @media (max-width:1199px) {
+     A grade de 3 colunas e desenhada para 1198px de conteudo (+40 de padding
+     do body = 1238). Abaixo disso empilha: espremer 274px em telas menores
+     quebra os rotulos longos. Empilhada, a central ganha a largura toda e as
+     duas colunas internas seguem valendo — so desmontam quando nem elas
+     caberiam. */
+  @media (max-width:1245px) {
     .grid { grid-template-columns:1fr; }
     .col > .card { flex:0 0 auto; }
+  }
+  @media (max-width:620px) {
+    .duo { grid-template-columns:1fr; }
+    /* Em uma coluna o rotulo nao disputa espaco e a frase cabe inteira. */
+    .duo > .toggle-block { justify-content:flex-start; }
+  }
+
+  /* Quem pediu menos movimento recebe o estado final, nao a transicao. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration:.01ms !important; }
   }
 </style>
 </head>
@@ -325,118 +419,136 @@
     <div class="col">
       <div class="card">
         <h2 data-i18n="section_guardian">🛡️ Guardian</h2>
-        <div class="field">
-          <label for="check_interval" data-i18n="label_check_interval">Intervalo de verificação (segundos, 0 = modo webhook)</label>
-          <input id="check_interval" type="number" min="0" placeholder="300">
-          <span class="help" data-i18n="help_check_interval">0 desativa o polling — use com o script de webhook no qBit</span>
-        </div>
-        <div class="field">
-          <label for="reevaluate_interval" data-i18n="label_reevaluate_interval">Reavaliação da fila (segundos)</label>
-          <input id="reevaluate_interval" type="number" min="0" placeholder="300">
-          <span class="help" data-i18n="help_reevaluate_interval">Ritmo em que torrents sem metadados e critérios de remoção são revistos. É a granularidade dos limites de tempo acima — um limite menor que este nunca é atingido antes do próximo ciclo. 0 desliga.</span>
-        </div>
-        <div class="field">
-          <label for="retry_interval" data-i18n="label_retry_interval">Retentativa de conexão (segundos)</label>
-          <input id="retry_interval" type="number" min="1" placeholder="120">
-          <span class="help" data-i18n="help_retry_interval">Intervalo entre tentativas quando o qBittorrent está inacessível</span>
-        </div>
+        <!-- Duas colunas internas. Os campos preenchem linha a linha, da
+             esquerda para a direita; `.span2` atravessa as duas. -->
+        <div class="duo">
+          <div class="field">
+            <label for="check_interval" data-i18n="label_check_interval">Polling</label>
+            <div class="num">
+              <input id="check_interval" type="number" min="0" placeholder="300">
+              <span class="unidade" data-i18n="unit_s">s</span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="reevaluate_interval" data-i18n="label_reevaluate_interval">Reavaliar fila</label>
+            <div class="num">
+              <input id="reevaluate_interval" type="number" min="0" placeholder="300">
+              <span class="unidade" data-i18n="unit_s">s</span>
+            </div>
+          </div>
 
-        <div class="field">
-          <label for="valid_extensions" data-i18n="label_valid_extensions">Extensões de mídia válidas (uma por linha)</label>
-          <textarea id="valid_extensions" placeholder=".mkv&#10;.mp4&#10;.avi"></textarea>
-        </div>
-
-        <div class="field">
-          <label for="dangerous_extensions" data-i18n="label_dangerous_extensions">Extensões perigosas (uma por linha)</label>
-          <textarea id="dangerous_extensions" placeholder=".exe&#10;.scr&#10;.bat&#10;.sh"></textarea>
-        </div>
-
-        <!-- Prioridade: a escala do qBittorrent NAO e continua. O filePrio
-             aceita apenas 0, 1, 6 e 7 — 2 a 5 devolvem HTTP 400. Por isso os
-             tres campos sao listas de selecao, e nao campos numericos: um
-             min/max nao expressa um conjunto com buracos. -->
-        <div class="field">
-          <label for="priority_media" data-i18n="label_priority_media">Prioridade para arquivos de mídia (0, 1, 6 ou 7)</label>
-          <select id="priority_media">
+          <div class="field">
+            <label for="retry_interval" data-i18n="label_retry_interval">Reconexão</label>
+            <div class="num">
+              <input id="retry_interval" type="number" min="1" placeholder="120">
+              <span class="unidade" data-i18n="unit_s">s</span>
+            </div>
+          </div>
+          <!-- Prioridade: a escala do qBittorrent NAO e continua. O filePrio
+               aceita apenas 0, 1, 6 e 7 — 2 a 5 devolvem HTTP 400. Por isso os
+               tres campos sao listas de selecao, e nao campos numericos: um
+               min/max nao expressa um conjunto com buracos. O texto de cada
+               opcao ja diz o que o numero faz, e era isso que a ajuda embaixo
+               do campo repetia. -->
+          <div class="field">
+            <label for="priority_media" data-i18n="label_priority_media">Prioridade mídia</label>
+            <select id="priority_media">
             <option value="0" data-i18n-option="prio_skip">0 — não baixar</option>
             <option value="1" data-i18n-option="prio_normal">1 — normal</option>
             <option value="6" data-i18n-option="prio_high">6 — alta</option>
             <option value="7" selected data-i18n-option="prio_max">7 — máxima</option>
-          </select>
-          <span class="help" data-i18n="help_priority_media">0 = não baixar · 1 = normal · 6 = alta · 7 = máxima</span>
-        </div>
-        <div class="field">
-          <label for="priority_normal" data-i18n="label_priority_normal">Prioridade para arquivos auxiliares (.nfo, .srt, .jpg)</label>
-          <select id="priority_normal">
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="priority_normal" data-i18n="label_priority_normal">Prioridade auxiliares</label>
+            <select id="priority_normal">
             <option value="0" data-i18n-option="prio_skip">0 — não baixar</option>
             <option value="1" selected data-i18n-option="prio_normal">1 — normal</option>
             <option value="6" data-i18n-option="prio_high">6 — alta</option>
             <option value="7" data-i18n-option="prio_max">7 — máxima</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="priority_skip" data-i18n="label_priority_skip">Prioridade para outros arquivos</label>
-          <select id="priority_skip">
+            </select>
+          </div>
+          <div class="field">
+            <label for="priority_skip" data-i18n="label_priority_skip">Prioridade outros</label>
+            <select id="priority_skip">
             <option value="0" selected data-i18n-option="prio_skip">0 — não baixar</option>
             <option value="1" data-i18n-option="prio_normal">1 — normal</option>
             <option value="6" data-i18n-option="prio_high">6 — alta</option>
             <option value="7" data-i18n-option="prio_max">7 — máxima</option>
-          </select>
-        </div>
-
-        <div class="toggle-block">
-          <div class="head">
-            <label for="remove_stalled" data-i18n="label_remove_stalled">Remover torrents parados (stalled) há mais de</label>
-            <input type="checkbox" class="switch" id="remove_stalled">
+            </select>
           </div>
-          <div class="inline">
-            <input type="number" id="stalled_time" min="0" max="999" value="0" placeholder="0">
-            <select id="stalled_unit">
+
+          <div class="field">
+            <label for="valid_extensions" data-i18n="label_valid_extensions">Extensões de mídia</label>
+            <textarea id="valid_extensions" placeholder=".mkv&#10;.mp4&#10;.avi"></textarea>
+          </div>
+          <div class="field">
+            <label for="dangerous_extensions" data-i18n="label_dangerous_extensions">Extensões perigosas</label>
+            <textarea id="dangerous_extensions" placeholder=".exe&#10;.scr&#10;.bat&#10;.sh"></textarea>
+          </div>
+
+          <hr class="span2">
+          <!-- O verbo saiu dos tres rotulos e subiu para o grupo: cada linha
+               so declara a condicao, e o cabecalho diz o que acontece quando
+               ela bate. Antes "Remover torrents" aparecia tres vezes. -->
+          <h3 class="span2" data-i18n="section_remove">Remover torrents</h3>
+
+          <div class="toggle-block">
+            <div class="head">
+              <label for="remove_stalled" data-i18n="label_remove_stalled">Parados (stalled) há mais de</label>
+              <input type="checkbox" class="switch" id="remove_stalled">
+            </div>
+            <div class="inline">
+              <input type="number" id="stalled_time" min="0" max="999" value="0" placeholder="0">
+              <select id="stalled_unit">
               <option value="seconds" data-i18n-option="unit_seconds">segundos</option>
               <option value="minutes" data-i18n-option="unit_minutes">minutos</option>
               <option value="hours" selected data-i18n-option="unit_hours">horas</option>
-            </select>
+              </select>
+            </div>
           </div>
-        </div>
 
-        <div class="toggle-block">
-          <div class="head">
-            <label for="remove_no_seeds" data-i18n="label_remove_no_seeds">Remover torrents sem seeds há mais de</label>
-            <input type="checkbox" class="switch" id="remove_no_seeds">
-          </div>
-          <div class="inline">
-            <input type="number" id="no_seeds_time" min="0" max="999" value="0" placeholder="0">
-            <select id="no_seeds_unit">
+          <div class="toggle-block">
+            <div class="head">
+              <label for="remove_no_seeds" data-i18n="label_remove_no_seeds">Sem seeds há mais de</label>
+              <input type="checkbox" class="switch" id="remove_no_seeds">
+            </div>
+            <div class="inline">
+              <input type="number" id="no_seeds_time" min="0" max="999" value="0" placeholder="0">
+              <select id="no_seeds_unit">
               <option value="seconds" data-i18n-option="unit_seconds">segundos</option>
               <option value="minutes" data-i18n-option="unit_minutes">minutos</option>
               <option value="hours" selected data-i18n-option="unit_hours">horas</option>
-            </select>
+              </select>
+            </div>
           </div>
-        </div>
 
-        <div class="toggle-block">
-          <div class="head">
-            <label for="remove_slow" data-i18n="label_remove_slow">Remover torrents abaixo da velocidade mínima</label>
-            <input type="checkbox" class="switch" id="remove_slow">
-          </div>
-          <div class="inline">
-            <input type="number" id="slow_speed" min="0" max="999999" value="0" placeholder="0">
-            <select id="slow_speed_unit">
-              <option value="KiB" selected data-i18n-option="unit_kib">KiB/s</option>
-              <option value="MiB" data-i18n-option="unit_mib">MiB/s</option>
-              <option value="GiB" data-i18n-option="unit_gib">GiB/s</option>
-              <option value="TiB" data-i18n-option="unit_tib">TiB/s</option>
-            </select>
-          </div>
-          <div class="inline">
-            <input type="number" id="slow_time" min="0" max="999" value="0" placeholder="0">
-            <select id="slow_unit">
+          <!-- Atravessa as duas colunas: os dois pares formam uma frase
+               (abaixo de X por Y) e separa-los em colunas tiraria o limite da
+               janela em que ele vale. -->
+          <div class="toggle-block span2">
+            <div class="head">
+              <label for="remove_slow" data-i18n="label_remove_slow">Abaixo da velocidade mínima</label>
+              <input type="checkbox" class="switch" id="remove_slow">
+            </div>
+            <div class="inline">
+              <input type="number" id="slow_speed" min="0" max="999999" value="0" placeholder="0">
+              <select id="slow_speed_unit">
+                <option value="KiB" selected data-i18n-option="unit_kib">KiB/s</option>
+                <option value="MiB" data-i18n-option="unit_mib">MiB/s</option>
+                <option value="GiB" data-i18n-option="unit_gib">GiB/s</option>
+                <option value="TiB" data-i18n-option="unit_tib">TiB/s</option>
+              </select>
+              <span class="conector" data-i18n="conector_por">por</span>
+              <input type="number" id="slow_time" min="0" max="999" value="0" placeholder="0">
+              <select id="slow_unit">
               <option value="seconds" data-i18n-option="unit_seconds">segundos</option>
               <option value="minutes" selected data-i18n-option="unit_minutes">minutos</option>
               <option value="hours" data-i18n-option="unit_hours">horas</option>
-            </select>
+              </select>
+            </div>
           </div>
-          <span class="help" data-i18n="help_remove_slow">Julga a média na janela, não o pico instantâneo. Avalia só torrents em download — nunca os da fila.</span>
         </div>
       </div>
     </div>
@@ -448,35 +560,53 @@
           <input type="checkbox" class="switch" id="notifications_enabled">
         </div>
         <div class="field">
-          <label for="apprise_url" data-i18n="label_apprise_url">Apprise URL (Telegram, Discord, etc.)</label>
+          <label for="apprise_url" data-i18n="label_apprise_url">Apprise URL</label>
           <input id="apprise_url" data-i18n-placeholder="placeholder_apprise_url" placeholder="tgram://BOT_TOKEN/CHAT_ID">
         </div>
 
         <div class="msg" id="msg_optimized_wrap">
           <div class="head">
-            <label for="msg_optimized" data-i18n="label_msg_optimized">Mensagem para Torrent Otimizado</label>
-            <input type="checkbox" class="switch" id="msg_optimized_enabled">
+            <label for="msg_optimized" data-i18n="label_msg_optimized">Otimizado</label>
+            <span class="head-fim">
+              <button type="button" class="dica" aria-describedby="vars_optimized"
+                      data-i18n-title="vars_tooltip" data-i18n-aria="vars_tooltip">
+                <span class="dica-ico" aria-hidden="true">{&nbsp;}</span>
+                <span class="dica-tip vars" role="tooltip" id="vars_optimized"></span>
+              </button>
+              <input type="checkbox" class="switch" id="msg_optimized_enabled">
+            </span>
           </div>
           <textarea id="msg_optimized" rows="4" spellcheck="false"></textarea>
-          <span class="help vars" id="vars_optimized"></span>
         </div>
 
         <div class="msg" id="msg_removed_wrap">
           <div class="head">
-            <label for="msg_removed" data-i18n="label_msg_removed">Mensagem para Torrent Excluído (Perigoso)</label>
-            <input type="checkbox" class="switch" id="msg_removed_enabled">
+            <label for="msg_removed" data-i18n="label_msg_removed">Removido (perigoso)</label>
+            <span class="head-fim">
+              <button type="button" class="dica" aria-describedby="vars_removed"
+                      data-i18n-title="vars_tooltip" data-i18n-aria="vars_tooltip">
+                <span class="dica-ico" aria-hidden="true">{&nbsp;}</span>
+                <span class="dica-tip vars" role="tooltip" id="vars_removed"></span>
+              </button>
+              <input type="checkbox" class="switch" id="msg_removed_enabled">
+            </span>
           </div>
           <textarea id="msg_removed" rows="4" spellcheck="false"></textarea>
-          <span class="help vars" id="vars_removed"></span>
         </div>
 
         <div class="msg" id="msg_stalled_wrap">
           <div class="head">
-            <label for="msg_stalled" data-i18n="label_msg_stalled">Mensagem para Torrent Excluído (Stalled)</label>
-            <input type="checkbox" class="switch" id="msg_stalled_enabled">
+            <label for="msg_stalled" data-i18n="label_msg_stalled">Removido (parado)</label>
+            <span class="head-fim">
+              <button type="button" class="dica" aria-describedby="vars_stalled"
+                      data-i18n-title="vars_tooltip" data-i18n-aria="vars_tooltip">
+                <span class="dica-ico" aria-hidden="true">{&nbsp;}</span>
+                <span class="dica-tip vars" role="tooltip" id="vars_stalled"></span>
+              </button>
+              <input type="checkbox" class="switch" id="msg_stalled_enabled">
+            </span>
           </div>
           <textarea id="msg_stalled" rows="4" spellcheck="false"></textarea>
-          <span class="help vars" id="vars_stalled"></span>
         </div>
       </div>
     </div>
