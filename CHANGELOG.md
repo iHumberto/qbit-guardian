@@ -5,6 +5,22 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.1] — 2026-10-12
+
+O aviso de erro do campo Apprise deixa de se confundir com o estilo de foco da tela.
+
+### Corrigido
+- **Campo correto parecia errado ao ser selecionado.** O estado de erro usava `outline: 2px solid var(--accent)` — exatamente o que `.field input:focus` aplica em **todos** os campos da tela desde o prototipo. Dois estados diferentes com o mesmo sinal: focar um campo certo acendia o aviso, e um campo de fato invalido nao se distinguia de um campo em foco. Agora o erro fala por dentro do campo (fundo e cor do texto proprios) e por uma linha de texto abaixo dele — nenhum dos dois o foco produz. O `outline` volta a significar so "este campo esta selecionado".
+- **A mensagem de erro agora aparece na tela, nao so no `title`.** Cor sozinha nao diz o que fazer, e nao chega a quem usa leitor de tela. A linha segue o mesmo papel do `.erro` da tela de login — e resposta do formulario ao que foi digitado, nao ajuda de campo (que saiu da tela na v2.9.0) — com `role="alert"` e `aria-describedby` ligando ao campo.
+
+### Mudado
+- **URL de servico do Apprise tem mensagem propria.** `tgram://BOT_TOKEN/CHAT_ID`, `slack://webhook/#general`, `pover://USER/APP` e companhia nao sao "endereco invalido" qualquer: sao o erro que se comete copiando a documentacao do Apprise. A deteccao passou a reconhecer `esquema://` generico e a dizer para onde aquele valor realmente vai, em vez de so recusar o formato.
+
+### Notas
+- Nenhuma mudanca no motor: `guardian.py` nao foi tocado.
+- Testes: 945 -> **952**. O novo guarda proibe `outline` na regra do campo invalido, justamente porque e o estilo de foco; outro exige que a mensagem exista, esteja ligada ao campo e desapareca quando vazia.
+- O teste que varria o `<input>` linha a linha foi reescrito para ler a tag inteira: ela passou de uma linha para tres ao ganhar o `aria-describedby`, e um teste ancorado em formatacao quebra sem que nada tenha piorado.
+
 ## [2.10.0] — 2026-10-12
 
 Passeio guiado pela interface, em pt-BR e en-US, rodando em cima das telas de verdade.

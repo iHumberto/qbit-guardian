@@ -2775,18 +2775,32 @@ class TestPlaceholderApprise:
                 assert esquema not in linha, \
                     f"{fonte} voltou a sugerir {esquema} no campo Apprise: {linha.strip()}"
 
+    def _exemplos_de_apprise(self, fonte):
+        """Todo valor de exemplo do campo, venha do HTML ou das tabelas.
+
+        A tag do `<input>` e lida inteira, e nao linha a linha: ela ja passou
+        de uma linha para tres quando ganhou o `aria-describedby`, e um teste
+        ancorado em linha quebra por formatacao sem que nada tenha piorado.
+        """
+        texto = _read_static(fonte)
+        if fonte.endswith(".html"):
+            tag = re.search(r'<input[^>]*id="apprise_url"[^>]*>', texto, re.S)
+            assert tag, f"{fonte} nao tem o campo Apprise"
+            # O lookbehind evita casar dentro de `data-i18n-placeholder=`,
+            # cujo valor e o nome da chave, nao um endereco.
+            return re.findall(r'(?<![-\w])placeholder="([^"]+)"', tag.group(0))
+        return re.findall(r"placeholder_apprise_url:\s*'([^']+)'", texto)
+
     @pytest.mark.parametrize("fonte", ["index.html", "i18n.js"])
     def test_placeholder_e_um_endpoint_http(self, fonte):
-        texto = _read_static(fonte)
-        achou = [l for l in texto.splitlines()
-                 if "placeholder_apprise_url" in l or 'id="apprise_url"' in l]
-        assert achou, f"{fonte} nao tem o campo Apprise"
-        for linha in achou:
-            assert "http://" in linha or "https://" in linha, \
-                f"{fonte}: o placeholder precisa ser um endereco HTTP — {linha.strip()}"
-            assert "/notify/" in linha, \
+        exemplos = self._exemplos_de_apprise(fonte)
+        assert exemplos, f"{fonte} nao tem exemplo para o campo Apprise"
+        for valor in exemplos:
+            assert re.match(r"^https?://", valor), \
+                f"{fonte}: o placeholder precisa ser um endereco HTTP — {valor}"
+            assert "/notify/" in valor, \
                 (f"{fonte}: o endpoint do servidor Apprise tem o caminho "
-                 f"/notify/<chave> — {linha.strip()}")
+                 f"/notify/<chave> — {valor}")
 
     def test_o_esquema_do_placeholder_e_aceito_pelo_requests(self):
         """O valor sugerido tem de ser postavel — era isso que faltava.
@@ -2939,7 +2953,8 @@ class TestValidacaoApprise:
     def test_campo_vazio_nao_e_erro(self):
         """Apprise e opcional: campo em branco significa sem notificacao."""
         corpo = self._funcao()
-        assert "!valor" in corpo, "vazio nao pode ser marcado como invalido"
+        assert re.search(r"if\s*\(\s*valor\s*&&", corpo), \
+            "o ramo de erro precisa exigir valor — vazio nao e invalido"
 
     def test_marca_o_campo_e_avisa_o_leitor_de_tela(self):
         corpo = self._funcao()
@@ -2947,12 +2962,33 @@ class TestValidacaoApprise:
         assert "aria-invalid" in corpo, \
             "quem nao ve a borda vermelha precisa do estado no leitor de tela"
 
-    def test_existe_estilo_para_o_campo_invalido(self):
+    def test_o_erro_nao_usa_o_mesmo_sinal_do_foco(self):
+        """REGRESSAO: campo correto em foco parecia errado.
+
+        `.field input:focus` ja e `outline:2px solid var(--accent)` — o mesmo
+        vermelho, na tela inteira, desde o prototipo. Com outline no estado
+        de erro, focar um campo certo acendia o aviso e um campo errado nao
+        se distinguia de um campo em foco. O erro fala por dentro do campo e
+        por uma linha de texto, que o foco nunca produz.
+        """
         html = _read_static("index.html")
         m = re.search(r"\.field input\.invalido\s*\{([^}]*)\}", html)
         assert m, "falta o estilo do campo invalido"
-        assert "--accent" in m.group(1), \
-            "o vermelho do erro e o mesmo token do resto da tela"
+        assert "outline" not in m.group(1), \
+            "outline e o estilo de foco da tela — o erro precisa de outro sinal"
+        assert "background" in m.group(1), \
+            "sem fundo proprio, o campo invalido fica igual ao valido"
+
+    def test_o_erro_tem_mensagem_visivel_no_formulario(self):
+        """Cor sozinha nao diz o que fazer — e nao chega a quem nao a ve."""
+        html = _read_static("index.html")
+        assert 'id="erro_apprise"' in html, "falta o alvo da mensagem de erro"
+        assert 'class="erro-campo"' in html
+        assert 'role="alert"' in html, "o erro precisa ser anunciado"
+        assert 'aria-describedby="erro_apprise"' in html, \
+            "a mensagem precisa estar ligada ao campo"
+        assert re.search(r"\.erro-campo:empty\s*\{[^}]*display:none", html), \
+            "sem conteudo a mensagem nao pode ocupar espaco"
 
     def test_valida_ao_digitar_e_ao_carregar(self):
         html = _read_static("index.html")
@@ -2961,8 +2997,29 @@ class TestValidacaoApprise:
                          html), "o aviso tem de aparecer enquanto se digita"
 
     @pytest.mark.parametrize("lang", ["pt-BR", "en-US"])
-    def test_a_mensagem_existe_nos_dois_idiomas(self, lang):
-        assert "erro_apprise_url" in _i18n_tables()[lang]
+    @pytest.mark.parametrize("chave", ["erro_apprise_url", "erro_apprise_servico",
+                                       "erro_apprise_formato"])
+    def test_a_mensagem_existe_nos_dois_idiomas(self, lang, chave):
+        assert chave in _i18n_tables()[lang]
+
+    def test_url_de_servico_tem_erro_proprio(self):
+        """`tgram://` e `slack://` nao sao "endereco invalido" qualquer.
+
+        Sao o erro que o usuario comete copiando a documentacao do Apprise, e
+        merecem a mensagem que diz para onde aquele valor realmente vai.
+        """
+        corpo = self._funcao()
+        assert "erro_apprise_servico" in corpo and "erro_apprise_formato" in corpo, \
+            "os dois casos precisam de mensagens distintas"
+        assert re.search(r"\^\[a-z\]\[a-z0-9\+\.\\-\]\*:", corpo), \
+            "falta reconhecer `esquema://` generico, nao so os esquemas conhecidos"
+
+    def test_a_mensagem_do_campo_passa_pelo_walker(self):
+        """Senao ela congela no idioma em que o erro apareceu."""
+        corpo = self._funcao()
+        assert "setAttribute('data-i18n'" in corpo
+        assert "removeAttribute('data-i18n')" in corpo, \
+            "o walker reescreveria uma mensagem ja apagada"
 
     def test_a_mensagem_diz_o_que_fazer(self):
         js = _read_static("i18n.js")

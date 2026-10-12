@@ -230,12 +230,25 @@
   .switch:disabled { opacity:.45; cursor:not-allowed; }
   .msg.off > .head > label { opacity:.55; }
 
-  /* Preenchimento que o backend nao consegue usar. Vermelho so aqui e no
-     toast de erro: e o mesmo vocabulario de "isto deu errado" da tela. */
+  /* Preenchimento que o backend nao consegue usar.
+     NAO usa outline: `.field input:focus` ja e `2px solid var(--accent)`, o
+     mesmo vermelho — com outline aqui, focar um campo correto parecia erro e
+     um campo errado nao se distinguia de um campo em foco. O erro fala por
+     dentro do campo (fundo e cor do texto) e por uma linha de texto abaixo,
+     que o foco nunca produz. */
   .field input.invalido {
-    outline:2px solid var(--accent); outline-offset:0;
-    background:#ffe9ed;
+    background:#ffe3e9; color:#8a1026;
   }
+  .field input.invalido::placeholder { color:#b4687c; }
+
+  /* Mensagem de erro do proprio campo. Mesmo papel do `.erro` da tela de
+     login: nao e ajuda (que saiu da tela na v2.9.0), e a resposta do
+     formulario ao que foi digitado. */
+  .erro-campo {
+    font-size:var(--fs-help); line-height:1.3; color:var(--accent);
+    margin-top:4px; display:block;
+  }
+  .erro-campo:empty { display:none; }
 
   /* Campo que o motor ignora no modo atual. Continua legivel — o valor fica
      guardado para quando voltar a valer —, mas nao aceita edicao. */
@@ -590,7 +603,10 @@
         </div>
         <div class="field">
           <label for="apprise_url" data-i18n="label_apprise_url">Apprise URL</label>
-          <input id="apprise_url" data-i18n-placeholder="placeholder_apprise_url" placeholder="http://192.168.1.100:8000/notify/guardian">
+          <input id="apprise_url" data-i18n-placeholder="placeholder_apprise_url"
+                 placeholder="http://192.168.1.100:8000/notify/guardian"
+                 aria-describedby="erro_apprise">
+          <span class="erro-campo" id="erro_apprise" role="alert"></span>
         </div>
 
         <div class="msg" id="msg_optimized_wrap">
@@ -756,18 +772,37 @@ function syncModo() {
  */
 function validarApprise() {
   const campo = document.getElementById('apprise_url');
+  const aviso = document.getElementById('erro_apprise');
   const valor = campo.value.trim();
+
   // Vazio e valido: notificacoes desligadas.
-  const ok = !valor || /^https?:\/\//i.test(valor);
-  campo.classList.toggle('invalido', !ok);
-  campo.setAttribute('aria-invalid', ok ? 'false' : 'true');
-  // O titulo some quando esta valido para nao virar tooltip permanente.
-  if (ok) campo.removeAttribute('data-i18n-title'), campo.removeAttribute('title');
-  else {
+  // `esquema://` que nao seja http(s) e o erro nomeado — e dele que vem o
+  // `tgram://BOT_TOKEN/CHAT_ID` e o `slack://webhook/#general` que o usuario
+  // copia da documentacao do Apprise achando que vao neste campo.
+  let chave = null;
+  if (valor && !/^https?:\/\//i.test(valor)) {
+    chave = /^[a-z][a-z0-9+.\-]*:\/\//i.test(valor)
+      ? 'erro_apprise_servico'
+      : 'erro_apprise_formato';
+  }
+
+  campo.classList.toggle('invalido', chave !== null);
+  campo.setAttribute('aria-invalid', chave !== null ? 'true' : 'false');
+
+  // A mensagem passa pelo walker (`data-i18n`) para acompanhar a troca de
+  // idioma sem recarregar a pagina.
+  if (chave) {
+    aviso.setAttribute('data-i18n', chave);
+    aviso.textContent = t(chave);
     campo.setAttribute('data-i18n-title', 'erro_apprise_url');
     campo.title = t('erro_apprise_url');
+  } else {
+    aviso.removeAttribute('data-i18n');
+    aviso.textContent = '';
+    campo.removeAttribute('data-i18n-title');
+    campo.removeAttribute('title');
   }
-  return ok;
+  return chave === null;
 }
 
 /** Mostra, sob cada caixa, as variaveis que aquele evento aceita. */
