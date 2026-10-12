@@ -6,7 +6,9 @@
 
 [![tests](https://github.com/iHumberto/qbit-guardian/actions/workflows/test.yml/badge.svg)](https://github.com/iHumberto/qbit-guardian/actions/workflows/test.yml)
 [![docker-build](https://github.com/iHumberto/qbit-guardian/actions/workflows/docker-build.yml/badge.svg)](https://github.com/iHumberto/qbit-guardian/actions/workflows/docker-build.yml)
-[![Maintenance](https://img.shields.io/maintenance/yes/2026.svg)](https://github.com/iHumberto/qbit-guardian)
+[![GitHub Release](https://img.shields.io/github/v/release/iHumberto/qbit-guardian?style=flat&color=brightgreen&logo=github)](https://github.com/iHumberto/qbit-guardian/releases/latest)
+[![GitHub Tag](https://img.shields.io/github/v/tag/iHumberto/qbit-guardian?style=flat&color=brightgreen&logo=github)](https://github.com/iHumberto/qbit-guardian/tags)
+[![Maintenance](https://img.shields.io/maintenance/yes/2026?style=flat&color=brightgreen)](https://github.com/iHumberto/qbit-guardian)
 [![License: GPL v3](https://img.shields.io/badge/License-GNU_GPL_v3-brightgreen?style=flat&logo=gnuprivacyguard)](https://www.gnu.org/licenses/gpl-3.0)
 
 ---

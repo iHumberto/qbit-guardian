@@ -9,7 +9,11 @@ e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Mudancas que nao entram na imagem — ficam aqui ate a proxima release que mexer em codigo.
 
+### Adicionado
+- **Badges de release e de tag** no topo dos dois READMEs, apontando para a ultima release e para a lista de tags.
+
 ### Corrigido
+- **Badges padronizadas.** As duas novas saiam no azul default do shields.io e sem link, enquanto as demais ja eram `brightgreen` e clicaveis; ganharam `style=flat`, `color=brightgreen`, `logo=github` e destino. A de manutencao, que nao declarava estilo nem cor, entrou no mesmo formato. As tres rendem agora o mesmo par de cores das outras (`#4b0` no valor, `#555` no rotulo) — conferido no SVG servido.
 - **O FAQ listava as conexoes de rede sem a API do GitHub.** A pergunta *"manda dados para a internet?"* enumerava qBittorrent, Sonarr/Radarr e Apprise, e a checagem de versao nao estava la — desde a v2.5.0, e agora tambem a cada 6h sem ninguem abrir o painel. A resposta sobre privacidade continua valendo e ficou precisa: a consulta **pede** a lista de tags publicas e compara localmente, sem enviar versao instalada, configuracao nem identificador.
 - **O FAQ nao citava o rodape** em *"como sei qual versao estou usando?"*, que e a forma mais rapida — ensinava so `docker inspect` e `git log`. E *"o programa atualiza sozinho?"* agora explica o aviso de versao nova e as duas janelas de checagem.
 
