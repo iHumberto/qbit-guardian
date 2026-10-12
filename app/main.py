@@ -8,6 +8,7 @@ import sys
 import threading
 from app.logger import setup_logging, get_logger
 from app.guardian import start_guardian, write_heartbeat, bootstrap_credenciais
+from app.updates import iniciar_checagem_periodica
 from app.web import start_web
 
 setup_logging()
@@ -47,4 +48,7 @@ if __name__ == "__main__":
         sys.exit(1)
     write_heartbeat()
     start_guardian()
+    # Aviso de versao nova: checa agora e a cada 6h, sem depender de alguem
+    # abrir o painel. Falha em silencio — nao pode impedir o servidor de subir.
+    iniciar_checagem_periodica()
     start_web()

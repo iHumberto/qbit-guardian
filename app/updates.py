@@ -8,8 +8,25 @@ ruido que o usuario aprende a ignorar.
 
 Falha em silencio de proposito: um painel de homelab precisa abrir sem
 internet, entao qualquer erro de rede vira "nao sei" (`None`), nunca um erro
-na tela. O resultado fica em cache por `TTL_SEGUNDOS` — inclusive o "nao sei",
-senao uma caixa offline paga o timeout a cada carregamento de pagina.
+na tela. O resultado fica em cache — inclusive o "nao sei", senao uma caixa
+offline paga o timeout a cada carregamento de pagina.
+
+A checagem acontece por dois caminhos, com validades diferentes:
+
+- **Periodica** (`TTL_SEGUNDOS`, 6h): uma thread checa no start e a cada
+  intervalo, independente de alguem abrir o painel. Sem ela, a consulta so
+  acontecia por visita — e o cache em memoria so era zerado reiniciando o
+  container, de onde vinha a impressao de que o aviso "so funciona quando o
+  server inicia".
+- **No carregamento da pagina** (`TTL_PAGINA`, 10min): `/api/version` revalida
+  quando o cache passou desse tempo. E o que faz um F5 mostrar a versao que
+  saiu ha pouco, em vez de esperar o proximo ciclo de 6h.
+
+As duas validades existem porque as perguntas sao diferentes: quem esta
+olhando a tela aceita no maximo 10 minutos de defasagem; quem nao esta so
+precisa que o dado esteja quente quando abrir. Com 10min de piso, o teto de
+consultas a API do GitHub e 6/h — bem abaixo do limite de 60/h por IP sem
+autenticacao.
 """
 
 import re
@@ -24,7 +41,13 @@ log = get_logger("updates")
 
 TAGS_URL = "https://api.github.com/repos/iHumberto/qbit-guardian/tags"
 TIMEOUT = 5
+
+# Intervalo da checagem periodica, e validade padrao do cache.
 TTL_SEGUNDOS = 6 * 3600
+
+# Validade aceita por quem acabou de abrir o painel. Menor de proposito: e o
+# que transforma um F5 em "ja apareceu a versao nova".
+TTL_PAGINA = 10 * 60
 
 _RE_TAG = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 
@@ -71,17 +94,61 @@ def _buscar():
         return None
 
 
-def ultima_versao(agora=None):
-    """Maior versao publicada, com cache de `TTL_SEGUNDOS`. None se desconhecida."""
+def ultima_versao(agora=None, validade=None):
+    """Maior versao publicada, do cache ou da API. None se desconhecida.
+
+    `validade` e a idade maxima aceita para o valor em cache, em segundos.
+    O default (`TTL_SEGUNDOS`) serve a checagem periodica; `/api/version` pede
+    `TTL_PAGINA`, mais curto, porque quem esta com a tela aberta quer ver a
+    novidade no refresh. `validade=0` forca a consulta.
+    """
     agora = time.time() if agora is None else agora
+    validade = TTL_SEGUNDOS if validade is None else validade
     with _lock:
-        if _cache["em"] and (agora - _cache["em"]) < TTL_SEGUNDOS:
+        if _cache["em"] and (agora - _cache["em"]) < validade:
             return _cache["versao"]
     versao = _buscar()
     with _lock:
         _cache["em"] = agora
         _cache["versao"] = versao
     return versao
+
+
+# ── Checagem periodica ─────────────────────────────────────────────────
+
+_parar_checagem = threading.Event()
+
+
+def _loop_de_checagem(intervalo=None):
+    """Consulta no start e a cada `intervalo`, ate `_parar_checagem`.
+
+    Roda mesmo sem ninguem abrir o painel: assim o aviso nao depende de visita
+    e o primeiro carregamento do dia ja encontra o dado quente, sem pagar o
+    timeout da consulta.
+    """
+    intervalo = TTL_SEGUNDOS if intervalo is None else intervalo
+    while True:
+        try:
+            # `validade=0`: este e o ciclo que renova o cache, nao um leitor
+            # dele — reaproveitar o valor antigo aqui seria nao checar nada.
+            versao = ultima_versao(validade=0)
+            log.debug(f"Checagem periodica de versao: {versao or 'desconhecida'}")
+        except Exception as e:
+            # A thread nao pode morrer: sem ela o aviso volta a depender de
+            # visita, e em silencio.
+            log.debug(f"Checagem periodica de versao falhou: {e}")
+        if _parar_checagem.wait(intervalo):
+            return
+
+
+def iniciar_checagem_periodica(intervalo=None):
+    """Sobe a thread da checagem periodica (daemon). Devolve a thread."""
+    _parar_checagem.clear()
+    t = threading.Thread(target=_loop_de_checagem, args=(intervalo,), daemon=True)
+    t.start()
+    log.info("Checagem de versao a cada "
+             f"{(TTL_SEGUNDOS if intervalo is None else intervalo) // 3600}h")
+    return t
 
 
 def ha_atualizacao(instalada, disponivel):

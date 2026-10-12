@@ -343,8 +343,24 @@ The Web UI exposes these endpoints:
 | `GET`    | `/api/defaults`      | Required  | Default titles/templates and variables for each event          |
 | `POST`   | `/api/credentials`   | Required  | Changes the Web UI username and/or password                    |
 | `POST`   | `/api/trigger`       | Required  | Forces an immediate check (manual or webhook)                  |
+| `GET`    | `/api/version`       | Required  | Installed version, latest published one and whether an update exists |
 
 Every write endpoint requires `Content-Type: application/json` (except `/api/trigger`, which has no body) and rejects requests triggered by another site — that is the CSRF protection. Command-line clients such as `curl` are unaffected.
+
+### New version notice
+
+The footer shows `v2.11.0 available` when a release newer than the installed one exists, linking to that version's notes. The comparison is against the repository's highest **release tag** — a build of `main` is not a release, and warning on every commit would become noise.
+
+The check runs through two paths:
+
+| Path | When | What for |
+|------|------|----------|
+| Periodic | at startup and every **6 h** | the notice does not depend on anyone opening the panel, and the first page load already finds the answer ready |
+| On page load | if the last result is older than **10 min** | with the screen open and a new release out, a refresh already shows the notice |
+
+The two windows differ on purpose: whoever is looking at the screen accepts at most 10 minutes of lag; whoever is not just needs the value warm when they open it. The ceiling stays at 6 requests/h, well under GitHub's 60/h per-IP limit.
+
+> With no internet the lookup fails silently and the notice simply does not appear — never an error on screen. The "don't know" is cached too, otherwise an offline install would pay the timeout on every page load.
 
 ### Example: change the Web UI password
 

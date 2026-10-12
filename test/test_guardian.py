@@ -3308,6 +3308,137 @@ class TestChecagemDeVersao:
             assert m.call_args.kwargs.get("timeout") == u.TIMEOUT
 
 
+class TestChecagemPeriodicaDeVersao:
+    """O aviso nao pode depender de alguem abrir o painel.
+
+    Antes a consulta era so sob demanda, com cache de 6h em memoria. Quem
+    estivesse com a tela aberta quando saisse uma versao nova nao via nada: o
+    F5 batia no cache ainda valido, e o unico jeito de zera-lo era reiniciar o
+    container — de onde vinha a impressao de que a checagem "so funciona
+    quando o server inicia".
+
+    O conserto tem duas pernas, com validades diferentes de proposito: a
+    thread periodica (6h) para quem nao esta olhando, e a revalidacao curta
+    (10min) no `/api/version` para quem esta.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _cache_limpo(self):
+        u.limpar_cache()
+        u._parar_checagem.set()
+        yield
+        u._parar_checagem.set()
+        u.limpar_cache()
+
+    def test_a_validade_da_pagina_e_menor_que_a_do_ciclo(self):
+        """Se forem iguais, o refresh volta a nao adiantar nada."""
+        assert u.TTL_PAGINA < u.TTL_SEGUNDOS
+        assert u.TTL_PAGINA > 0, "zero faria cada F5 bater na API do GitHub"
+
+    def test_o_teto_de_consultas_cabe_no_limite_do_github(self):
+        """Sem autenticacao sao 60 req/h por IP; o piso curto nao pode furar."""
+        por_hora = 3600 / u.TTL_PAGINA + 3600 / u.TTL_SEGUNDOS
+        assert por_hora <= 30, f"{por_hora:.0f} consultas/h e perto demais do limite"
+
+    def test_pagina_revalida_antes_do_ttl_longo(self):
+        """Cache de 1h: o ciclo de 6h aceitaria, a pagina nao."""
+        resp = mock.Mock(status_code=200)
+        resp.json.return_value = [{"name": "v2.5.0"}]
+        with mock.patch.object(u.requests, "get", return_value=resp) as m:
+            u.ultima_versao(agora=1000.0)
+            assert m.call_count == 1
+            # Uma hora depois: dentro do TTL do ciclo, fora do da pagina.
+            u.ultima_versao(agora=1000.0 + 3600, validade=u.TTL_PAGINA)
+            assert m.call_count == 2, "o refresh precisa revalidar"
+            u.ultima_versao(agora=1000.0 + 3600)
+            assert m.call_count == 2, "o ciclo longo ainda aceita o cache"
+
+    def test_dentro_da_validade_curta_o_cache_vale(self):
+        """F5 em sequencia nao pode virar rajada na API."""
+        resp = mock.Mock(status_code=200)
+        resp.json.return_value = [{"name": "v2.5.0"}]
+        with mock.patch.object(u.requests, "get", return_value=resp) as m:
+            for i in range(5):
+                u.ultima_versao(agora=1000.0 + i, validade=u.TTL_PAGINA)
+            assert m.call_count == 1
+
+    def test_validade_zero_sempre_consulta(self):
+        """E o que o ciclo usa: ele renova o cache, nao le dele."""
+        resp = mock.Mock(status_code=200)
+        resp.json.return_value = [{"name": "v2.5.0"}]
+        with mock.patch.object(u.requests, "get", return_value=resp) as m:
+            u.ultima_versao(agora=1000.0, validade=0)
+            u.ultima_versao(agora=1000.0, validade=0)
+            assert m.call_count == 2
+
+    def test_o_ciclo_consulta_antes_de_esperar(self):
+        """Checa no start: o primeiro carregamento ja encontra o dado quente."""
+        chamadas = []
+        with mock.patch.object(u, "ultima_versao",
+                               side_effect=lambda **kw: chamadas.append(kw)), \
+             mock.patch.object(u._parar_checagem, "wait", return_value=True):
+            u._loop_de_checagem(intervalo=1)
+        assert chamadas == [{"validade": 0}], \
+            "o ciclo precisa forcar a consulta, nao reaproveitar o cache"
+
+    def test_o_ciclo_espera_o_intervalo_configurado(self):
+        with mock.patch.object(u, "ultima_versao", return_value="2.5.0"), \
+             mock.patch.object(u._parar_checagem, "wait", return_value=True) as m:
+            u._loop_de_checagem(intervalo=42)
+        assert m.call_args.args[0] == 42
+
+    def test_o_ciclo_usa_seis_horas_por_padrao(self):
+        with mock.patch.object(u, "ultima_versao", return_value="2.5.0"), \
+             mock.patch.object(u._parar_checagem, "wait", return_value=True) as m:
+            u._loop_de_checagem()
+        assert m.call_args.args[0] == u.TTL_SEGUNDOS == 6 * 3600
+
+    def test_falha_na_consulta_nao_mata_o_ciclo(self):
+        """Sem isto o aviso volta a depender de visita, e em silencio."""
+        tentativas = []
+
+        def explode(**kw):
+            tentativas.append(kw)
+            raise RuntimeError("API fora do ar")
+
+        with mock.patch.object(u, "ultima_versao", side_effect=explode), \
+             mock.patch.object(u._parar_checagem, "wait",
+                               side_effect=[False, True]) as m:
+            u._loop_de_checagem(intervalo=1)
+        assert len(tentativas) == 2, "o ciclo parou na primeira falha"
+        assert m.call_count == 2
+
+    def test_o_evento_de_parada_encerra_o_ciclo(self):
+        with mock.patch.object(u, "ultima_versao", return_value="2.5.0"), \
+             mock.patch.object(u._parar_checagem, "wait", return_value=True):
+            u._loop_de_checagem(intervalo=1)   # retorna sem pendurar
+
+    def test_iniciar_sobe_thread_daemon(self):
+        with mock.patch.object(u, "_loop_de_checagem") as alvo:
+            t = u.iniciar_checagem_periodica(intervalo=1)
+            t.join(timeout=2)
+        assert t.daemon, "thread nao-daemon seguraria o shutdown do container"
+        assert alvo.called
+
+    def test_iniciar_limpa_o_sinal_de_parada(self):
+        """Senao um ciclo anterior encerrado deixa o novo morrer na 1a espera."""
+        u._parar_checagem.set()
+        with mock.patch.object(u, "_loop_de_checagem"):
+            u.iniciar_checagem_periodica(intervalo=1).join(timeout=2)
+        assert not u._parar_checagem.is_set()
+
+    def test_o_entrypoint_sobe_a_checagem(self):
+        """De nada adianta a thread existir se ninguem a inicia."""
+        fonte = open(os.path.join(REPO_ROOT, "app", "main.py"), encoding="utf-8").read()
+        assert "iniciar_checagem_periodica()" in fonte, \
+            "main.py nao sobe a checagem periodica"
+
+    def test_a_api_pede_a_validade_curta(self):
+        fonte = open(os.path.join(REPO_ROOT, "app", "web.py"), encoding="utf-8").read()
+        assert "ultima_versao(validade=updates.TTL_PAGINA)" in fonte, \
+            "/api/version voltou a aceitar o cache de 6h"
+
+
 class TestApiVersionAtualizacao:
     """/api/version entrega o veredito pronto para o rodape."""
 

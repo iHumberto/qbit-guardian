@@ -5,6 +5,24 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0] — 2026-10-12
+
+O aviso de versao nova deixa de depender de restart do container.
+
+### Adicionado
+- **Checagem periodica de versao, a cada 6h.** Uma thread consulta a maior tag publicada no start e a cada `TTL_SEGUNDOS`, independente de alguem abrir o painel. Antes a consulta era so sob demanda: o cache de 6h vivia em memoria, e o unico jeito de zera-lo era reiniciar o container — daí a impressao de que a checagem "so funciona quando o server inicia". A thread falha em silencio e nao morre com erro de rede; se morresse, o aviso voltaria a depender de visita, e sem ninguem notar.
+- **`ultima_versao(validade=...)`** — a idade maxima aceita para o valor em cache virou parametro. O ciclo periodico usa `validade=0` (ele renova o cache, nao le dele); `/api/version` usa `TTL_PAGINA`.
+
+### Mudado
+- **`/api/version` revalida quando o cache passa de 10 minutos.** E o que faz um F5 mostrar a release que acabou de sair, em vez de esperar o proximo ciclo de 6h. As duas validades existem porque as perguntas sao diferentes: quem esta olhando a tela aceita no maximo 10 minutos de defasagem; quem nao esta so precisa que o dado esteja quente quando abrir.
+
+### Notas
+- **Teto de 6 consultas/h** a API do GitHub (`3600/TTL_PAGINA + 3600/TTL_SEGUNDOS`), contra o limite de 60/h por IP sem autenticacao. Ha teste que falha se uma mudanca de constante chegar perto do limite.
+- F5 em sequencia continua servido pelo cache — a revalidacao tem piso de 10 minutos, nao acontece a cada carregamento.
+- Nenhuma mudanca no motor nem no formato do `config.json`.
+- Comportamento verificado de ponta a ponta com o cliente Flask: painel aberto sem novidade; F5 um minuto depois da release sair ainda servido pelo cache; F5 passados os 10 minutos anunciando `update_available: true`; e o ciclo periodico atualizando o cache sem visita nenhuma.
+- Testes: 952 -> **966**.
+
 ## [2.10.1] — 2026-10-12
 
 O aviso de erro do campo Apprise deixa de se confundir com o estilo de foco da tela.

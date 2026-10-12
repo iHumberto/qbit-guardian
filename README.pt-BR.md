@@ -343,8 +343,24 @@ A Web UI expõe estes endpoints:
 | `GET`    | `/api/defaults`      | Obrigatória | Títulos/templates padrão e variáveis de cada evento              |
 | `POST`   | `/api/credentials`   | Obrigatória | Troca usuário e/ou senha da Web UI                               |
 | `POST`   | `/api/trigger`       | Obrigatória | Força verificação imediata (manual ou webhook)                   |
+| `GET`    | `/api/version`       | Obrigatória | Versão instalada, última publicada e se há atualização           |
 
 Todo endpoint de escrita exige `Content-Type: application/json` (exceto `/api/trigger`, que não tem corpo) e recusa requisição disparada por outro site — é a proteção contra CSRF. Clientes de linha de comando como o `curl` não são afetados.
+
+### Aviso de versão nova
+
+O rodapé mostra `v2.11.0 disponível` quando existe uma release mais nova que a instalada, com link para as notas daquela versão. A comparação é com a maior **tag de release** do repositório — um build de `main` não é release, e avisar a cada commit viraria ruído.
+
+A checagem acontece por dois caminhos:
+
+| Caminho | Quando | Para quê |
+|---------|--------|----------|
+| Periódica | no start e a cada **6 h** | o aviso não depende de alguém abrir o painel, e o primeiro carregamento já encontra o dado pronto |
+| No carregamento da página | se o último resultado tem mais de **10 min** | com a tela aberta e uma release nova no ar, um F5 já mostra o aviso |
+
+As duas validades são diferentes de propósito: quem está olhando a tela aceita no máximo 10 minutos de defasagem; quem não está só precisa que o dado esteja quente quando abrir. O teto de consultas fica em 6/h, bem abaixo do limite de 60/h por IP da API do GitHub.
+
+> Sem internet, a consulta falha em silêncio e o aviso simplesmente não aparece — nunca um erro na tela. O "não sei" também é guardado, senão uma instalação offline pagaria o timeout a cada carregamento.
 
 ### Exemplo: trocar a senha da Web UI
 

@@ -498,7 +498,11 @@ def api_version():
     fora do ar, rate limit). O rodape simplesmente nao mostra aviso nenhum:
     nao saber se ha versao nova nao e erro que mereca tela.
     """
-    ultima = updates.ultima_versao()
+    # Validade curta: quem acabou de carregar a pagina aceita no maximo
+    # TTL_PAGINA de defasagem. A checagem periodica (6h) mantem o valor quente
+    # para quem nao esta olhando — as duas juntas sao o que faz o aviso
+    # aparecer sem reiniciar o container.
+    ultima = updates.ultima_versao(validade=updates.TTL_PAGINA)
     return jsonify({
         "version": __version__,
         "latest": ultima,
