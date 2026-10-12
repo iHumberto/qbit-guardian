@@ -148,7 +148,7 @@ The first three fields are times, all in seconds — that's what the `s` next to
 | Field | Key | What it does |
 |---|---|---|
 | **Polling** | `check_interval_seconds` | How often the guardian sweeps the whole torrent list. `0` disables the sweep and leaves the guardian reacting only to qBittorrent's webhook — see **Operating modes**. |
-| **Queue recheck** | `reevaluate_interval_seconds` | How often the guardian revisits torrents that had no metadata yet and reapplies the removal criteria. This is the granularity of every time limit in this section: **a limit shorter than this is never reached before the next cycle**. `0` disables the recheck. |
+| **Queue recheck** | `reevaluate_interval_seconds` | How often the guardian revisits torrents that had no metadata yet and reapplies the removal criteria. This is the granularity of every time limit in this section: **a limit shorter than this is never reached before the next cycle**. `0` disables the recheck. **Only applies in webhook mode** (Polling at `0`) — see **Which field applies in each mode**. |
 | **Reconnect** | `retry_interval_seconds` | How long to wait between attempts while qBittorrent is unreachable. It needn't be short: the guardian retries forever. |
 | **Media priority** | `priority_media` | Download priority for the torrent's video files. See **File priorities**. |
 | **Auxiliary priority** | `priority_normal` | Priority for the files that come along with the media — subtitles (`.srt`), artwork (`.jpg`), metadata (`.nfo`). |
@@ -183,20 +183,31 @@ The three removal rules sit under the **Remove torrents** heading — the verb i
 
 qbit-guardian can alert you on your phone or computer whenever something important happens. It uses **Apprise** — a system that delivers messages to 100+ different services (Telegram, Discord, Slack, Pushover, email and many more).
 
-> **📘 Apprise:** Like a universal postal worker. You hand it a single URL and it takes care of delivering the message to the service you picked. You don't need to install anything extra, just generate the right URL.
+> **📘 Apprise:** Like a universal postal worker. It knows 100+ services; you tell it once which ones you want, and it delivers to all of them.
+
+### ⚠️ The field expects an HTTP address, not a service URL
+
+This is where most people get it wrong. qbit-guardian **does not run Apprise** — it makes an HTTP `POST` to an **Apprise server you host** (the official [`caronc/apprise`](https://hub.docker.com/r/caronc/apprise) image).
+
+So the **Apprise URL** field takes **your server's endpoint**:
+
+```
+http://192.168.1.100:8000/notify/guardian
+https://apprise.my-network.local/notify/guardian
+```
+
+Apprise service URLs — `tgram://`, `discord://`, `pover://` — **do not work here**. They go in the **Apprise server's configuration**, under the config key (the `guardian` at the end of the address above). Paste one of them into the field and no notification goes out, while the log records `Apprise: No connection adapters were found`.
+
+| Where | What goes in |
+|-------|--------------|
+| The **Apprise URL** field on this screen | `http://YOUR_SERVER:8000/notify/KEY` |
+| The Apprise server's configuration | `tgram://BOT_TOKEN/CHAT_ID`, `discord://ID/TOKEN`, `pover://USER/APP`… |
+
+> See the [full list of formats](https://github.com/caronc/apprise#supported-notifications) in Apprise's official documentation — remembering that they go on the **server**, not in this field.
 
 ### Turning notifications on
 
-Fill in the **Apprise URL** field with the address generated for your service and flip the switch in the **Notifications** card header. Example Apprise URLs:
-
-| Service | URL format |
-|---------|-----------|
-| Telegram | `tgram://BOT_TOKEN/CHAT_ID` |
-| Discord | `discord://WEBHOOK_ID/TOKEN` |
-| Pushover | `pover://USER_KEY/APP_TOKEN` |
-| Self-hosted Apprise | `https://apprise.my-network/notify/guardian` |
-
-> See the [full list of formats](https://github.com/caronc/apprise#supported-notifications) in Apprise's official documentation.
+Fill in the **Apprise URL** field with your Apprise server's endpoint and flip the switch in the **Notifications** card header.
 
 ### The three events
 
@@ -257,6 +268,27 @@ We recommend **300 seconds** for general use — fast enough and not taxing.
 In this mode, qBittorrent notifies the guardian **the moment** a torrent is added. Put `0` in the check interval and follow the steps in [Setting up the Webhook](INSTALL.md#setting-up-the-webhook-real-time).
 
 > ⚠️ The webhook needs `QBIT_GUARDIAN_USER` and `QBIT_GUARDIAN_PASS` on the qBittorrent service, because `/api/trigger` requires authentication.
+
+### Which field applies in each mode
+
+The two time fields look independent on screen, but **one switches the other off**:
+
+| Polling | Mode | What runs | **Re-evaluate queue** |
+|---------|------|-----------|------------------------|
+| above `0` | Polling | the guardian sweeps the whole queue every N seconds | **ignored** — the field shows up disabled |
+| `0` | Webhook | the guardian only acts when qBittorrent calls it | **this is what keeps it watching the queue** |
+
+In webhook mode, `/api/trigger` fires when a torrent is **added** — and that is all. Without re-evaluation, a torrent that stalled *after* coming in would wait for another torrent to arrive before being looked at again, and a batch that came in without metadata would never get its priorities. That is why, in this mode, leaving `Re-evaluate queue` at 0 **is not recommended**.
+
+In practice: on webhook, keep re-evaluation on (300 seconds works well). On polling, you do not need to think about this field — the screen disables it for you.
+
+> The value you typed is **not lost** when the field is disabled: it applies again as soon as Polling goes back to `0`.
+
+### Switching modes with the container running
+
+You can switch from the Web UI, no restart needed: save the new Polling value and the guardian switches modes on its own — the log records it (`entrando em modo webhook` or `Polling religado`).
+
+> Up to v2.9.0 this **did not work**: the switch only took effect after a container restart, and leaving polling left the guardian with no active checking at all. Fixed in v2.10.0.
 
 ### If qBittorrent goes down
 

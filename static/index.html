@@ -230,6 +230,19 @@
   .switch:disabled { opacity:.45; cursor:not-allowed; }
   .msg.off > .head > label { opacity:.55; }
 
+  /* Preenchimento que o backend nao consegue usar. Vermelho so aqui e no
+     toast de erro: e o mesmo vocabulario de "isto deu errado" da tela. */
+  .field input.invalido {
+    outline:2px solid var(--accent); outline-offset:0;
+    background:#ffe9ed;
+  }
+
+  /* Campo que o motor ignora no modo atual. Continua legivel — o valor fica
+     guardado para quando voltar a valer —, mas nao aceita edicao. */
+  .field.ignorado > label { opacity:.55; }
+  .field.ignorado input { background:#d9dbe4; color:#4a4f66; cursor:not-allowed; }
+  .field.ignorado .unidade { opacity:.55; }
+
   /* Variaveis que o template aceita */
   .vars { display:flex; flex-wrap:wrap; gap:6px; align-items:baseline; }
   .vars code {
@@ -351,6 +364,17 @@
 <body>
 <div class="container">
   <div class="topbar">
+    <!-- Passeio guiado: abre em outra aba na tela de login e segue ate a
+         configuracao, em cima das telas de verdade. `?tour=1` tambem impede
+         que /login mande de volta para o painel por ja haver sessao. -->
+    <a class="docs tour" id="tour-link" href="/login?tour=1"
+       target="_blank" rel="noopener noreferrer">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814l-3.5-2.5z"/>
+      </svg>
+      <span data-i18n="tour_label">Tour</span>
+      <span class="docs-tip" data-i18n="tour_tooltip">Primeira vez por aqui? Veja um passeio guiado pela tela, do login à configuração</span>
+    </a>
     <!-- Icone de documentacao: tooltip em hover, clique abre os docs do
          idioma ativo (o href vem do i18n, via data-i18n-href). -->
     <a class="docs" id="docs-link" href="https://github.com/iHumberto/qbit-guardian/tree/main/docs/pt-BR"
@@ -383,7 +407,7 @@
         <h2 data-i18n="section_qbit">🔗 qBittorrent</h2>
         <div class="field">
           <label for="qbit_url" data-i18n="label_url">URL</label>
-          <input id="qbit_url" data-i18n-placeholder="placeholder_qbit_url" placeholder="http://192.168.15.3:8080">
+          <input id="qbit_url" data-i18n-placeholder="placeholder_qbit_url" placeholder="http://192.168.1.100:8080">
         </div>
         <div class="field">
           <label for="qbit_api_key" data-i18n="label_api_key">API Key</label>
@@ -395,7 +419,7 @@
         <h2 data-i18n="section_radarr">🎬 Radarr</h2>
         <div class="field">
           <label for="radarr_url" data-i18n="label_url">URL</label>
-          <input id="radarr_url" data-i18n-placeholder="placeholder_radarr_url" placeholder="http://192.168.15.3:7878">
+          <input id="radarr_url" data-i18n-placeholder="placeholder_radarr_url" placeholder="http://192.168.1.100:7878">
         </div>
         <div class="field">
           <label for="radarr_api_key" data-i18n="label_api_key">API Key</label>
@@ -407,7 +431,7 @@
         <h2 data-i18n="section_sonarr">📺 Sonarr</h2>
         <div class="field">
           <label for="sonarr_url" data-i18n="label_url">URL</label>
-          <input id="sonarr_url" data-i18n-placeholder="placeholder_sonarr_url" placeholder="http://192.168.15.3:8989">
+          <input id="sonarr_url" data-i18n-placeholder="placeholder_sonarr_url" placeholder="http://192.168.1.100:8989">
         </div>
         <div class="field">
           <label for="sonarr_api_key" data-i18n="label_api_key">API Key</label>
@@ -429,10 +453,15 @@
               <span class="unidade" data-i18n="unit_s">s</span>
             </div>
           </div>
-          <div class="field">
+          <!-- Reavaliar fila so vale no modo webhook: com Polling acima de 0,
+               `_start_reevaluate_loop()` nunca e chamado e o valor daqui nao
+               tem efeito nenhum. O campo desliga junto, para a tela nao
+               oferecer um controle que o motor ignora. -->
+          <div class="field" id="campo-reevaluate">
             <label for="reevaluate_interval" data-i18n="label_reevaluate_interval">Reavaliar fila</label>
             <div class="num">
-              <input id="reevaluate_interval" type="number" min="0" placeholder="300">
+              <input id="reevaluate_interval" type="number" min="0" placeholder="300"
+                     data-i18n-title="tip_reevaluate" title="Só vale no modo webhook (Polling em 0)">
               <span class="unidade" data-i18n="unit_s">s</span>
             </div>
           </div>
@@ -561,7 +590,7 @@
         </div>
         <div class="field">
           <label for="apprise_url" data-i18n="label_apprise_url">Apprise URL</label>
-          <input id="apprise_url" data-i18n-placeholder="placeholder_apprise_url" placeholder="tgram://BOT_TOKEN/CHAT_ID">
+          <input id="apprise_url" data-i18n-placeholder="placeholder_apprise_url" placeholder="http://192.168.1.100:8000/notify/guardian">
         </div>
 
         <div class="msg" id="msg_optimized_wrap">
@@ -663,6 +692,9 @@
 <div id="toast" class="toast"></div>
 
 <script src="/i18n.js"></script>
+<!-- Antes do script da pagina de proposito: em /demo o tour troca o
+     `window.fetch` por um stub, e o painel chama /api/config logo abaixo. -->
+<script src="/tour.js"></script>
 <script>
 const API = '/api/config';
 const VERSION_API = '/api/version';
@@ -692,6 +724,50 @@ function syncNotifications() {
     document.getElementById('msg_' + ev + '_wrap')
             .classList.toggle('off', caixa.disabled);
   }
+}
+
+/**
+ * Liga/desliga o campo de reavaliacao conforme o modo que o Polling define.
+ *
+ * Com `check_interval_seconds > 0` o guardian roda em polling e o laco de
+ * reavaliacao nunca sobe — o campo ficava editavel e sem efeito, ao lado do
+ * Polling e sem nada que dissesse isso. O valor NAO e apagado: ele volta a
+ * valer assim que o Polling voltar a 0.
+ */
+function syncModo() {
+  const polling = parseInt(getVal('check_interval'));
+  const ignorado = !isNaN(polling) && polling > 0;
+  document.getElementById('reevaluate_interval').disabled = ignorado;
+  document.getElementById('campo-reevaluate').classList.toggle('ignorado', ignorado);
+}
+
+/**
+ * Marca a Apprise URL quando o valor nao e postavel.
+ *
+ * O campo pede o endpoint HTTP de um servidor Apprise. Uma URL de servico
+ * (`tgram://`, `discord://`) e o erro classico — ate o placeholder desta tela
+ * ensinava isso ate pouco tempo atras —, e ela falha de um jeito invisivel: o
+ * `requests` nao tem adapter para esses esquemas, entao a notificacao morre
+ * dentro do guardian com `InvalidSchema` e so aparece no log do container.
+ * Marcar na hora de digitar e o unico aviso que chega a quem configura.
+ *
+ * Nao bloqueia o salvamento: o campo e opcional e quem quiser guardar um
+ * rascunho pode. O que ele nao pode e achar que esta certo.
+ */
+function validarApprise() {
+  const campo = document.getElementById('apprise_url');
+  const valor = campo.value.trim();
+  // Vazio e valido: notificacoes desligadas.
+  const ok = !valor || /^https?:\/\//i.test(valor);
+  campo.classList.toggle('invalido', !ok);
+  campo.setAttribute('aria-invalid', ok ? 'false' : 'true');
+  // O titulo some quando esta valido para nao virar tooltip permanente.
+  if (ok) campo.removeAttribute('data-i18n-title'), campo.removeAttribute('title');
+  else {
+    campo.setAttribute('data-i18n-title', 'erro_apprise_url');
+    campo.title = t('erro_apprise_url');
+  }
+  return ok;
 }
 
 /** Mostra, sob cada caixa, as variaveis que aquele evento aceita. */
@@ -761,6 +837,8 @@ async function loadConfig() {
       setVal('msg_' + ev, (atual.template || '').trim() ? atual.template : padrao);
     }
     syncNotifications();
+    syncModo();
+    validarApprise();
   } catch(e) {
     toast(t('toast_load_error') + e.message, 'err');
   }
@@ -835,6 +913,13 @@ function prioOrDefault(val, fallback) {
 // Os toggles mudam o que pode ser editado — religa a cada clique.
 document.getElementById('notifications_enabled')
         .addEventListener('change', syncNotifications);
+// O Polling decide o modo, e o modo decide se a reavaliacao vale: `input`
+// e nao `change` para o campo responder enquanto se digita, sem esperar o
+// foco sair.
+document.getElementById('check_interval').addEventListener('input', syncModo);
+// Enquanto digita: quem colou um `tgram://` ve o erro no ato, e nao no log
+// do container tres dias depois.
+document.getElementById('apprise_url').addEventListener('input', validarApprise);
 for (const ev of MSG_EVENTS) {
   document.getElementById('msg_' + ev + '_enabled')
           .addEventListener('change', syncNotifications);

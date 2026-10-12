@@ -144,6 +144,8 @@ Examples:
 
 You land on the **login page**. Sign in with the username `admin` and the password from the log.
 
+> 💡 **Never used the panel before?** Click *First time? Take the guided tour*, right below the form. It walks you through the screen itself, step by step, from login to the full configuration. Nothing you type during the tour is saved.
+
 ### Change the password
 
 Click the **user icon** in the top-right corner. Enter the current password, pick a new one (minimum 8 characters) and save. You can change the username in the same popup.
@@ -168,6 +170,8 @@ Once signed in, only two fields are required:
 Click **Save Configuration**. The guardian starts checking torrents every **300 seconds (5 minutes)** using the default rules.
 
 To tune the behaviour — dangerous extensions, stalled removal, priorities, notifications — see the **[Usage Guide](USAGE.md)**.
+
+> 💡 The **Tour** icon at the top of the panel reopens the guided walkthrough whenever you want, in a separate tab, without touching the configuration already in effect.
 
 ---
 

@@ -148,7 +148,7 @@ Os três primeiros campos são tempos, todos em segundos — é o que o `s` ao l
 | Campo | Chave | O que faz |
 |---|---|---|
 | **Polling** | `check_interval_seconds` | De quanto em quanto tempo o guardião varre a lista inteira de torrents. `0` desliga a varredura e deixa o guardião reagindo só ao webhook do qBittorrent — veja **Modos de operação**. |
-| **Reavaliar fila** | `reevaluate_interval_seconds` | Ritmo em que o guardião revisita os torrents que ainda não tinham metadados e reaplica os critérios de remoção. É a granularidade dos limites de tempo desta seção: **um limite menor que este nunca é alcançado antes do próximo ciclo**. `0` desliga a reavaliação. |
+| **Reavaliar fila** | `reevaluate_interval_seconds` | Ritmo em que o guardião revisita os torrents que ainda não tinham metadados e reaplica os critérios de remoção. É a granularidade dos limites de tempo desta seção: **um limite menor que este nunca é alcançado antes do próximo ciclo**. `0` desliga a reavaliação. **Só vale no modo webhook** (Polling em `0`) — veja **Qual campo vale em cada modo**. |
 | **Reconexão** | `retry_interval_seconds` | Quanto esperar entre tentativas enquanto o qBittorrent estiver inacessível. Não precisa ser curto: o guardião tenta para sempre. |
 | **Prioridade mídia** | `priority_media` | Prioridade de download dos arquivos de vídeo do torrent. Veja **Prioridades de arquivos**. |
 | **Prioridade auxiliares** | `priority_normal` | Prioridade dos arquivos que acompanham a mídia — legendas (`.srt`), capas (`.jpg`), metadados (`.nfo`). |
@@ -183,20 +183,31 @@ As três regras de remoção ficam embaixo do título **Remover torrents** — o
 
 O qbit-guardian pode te avisar pelo celular ou computador sempre que uma ação importante acontecer. Para isso, ele usa o **Apprise** — um sistema que envia mensagens para mais de 100 serviços diferentes (Telegram, Discord, Slack, Pushover, e-mail e muitos outros).
 
-> **📘 Apprise:** É como um carteiro universal. Você entrega uma única URL e ele se encarrega de entregar a mensagem no serviço que você escolheu. Você não precisa instalar nada extra, só gerar a URL correta.
+> **📘 Apprise:** É como um carteiro universal. Ele conhece mais de 100 serviços; você diz uma vez quais quer usar, e ele entrega em todos.
+
+### ⚠️ O campo espera um endereço HTTP, não uma URL de serviço
+
+Este é o ponto onde mais gente erra. O qbit-guardian **não executa o Apprise** — ele faz um `POST` HTTP para um **servidor Apprise que você hospeda** (a imagem oficial [`caronc/apprise`](https://hub.docker.com/r/caronc/apprise)).
+
+Então o campo **Apprise URL** recebe o **endpoint do seu servidor**:
+
+```
+http://192.168.1.100:8000/notify/guardian
+https://apprise.minha-rede.local/notify/guardian
+```
+
+As URLs de serviço do Apprise — `tgram://`, `discord://`, `pover://` — **não funcionam aqui**. Elas vão na **configuração do servidor Apprise**, sob a chave de configuração (o `guardian` do fim do endereço acima). Se você colar uma delas no campo, nenhuma notificação sai e o log registra `Apprise: No connection adapters were found`.
+
+| Onde | O que vai |
+|------|-----------|
+| Campo **Apprise URL** desta tela | `http://SEU_SERVIDOR:8000/notify/CHAVE` |
+| Configuração do servidor Apprise | `tgram://TOKEN_DO_BOT/ID_DO_CHAT`, `discord://ID/TOKEN`, `pover://USER/APP`… |
+
+> Consulte a [lista completa de formatos](https://github.com/caronc/apprise#supported-notifications) na documentação oficial do Apprise — lembrando que eles vão no **servidor**, não neste campo.
 
 ### Ativando notificações
 
-Preencha o campo **Apprise URL** com o endereço gerado para o seu serviço e ligue o interruptor no cabeçalho do card **Notificações**. Exemplos de URLs Apprise:
-
-| Serviço | Formato da URL |
-|---------|---------------|
-| Telegram | `tgram://TOKEN_DO_BOT/ID_DO_CHAT` |
-| Discord | `discord://ID_DO_WEBHOOK/TOKEN` |
-| Pushover | `pover://USER_KEY/APP_TOKEN` |
-| Apprise próprio | `https://apprise.minha-rede/notify/guardian` |
-
-> Consulte a [lista completa de formatos](https://github.com/caronc/apprise#supported-notifications) na documentação oficial do Apprise.
+Preencha o campo **Apprise URL** com o endpoint do seu servidor Apprise e ligue o interruptor no cabeçalho do card **Notificações**.
 
 ### Os três eventos
 
@@ -257,6 +268,27 @@ Recomendamos **300 segundos** para uso geral — é rápido o suficiente e não 
 Neste modo, o qBittorrent avisa o guardião **no exato momento** em que um torrent é adicionado. Coloque `0` no intervalo de verificação e siga o passo a passo em [Configurando o Webhook](INSTALL.md#configurando-o-webhook-tempo-real).
 
 > ⚠️ O webhook precisa das variáveis `QBIT_GUARDIAN_USER` e `QBIT_GUARDIAN_PASS` no serviço do qBittorrent, porque o `/api/trigger` exige autenticação.
+
+### Qual campo vale em cada modo
+
+Os dois campos de tempo parecem independentes na tela, mas **um desliga o outro**:
+
+| Polling | Modo | O que roda | **Reavaliar fila** |
+|---------|------|-----------|--------------------|
+| acima de `0` | Polling | o guardião varre a fila inteira a cada N segundos | **ignorado** — o campo aparece desabilitado na tela |
+| `0` | Webhook | o guardião só age quando o qBittorrent avisa | **é o que o mantém de olho na fila** |
+
+No modo webhook, o `/api/trigger` dispara quando um torrent é **adicionado** — e só. Sem a reavaliação, um torrent que travou *depois* de entrar ficaria esperando outro torrent chegar para ser olhado de novo, e um lote que entrou sem metadados nunca receberia prioridade. É por isso que, nesse modo, **deixar `Reavaliar fila` em 0 não é recomendado**.
+
+Na prática: se você usa webhook, mantenha a reavaliação ligada (300 segundos serve bem). Se usa polling, não precisa pensar nesse campo — a tela o desabilita sozinha.
+
+> O valor digitado **não se perde** quando o campo é desabilitado: ele volta a valer assim que o Polling voltar para `0`.
+
+### Trocar de modo com o container rodando
+
+Pode trocar pela Web UI, sem reiniciar nada: salve o novo valor de Polling e o guardião troca de modo sozinho — o log registra a troca (`entrando em modo webhook` ou `Polling religado`).
+
+> Até a v2.9.0 isso **não funcionava**: a troca só valia depois de reiniciar o container, e sair do polling deixava o guardião sem nenhuma verificação ativa. Corrigido na v2.10.0.
 
 ### Se o qBittorrent cair
 

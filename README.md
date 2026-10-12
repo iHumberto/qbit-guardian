@@ -98,7 +98,15 @@ The configuration page is split into three columns:
 - **Middle column**: All Guardian settings — check interval, file extensions, file priorities, and stalled/seedless removal rules.
 - **Right column**: Apprise notifications.
 
-The header carries a **Docs** icon — hover it for a hint, click it to open this project's documentation in your language — and the language selector.
+The header carries a **Tour** icon — opens the guided walkthrough in a new tab —, a **Docs** icon — hover it for a hint, click it to open this project's documentation in your language — and the language selector.
+
+### Guided tour
+
+The **Tour** icon opens, in another tab, a 14-step walkthrough that starts at the login screen and ends at the configuration. Each step highlights one field and explains what goes in it; moving on fills that field with an example and jumps to the next one.
+
+It runs on top of the real screens rather than on a separate prototype, so it follows the interface from release to release. The language is whichever one the panel is set to: a single link, pt-BR or en-US according to the selector.
+
+The second half happens at `/demo`, a public and inert copy of the configuration screen: it shows the values of a fresh install, **nothing typed there is saved**, and no write request reaches the server. A banner at the top says so the whole time. Closing the tour leaves you on that screen, free to play with the fields and see how it behaves.
 
 Below 1200 px the three columns stack vertically, so the page stays usable on tablets and phones without squeezing the longer labels.
 
@@ -213,7 +221,7 @@ All settings live in `config.json` and can be edited through the Web UI or direc
 | **sonarr**      | `url`, `api_key` — optional, leave blank to disable                      |
 | **radarr**      | `url`, `api_key` — optional, leave blank to disable                      |
 | **guardian**    | `check_interval_seconds` (0 = webhook mode), `reevaluate_interval_seconds` (how often stalled/seedless is re-checked — this is the only periodic work left in webhook mode; 0 disables it), `retry_interval_seconds`, extension lists, stalled/seedless/slow rules (`remove_slow` + `slow_speed`/`slow_speed_unit` in KiB/MiB/GiB/TiB per second and `slow_time`/`slow_unit`), file priorities |
-| **notifications** | `apprise_url` — Apprise-compatible URL (see [Apprise docs](https://github.com/caronc/apprise)) |
+| **notifications** | `apprise_url` — **your Apprise server's HTTP endpoint** (`http://host:8000/notify/key`). Not a service URL (`tgram://`, `discord://`): those go in the Apprise server's configuration |
 | **webui**       | `user`, `password`, `secret_key` — provisioned on first startup. The password is stored as a PBKDF2 hash; `secret_key` signs the session cookie |
 
 ### Notification messages
@@ -325,7 +333,9 @@ The Web UI exposes these endpoints:
 | Method   | Endpoint             | Auth      | Description                                                    |
 |----------|----------------------|-----------|----------------------------------------------------------------|
 | `GET`    | `/api/health`        | Public    | Healthcheck — returns `{"status": "ok"}`                       |
-| `GET`    | `/login`             | Public    | Login page (redirects to `/` if a session already exists)      |
+| `GET`    | `/login`             | Public    | Login page (redirects to `/` if a session already exists, except with `?tour=1`) |
+| `GET`    | `/demo`              | Public    | Configuration screen in demo mode, for the guided tour         |
+| `GET`    | `/api/demo-config`   | Public    | Values of a fresh install. Does not read `config.json`         |
 | `POST`   | `/api/login`         | Public    | Exchanges username and password for a session cookie. `429` after 5 failures |
 | `POST`   | `/api/logout`        | Public    | Ends the session                                               |
 | `GET`    | `/api/config`        | Required  | Reads the current configuration. Does **not** return `webui.password` |

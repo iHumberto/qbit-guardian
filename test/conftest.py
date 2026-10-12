@@ -35,6 +35,10 @@ def reset_guardian_globals():
         # Janelas de lentidao: um teste que deixa hash marcado como lento faria
         # o seguinte remover torrent que nunca ficou lento.
         g._lento_desde.clear()
+        # Modo em execucao (polling/webhook): tambem e global de modulo. Um
+        # teste que sai com "webhook" faz o POST /api/config do teste seguinte
+        # achar que precisa religar o polling — e subir a thread de verdade.
+        g._definir_modo(None)
 
     _limpar()
     yield
@@ -51,6 +55,13 @@ def nao_sobe_thread_de_reavaliacao(monkeypatch):
     outro teste seta o Event e entao estoura ao encontrar o CONFIG_PATH do
     temporario ja removido. Aparecia como PytestUnhandledThreadExceptionWarning
     intermitente — flaky, porque depende da ordem em que os testes rodam.
+
+    O outro lado da troca de modo — `_reevaluate_loop` e
+    `aplicar_modo_da_config` chamando `start_guardian` ao ver o polling
+    religado — nao precisa de patch aqui: nenhum dos dois caminhos roda com o
+    modo em `None`, e `reset_guardian_globals` zera o modo a cada teste.
+    Patchar `start_guardian` tambem apagaria o unico teste que verifica que
+    ele cria a thread daemon.
 
     Quem precisa verificar que o loop foi iniciado faz seu proprio patch e
     inspeciona a chamada; quem so passa pelo caminho nao paga uma thread.

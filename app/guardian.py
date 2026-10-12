@@ -93,53 +93,63 @@ def _marca_mtime():
         _config_mtime = None
 
 
+def config_default():
+    """Config de uma instalacao nova, montada na memoria.
+
+    Vive fora do `load_config()` porque nao e so o arquivo inicial: a rota
+    `/api/demo-config` serve esta mesma estrutura para o tour guiado, e uma
+    segunda copia dos defaults sairia de sincronia no primeiro campo novo.
+    """
+    return {
+        "qbit": {"url": "", "api_key": ""},
+        "sonarr": {"url": "", "api_key": ""},
+        "radarr": {"url": "", "api_key": ""},
+        "guardian": {
+            "check_interval_seconds": 300,
+            "reevaluate_interval_seconds": 300,
+            "retry_interval_seconds": 120,
+            "valid_media_extensions": [
+                ".mkv", ".mp4", ".avi", ".mov", ".m4v",
+                ".ts", ".wmv", ".flv", ".webm"
+            ],
+            "dangerous_extensions": [
+                ".exe", ".scr", ".bat", ".cmd", ".vbs",
+                ".js", ".com", ".pif", ".msi", ".dll",
+                ".ps1", ".sh", ".bin"
+            ],
+            "remove_stalled": False,
+            "stalled_time": 0,
+            "stalled_unit": "hours",
+            "remove_no_seeds": False,
+            "no_seeds_time": 0,
+            "no_seeds_unit": "hours",
+            "remove_slow": False,
+            "slow_speed": 0,
+            "slow_speed_unit": "KiB",
+            "slow_time": 0,
+            "slow_unit": "minutes",
+            "priority_media": 7,
+            "priority_normal": 1,
+            "priority_skip": 0
+        },
+        "notifications": {
+            "apprise_url": "",
+            "enabled": True,
+            "events": {
+                ev: {"enabled": True, **spec}
+                for ev, spec in DEFAULT_NOTIFICATIONS.items()
+            },
+        },
+        "webui": {"user": "", "password": ""}
+    }
+
+
 def load_config():
     """Le config.json (thread-safe). Cria default se nao existir."""
     global _config
     with _config_lock:
         if not os.path.exists(CONFIG_PATH):
-            default = {
-                "qbit": {"url": "", "api_key": ""},
-                "sonarr": {"url": "", "api_key": ""},
-                "radarr": {"url": "", "api_key": ""},
-                "guardian": {
-                    "check_interval_seconds": 300,
-                    "reevaluate_interval_seconds": 300,
-                    "retry_interval_seconds": 120,
-                    "valid_media_extensions": [
-                        ".mkv", ".mp4", ".avi", ".mov", ".m4v",
-                        ".ts", ".wmv", ".flv", ".webm"
-                    ],
-                    "dangerous_extensions": [
-                        ".exe", ".scr", ".bat", ".cmd", ".vbs",
-                        ".js", ".com", ".pif", ".msi", ".dll",
-                        ".ps1", ".sh", ".bin"
-                    ],
-                    "remove_stalled": False,
-                    "stalled_time": 0,
-                    "stalled_unit": "hours",
-                    "remove_no_seeds": False,
-                    "no_seeds_time": 0,
-                    "no_seeds_unit": "hours",
-                    "remove_slow": False,
-                    "slow_speed": 0,
-                    "slow_speed_unit": "KiB",
-                    "slow_time": 0,
-                    "slow_unit": "minutes",
-                    "priority_media": 7,
-                    "priority_normal": 1,
-                    "priority_skip": 0
-                },
-                "notifications": {
-                    "apprise_url": "",
-                    "enabled": True,
-                    "events": {
-                        ev: {"enabled": True, **spec}
-                        for ev, spec in DEFAULT_NOTIFICATIONS.items()
-                    },
-                },
-                "webui": {"user": "", "password": ""}
-            }
+            default = config_default()
             os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
             with open(CONFIG_PATH, "w") as f:
                 json.dump(default, f, indent=2)
@@ -379,8 +389,9 @@ def send_notification(title, message):
     if not url:
         return
     try:
-        # So o host: a apprise_url embute o token do bot (tgram://TOKEN/chat),
-        # e com LOG_LEVEL=DEBUG ela iria inteira para o `docker logs`.
+        # So o host: a apprise_url pode embutir credencial no caminho ou na
+        # query (a chave de configuracao do servidor Apprise, um token), e com
+        # LOG_LEVEL=DEBUG ela iria inteira para o `docker logs`.
         log.debug(f"HTTP POST {_destino_de(url)} (Apprise: {title})")
         requests.post(url, data={"title": title, "body": message},
                      timeout=10, verify=False)
@@ -1001,6 +1012,97 @@ def _reevaluate_interval(cfg):
         return 300
 
 
+def _check_interval(cfg):
+    """Intervalo do polling, em segundos (0 = modo webhook).
+
+    Simetrica a `_reevaluate_interval`, e pelo mesmo motivo: o valor pode vir
+    como string de um config editado a mao, e `"0" == 0` e False. O
+    healthcheck ja normalizava (`_as_int`) enquanto o loop comparava cru — os
+    dois discordavam sobre o modo de um `"0"` entre aspas.
+    """
+    g = cfg.get("guardian") or {}
+    try:
+        return max(0, int(g.get("check_interval_seconds", 300)))
+    except (TypeError, ValueError):
+        return 300
+
+
+# ── Modo de operacao: polling x webhook ────────────────────────────────
+#
+# Sao dois lacos distintos e so um roda por vez; trocar de modo e passar o
+# bastao de um para o outro. Sem isso, os dois sentidos falhavam:
+#
+#   polling -> webhook: o laco de polling dava `return` sem acordar a
+#       reavaliacao. Nao sobrava laco nenhum — so o `/api/trigger`, que nem
+#       existe se o webhook nao estiver configurado no qBittorrent.
+#   webhook -> polling: quem detectaria a volta era o laco de polling, que
+#       tinha terminado no start. So com restart do container.
+_modo_lock = threading.Lock()
+_modo_atual = None
+
+
+def _definir_modo(modo):
+    """Registra quem esta no comando. Chamado por quem assume o laco."""
+    global _modo_atual
+    with _modo_lock:
+        _modo_atual = modo
+
+
+def modo_em_execucao():
+    """`"polling"`, `"webhook"` ou None (nenhum laco subiu ainda)."""
+    with _modo_lock:
+        return _modo_atual
+
+
+def _passar_bastao(de, para, subir):
+    """Troca o modo UMA vez, mesmo com duas threads percebendo a mudanca.
+
+    A guarda e o `de`: so troca quem ainda e o dono do modo. Sem ela, uma
+    thread atrasada — dormindo no intervalo enquanto a troca ja aconteceu —
+    acordaria e subiria um segundo laco, e o ciclo passaria a rodar em dobro
+    contra o mesmo qBittorrent.
+
+    Devolve False quando a troca nao era desta thread, e aí o chamador segue
+    o que estava fazendo em vez de encerrar.
+    """
+    global _modo_atual
+    with _modo_lock:
+        if _modo_atual != de:
+            return False
+        _modo_atual = para
+    subir()
+    return True
+
+
+def aplicar_modo_da_config():
+    """Religa o laco certo quando a Web UI troca o modo. Chamada pelo POST.
+
+    O laco de polling percebe a troca sozinho, ao fim do ciclo em andamento.
+    A volta nao tinha quem percebesse: em modo webhook com a reavaliacao
+    desligada (`reevaluate_interval_seconds = 0`) nao ha laco nenhum rodando,
+    e salvar um Polling > 0 pela tela nao religava nada ate o restart.
+
+    Devolve o modo para o qual trocou, ou None quando nao havia o que fazer.
+    """
+    desejado = "polling" if _check_interval(get_config()) > 0 else "webhook"
+    atual = modo_em_execucao()
+    if atual is None or desejado == atual:
+        return None
+
+    if desejado == "polling":
+        # Acorda o laco de webhook, que pode estar dormindo ate o proximo
+        # intervalo de reavaliacao. Quem sobe um `_reevaluate_loop` novo limpa
+        # o Event, entao nao ha flag preso para a proxima vez.
+        _parar_reevaluate.set()
+        if _passar_bastao("webhook", "polling", start_guardian):
+            log.info("Polling religado pela Web UI — voltando do modo webhook.")
+            return "polling"
+        return None
+
+    # polling -> webhook: o proprio laco de polling trata, ao acordar.
+    return None
+
+
 def executar_ciclo(torrents=None):
     """Um ciclo de analise: pendentes (pass 1) + reavaliacao de stalled (pass 2).
 
@@ -1069,8 +1171,21 @@ def _reevaluate_loop():
     `get_torrents()`. Nao ha modo a alternar — o loop fica barato quando nao ha
     trabalho, e volta a trabalhar quando um lote novo entra.
     """
+    # Quem assume o laco limpa o sinal de parada: `aplicar_modo_da_config()`
+    # o levanta para acordar a thread anterior, e deixar o flag preso faria
+    # este laco encerrar na primeira espera.
+    _parar_reevaluate.clear()
+
     while True:
         cfg = get_config()
+
+        # Polling religado: devolve o bastao e sai. Se a troca nao for desta
+        # thread (`False`), segue reavaliando — outra ja assumiu.
+        if _check_interval(cfg) > 0:
+            if _passar_bastao("webhook", "polling", start_guardian):
+                log.info("Polling religado — saindo do modo webhook.")
+                return
+
         intervalo = _reevaluate_interval(cfg)
         if intervalo <= 0:
             log.info("reevaluate_interval_seconds=0 — reavaliacao periodica desligada.")
@@ -1114,15 +1229,17 @@ def guardian_loop():
     _connect_with_retry()
 
     cfg = get_config()
-    interval = cfg["guardian"].get("check_interval_seconds", 300)
+    interval = _check_interval(cfg)
 
     if interval == 0:
         reeval = _reevaluate_interval(cfg)
         log.info("Guardian iniciado em modo webhook (intervalo=0). "
                  f"Aguardando /api/trigger; reavaliacao de stalled a cada {reeval}s.")
+        _definir_modo("webhook")
         _start_reevaluate_loop()
         return  # sem ciclo completo — so responde a /api/trigger
 
+    _definir_modo("polling")
     log.info(f"Guardian iniciado. Intervalo: {interval}s")
 
     while True:
@@ -1154,9 +1271,12 @@ def guardian_loop():
         # Recarrega config a cada iteracao para detectar mudancas no intervalo
         # (`get_config` invalida o cache por mtime — ver a funcao)
         cfg = get_config()
-        interval = cfg["guardian"].get("check_interval_seconds", 300)
+        interval = _check_interval(cfg)
         if interval == 0:
             log.info("Intervalo alterado para 0 — entrando em modo webhook. Aguardando /api/trigger.")
+            # Passar o bastao e o que faltava: antes o laco so terminava, e
+            # ninguem mais olhava a fila ate o restart do container.
+            _passar_bastao("polling", "webhook", _start_reevaluate_loop)
             return
 
         time.sleep(interval)

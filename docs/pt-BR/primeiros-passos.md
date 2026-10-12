@@ -144,6 +144,8 @@ Exemplos:
 
 Você cai na **tela de login**. Entre com o usuário `admin` e a senha que apareceu no log.
 
+> 💡 **Nunca usou o painel?** Clique em *Primeira vez? Veja o passeio guiado*, logo abaixo do formulário. Ele mostra, passo a passo e na própria tela, onde fica cada coisa — do login à configuração completa. Nada do que você digitar durante o passeio é salvo.
+
 ### Troque a senha
 
 Clique no **ícone de usuário** no canto superior direito. Informe a senha atual, escolha uma nova (mínimo 8 caracteres) e salve. Se quiser, mude o nome de usuário no mesmo popup.
@@ -168,6 +170,8 @@ Depois de entrar, apenas dois campos são obrigatórios:
 Clique em **Salvar Configurações**. O guardião já começa a verificar torrents a cada **300 segundos (5 minutos)** usando as regras padrão.
 
 Para ajustar o comportamento — extensões perigosas, remoção de stalled, prioridades, notificações — veja o **[Guia de Uso](USAGE.md)**.
+
+> 💡 O ícone **Tour** no topo do painel reabre o passeio guiado quando você quiser, numa aba separada, sem mexer na configuração que já está valendo.
 
 ---
 

@@ -2709,6 +2709,428 @@ class TestWebUIDocsLink:
             f"{caminho} nao tem documentacao"
 
 
+def _passos_do_tour(nome_da_lista):
+    """Extrai os passos de uma das listas de `static/tour.js`.
+
+    Parse por regex, como `_i18n_tables()`: o teste nao executa JS de
+    proposito, e so precisa de `alvo` e `chave` de cada passo.
+    """
+    src = _read_static("tour.js")
+    m = re.search(r"var " + nome_da_lista + r" = \[(.*?)\n  \];", src, re.S)
+    assert m, f"{nome_da_lista} nao encontrada em tour.js"
+    passos = []
+    for bloco in re.findall(r"\{(.*?)\}", m.group(1), re.S):
+        alvo = re.search(r"alvo:\s*'([^']+)'", bloco)
+        chave = re.search(r"chave:\s*'([^']+)'", bloco)
+        assert chave, f"passo sem chave de i18n em {nome_da_lista}: {bloco}"
+        passos.append((alvo.group(1) if alvo else None, chave.group(1)))
+    assert passos, f"{nome_da_lista} ficou vazia"
+    return passos
+
+
+def _seletor_existe(seletor, html):
+    """Confere `#id` e `.classe` de um seletor simples contra o HTML.
+
+    Nao e um motor de CSS: cada parte do seletor so precisa aparecer no
+    arquivo. Basta para pegar o que importa — um alvo renomeado no HTML e
+    esquecido no tour.
+    """
+    for parte in re.findall(r"[#.][\w-]+", seletor):
+        if parte.startswith("#"):
+            if f'id="{parte[1:]}"' not in html:
+                return False
+        elif not re.search(r'class="[^"]*\b' + re.escape(parte[1:]) + r'\b', html):
+            return False
+    return True
+
+
+class TestPlaceholderApprise:
+    """O campo Apprise espera um endpoint HTTP, nao uma URL de servico.
+
+    `send_notification` faz `requests.post(url, ...)`. Um esquema proprio do
+    Apprise (`tgram://`, `discord://`, `pover://`) nao tem adapter no
+    `requests`: a chamada levanta `InvalidSchema` antes de qualquer byte sair
+    do processo, cai no `except` e vira uma linha de log. O placeholder
+    ensinava exatamente esse valor — quem copiasse montava uma configuracao
+    que nunca poderia notificar.
+
+    O guardian nao executa o Apprise: ele fala com um servidor Apprise
+    hospedado pelo usuario, cujo endpoint e `http://host:8000/notify/<chave>`.
+    As URLs de servico vivem na configuracao daquele servidor.
+    """
+
+    ESQUEMAS_DE_SERVICO = ("tgram://", "discord://", "pover://", "mailto://",
+                           "slack://", "gotify://", "ntfy://")
+
+    @pytest.mark.parametrize("fonte", ["index.html", "i18n.js"])
+    def test_placeholder_nao_ensina_url_de_servico(self, fonte):
+        """REGRESSAO: o placeholder era `tgram://BOT_TOKEN/CHAT_ID`."""
+        texto = _read_static(fonte)
+        for linha in texto.splitlines():
+            # `erro_apprise_url` cita `tgram://` de proposito: e a mensagem que
+            # ensina a NAO usar. O que nao pode sugerir e o placeholder.
+            if "apprise_url" not in linha or "erro_apprise_url" in linha:
+                continue
+            for esquema in self.ESQUEMAS_DE_SERVICO:
+                assert esquema not in linha, \
+                    f"{fonte} voltou a sugerir {esquema} no campo Apprise: {linha.strip()}"
+
+    @pytest.mark.parametrize("fonte", ["index.html", "i18n.js"])
+    def test_placeholder_e_um_endpoint_http(self, fonte):
+        texto = _read_static(fonte)
+        achou = [l for l in texto.splitlines()
+                 if "placeholder_apprise_url" in l or 'id="apprise_url"' in l]
+        assert achou, f"{fonte} nao tem o campo Apprise"
+        for linha in achou:
+            assert "http://" in linha or "https://" in linha, \
+                f"{fonte}: o placeholder precisa ser um endereco HTTP — {linha.strip()}"
+            assert "/notify/" in linha, \
+                (f"{fonte}: o endpoint do servidor Apprise tem o caminho "
+                 f"/notify/<chave> — {linha.strip()}")
+
+    def test_o_esquema_do_placeholder_e_aceito_pelo_requests(self):
+        """O valor sugerido tem de ser postavel — era isso que faltava.
+
+        Nao faz requisicao: checa o adapter registrado, que e o que o
+        `requests` consulta antes de abrir conexao.
+        """
+        import requests
+        sessao = requests.Session()
+        js = _read_static("i18n.js")
+        for valor in re.findall(r"placeholder_apprise_url:\s*'([^']+)'", js):
+            assert sessao.get_adapter(valor), f"{valor} nao tem adapter no requests"
+        with pytest.raises(requests.exceptions.InvalidSchema):
+            sessao.get_adapter("tgram://BOT_TOKEN/CHAT_ID")
+
+    @pytest.mark.parametrize("doc", ["docs/pt-BR/USAGE.md", "docs/en-US/USAGE.md"])
+    def test_a_doc_avisa_que_url_de_servico_nao_vale_no_campo(self, doc):
+        """A tabela antiga listava `tgram://` como opcao do campo."""
+        with open(os.path.join(REPO_ROOT, doc), encoding="utf-8") as f:
+            texto = f.read()
+        assert "/notify/" in texto, f"{doc} nao mostra o formato do endpoint"
+        assert ("nao funcionam aqui" in texto or "do not work here" in texto
+                or "n\u00e3o funcionam aqui" in texto), \
+            f"{doc} nao avisa que a URL de servico nao vale no campo"
+
+
+class TestCampoReavaliarSegueOModo:
+    """A tela nao pode oferecer um controle que o motor ignora.
+
+    Com `check_interval_seconds > 0` o guardian roda em polling e
+    `_start_reevaluate_loop()` nunca e chamado: o campo *Reavaliar fila*
+    ficava editavel, ao lado do Polling, sem nada indicando que o valor nao
+    teria efeito. Ver TestTrocaDeModoEmRuntime para o lado do motor.
+    """
+
+    def test_o_campo_tem_ancora_para_o_estilo(self):
+        html = _read_static("index.html")
+        assert 'id="campo-reevaluate"' in html, \
+            "sem o wrapper identificado nao da para esmaecer o campo"
+
+    def test_existe_regra_visual_de_campo_ignorado(self):
+        html = _read_static("index.html")
+        assert ".field.ignorado" in html, "falta o estilo do campo desligado"
+        assert re.search(r"\.field\.ignorado input\s*\{[^}]*not-allowed", html), \
+            "o campo desligado precisa mostrar que nao aceita edicao"
+
+    def test_a_funcao_liga_o_campo_ao_polling(self):
+        html = _read_static("index.html")
+        assert "function syncModo()" in html
+        m = re.search(r"function syncModo\(\)\s*\{(.*?)\n\}", html, re.S)
+        corpo = m.group(1)
+        assert "check_interval" in corpo, "o modo e decidido pelo Polling"
+        assert "reevaluate_interval" in corpo and "disabled" in corpo
+
+    def test_o_campo_sincroniza_ao_carregar_e_ao_digitar(self):
+        """So no load, um Polling recem-digitado nao refletiria no campo."""
+        html = _read_static("index.html")
+        assert "syncModo();" in html, "falta a chamada no carregamento"
+        assert re.search(r"getElementById\('check_interval'\)\s*\.addEventListener\('input', syncModo\)",
+                         html), "o campo precisa acompanhar o que esta sendo digitado"
+
+    def test_o_valor_nao_e_apagado_quando_ignorado(self):
+        """Desligar o campo nao pode perder o valor: ele volta a valer.
+
+        `disabled` em vez de limpar — e o `getVal` continua lendo o campo, de
+        modo que salvar em modo polling preserva o intervalo de reavaliacao.
+        """
+        html = _read_static("index.html")
+        m = re.search(r"function syncModo\(\)\s*\{(.*?)\n\}", html, re.S)
+        corpo = m.group(1)
+        assert "setVal('reevaluate_interval'" not in corpo and ".value = ''" not in corpo, \
+            "o campo desligado mantem o valor guardado"
+
+    @pytest.mark.parametrize("lang", ["pt-BR", "en-US"])
+    def test_a_dica_explica_o_motivo_nos_dois_idiomas(self, lang):
+        tables = _i18n_tables()
+        assert "tip_reevaluate" in tables[lang]
+        js = _read_static("i18n.js")
+        assert 'data-i18n-title="tip_reevaluate"' in _read_static("index.html"), \
+            "a dica precisa passar pelo walker para trocar de idioma"
+        valores = re.findall(r"tip_reevaluate:\s*'([^']*)'", js)
+        assert len(valores) == 2
+        for valor in valores:
+            assert "webhook" in valor.lower(), valor
+
+
+class TestPlaceholdersDeRede:
+    """Endereco de exemplo nao pode ser o de uma rede real.
+
+    Placeholder e material de leitura: ele vai para a documentacao, para
+    print de tela e para o repositorio publico. Usar a faixa domestica mais
+    comum (`192.168.1.x`) deixa claro que ali vai o IP de quem instala, e nao
+    o de quem escreveu — alem de ser o que o resto da documentacao ja usava.
+    """
+
+    FAIXA_GENERICA = "192.168.1."
+    FONTES = ["index.html", "i18n.js", "tour.js"]
+
+    @pytest.mark.parametrize("fonte", FONTES)
+    def test_todo_ip_de_exemplo_esta_na_faixa_generica(self, fonte):
+        texto = _read_static(fonte)
+        for ip in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", texto):
+            if ip.startswith("127.") or ip == "0.0.0.0":
+                continue
+            assert ip.startswith(self.FAIXA_GENERICA), \
+                f"{fonte}: {ip} nao esta na faixa de exemplo {self.FAIXA_GENERICA}x"
+
+    @pytest.mark.parametrize("doc", ["docs/pt-BR/USAGE.md", "docs/en-US/USAGE.md"])
+    def test_a_doc_usa_a_mesma_faixa(self, doc):
+        with open(os.path.join(REPO_ROOT, doc), encoding="utf-8") as f:
+            texto = f.read()
+        for ip in re.findall(r"\b192\.168\.(?:\d{1,3})\.\d{1,3}\b", texto):
+            assert ip.startswith(self.FAIXA_GENERICA), \
+                f"{doc}: {ip} foge da faixa de exemplo"
+
+    def test_o_tour_preenche_com_o_mesmo_endereco_do_placeholder(self):
+        """O passo que digita no campo nao pode ensinar outro endereco."""
+        js = _read_static("i18n.js")
+        tour = _read_static("tour.js")
+        for chave, campo in [("placeholder_qbit_url", "#qbit_url"),
+                             ("placeholder_apprise_url", "#apprise_url")]:
+            valor = re.search(chave + r":\s*'([^']+)'", js).group(1)
+            passo = re.search(r"alvo: '" + re.escape(campo) + r"'.*?\}", tour, re.S).group(0)
+            preenche = re.search(r"preenche: '([^']+)'", passo)
+            assert preenche, f"o passo de {campo} deveria preencher o campo"
+            assert preenche.group(1) == valor, \
+                f"{campo}: o tour digita {preenche.group(1)}, o placeholder diz {valor}"
+
+
+class TestValidacaoApprise:
+    """O campo avisa na hora quando o valor nao e postavel.
+
+    Sem isto o erro e invisivel: o `requests` recusa `tgram://` dentro do
+    guardian, a excecao vira uma linha no log do container e a tela segue
+    mostrando a configuracao como se estivesse certa. Ver
+    TestPlaceholderApprise para o lado do formato.
+    """
+
+    def _funcao(self):
+        html = _read_static("index.html")
+        m = re.search(r"function validarApprise\(\)\s*\{(.*?)\n\}", html, re.S)
+        assert m, "validarApprise() nao encontrada"
+        return m.group(1)
+
+    def test_aceita_so_http_e_https(self):
+        corpo = self._funcao()
+        assert re.search(r"\^https\?:", corpo), \
+            "a regra precisa ancorar no inicio e aceitar http e https"
+
+    def test_campo_vazio_nao_e_erro(self):
+        """Apprise e opcional: campo em branco significa sem notificacao."""
+        corpo = self._funcao()
+        assert "!valor" in corpo, "vazio nao pode ser marcado como invalido"
+
+    def test_marca_o_campo_e_avisa_o_leitor_de_tela(self):
+        corpo = self._funcao()
+        assert "classList.toggle('invalido'" in corpo
+        assert "aria-invalid" in corpo, \
+            "quem nao ve a borda vermelha precisa do estado no leitor de tela"
+
+    def test_existe_estilo_para_o_campo_invalido(self):
+        html = _read_static("index.html")
+        m = re.search(r"\.field input\.invalido\s*\{([^}]*)\}", html)
+        assert m, "falta o estilo do campo invalido"
+        assert "--accent" in m.group(1), \
+            "o vermelho do erro e o mesmo token do resto da tela"
+
+    def test_valida_ao_digitar_e_ao_carregar(self):
+        html = _read_static("index.html")
+        assert "validarApprise();" in html, "falta validar no carregamento"
+        assert re.search(r"getElementById\('apprise_url'\)\s*\.addEventListener\('input', validarApprise\)",
+                         html), "o aviso tem de aparecer enquanto se digita"
+
+    @pytest.mark.parametrize("lang", ["pt-BR", "en-US"])
+    def test_a_mensagem_existe_nos_dois_idiomas(self, lang):
+        assert "erro_apprise_url" in _i18n_tables()[lang]
+
+    def test_a_mensagem_diz_o_que_fazer(self):
+        js = _read_static("i18n.js")
+        for valor in re.findall(r"erro_apprise_url:\s*'([^']*)'", js):
+            assert "/notify/" in valor, "a mensagem precisa mostrar o formato certo"
+            assert "tgram" in valor, "e nomear o erro que ela esta corrigindo"
+
+    def test_o_proprio_placeholder_passa_na_validacao(self):
+        """O exemplo da tela nao pode ser marcado como invalido."""
+        js = _read_static("i18n.js")
+        for valor in re.findall(r"placeholder_apprise_url:\s*'([^']+)'", js):
+            assert re.match(r"^https?://", valor), valor
+
+
+class TestTourGuiado:
+    """O passeio guiado roda em cima das telas de verdade.
+
+    Essa e a razao de ele existir em vez de um prototipo a parte: nao ha
+    segunda copia da interface para envelhecer. So que isso vale enquanto os
+    alvos de cada passo continuarem existindo — um `id` renomeado na home
+    deixaria o tour apontando para o nada, e em silencio, porque `tour.js`
+    pula passo sem alvo em vez de travar a tela do usuario.
+    """
+
+    FASES = [("PASSOS_LOGIN", "login.html"), ("PASSOS_CONFIG", "index.html")]
+
+    @pytest.mark.parametrize("lista,arquivo", FASES)
+    def test_todo_alvo_existe_na_tela_da_fase(self, lista, arquivo):
+        html = _read_static(arquivo)
+        for alvo, chave in _passos_do_tour(lista):
+            if alvo is None:
+                continue
+            assert _seletor_existe(alvo, html), \
+                f"{lista}: o passo {chave} aponta para {alvo}, que nao esta em {arquivo}"
+
+    @pytest.mark.parametrize("lista,_arquivo", FASES)
+    def test_todo_passo_tem_texto_nos_dois_idiomas(self, lista, _arquivo):
+        tables = _i18n_tables()
+        for _alvo, chave in _passos_do_tour(lista):
+            for lang in ("pt-BR", "en-US"):
+                assert chave in tables[lang], f"{chave} falta na tabela {lang}"
+
+    def test_a_fase_de_login_termina_na_tela_de_demonstracao(self):
+        """Sem o `vai`, o tour pararia no botao de entrar."""
+        src = _read_static("tour.js")
+        assert "vai: '/demo?tour=1'" in src, \
+            "a fase de login nao encadeia na home de demonstracao"
+
+    def test_nenhuma_chave_do_tour_ficou_orfa(self):
+        """Chave sem uso volta para a tela no proximo copiar e colar."""
+        usado = (_read_static("tour.js") + _read_static("index.html")
+                 + _read_static("login.html"))
+        for chave in _i18n_tables()["pt-BR"]:
+            if chave.startswith(("tour_", "demo_")):
+                assert chave in usado, f"{chave} nao e usada em lugar nenhum"
+
+    def test_o_texto_do_passo_nao_fica_dentro_do_tour(self):
+        """REGRESSAO: dica escrita no roteiro congela no idioma do autor.
+
+        O tour precisa abrir em pt-BR ou en-US conforme a tela — por isso todo
+        texto visivel sai de `t(chave)`, e o unico literal permitido e o
+        comando de terminal, que nao se traduz.
+        """
+        src = _read_static("tour.js")
+        m = re.search(r"var PASSOS_LOGIN = \[(.*?)var CSS", src, re.S)
+        for bloco in re.findall(r"\{(.*?)\}", m.group(1), re.S):
+            for campo, valor in re.findall(r"(\w+):\s*'([^']*)'", bloco):
+                assert campo in ("alvo", "chave", "comando", "preenche", "vai"), \
+                    f"campo inesperado no roteiro: {campo}"
+                if campo in ("alvo", "chave", "vai", "preenche"):
+                    continue
+                assert campo == "comando", f"texto literal no roteiro: {valor!r}"
+
+    def test_o_stub_de_demonstracao_recusa_escrita(self):
+        """Em `/demo` nenhum POST pode chegar a API real."""
+        src = _read_static("tour.js")
+        assert "if (metodo !== 'GET')" in src, \
+            "o stub de rede deixou de barrar metodo de escrita"
+        assert "/api/demo-config" in src, \
+            "a tela de demonstracao precisa ler os valores da rota publica"
+
+    def test_tour_js_carrega_antes_do_script_do_painel(self):
+        """O stub tem que estar de pe antes do primeiro `/api/config`.
+
+        O painel chama `loadConfig()` no fim do `<body>`. Com `tour.js` depois
+        dele, a primeira requisicao escaparia para a API real e a tela de
+        demonstracao abriria com 401 — ou, pior, com dado de verdade.
+        """
+        html = _read_static("index.html")
+        assert html.index('src="/tour.js"') < html.index("const API = '/api/config'")
+
+    @pytest.mark.parametrize("arquivo", ["index.html", "login.html"])
+    def test_as_duas_telas_oferecem_o_tour(self, arquivo):
+        html = _read_static(arquivo)
+        assert 'id="tour-link"' in html, f"{arquivo} nao oferece o passeio"
+        assert "/login?tour=1" in html, \
+            f"{arquivo}: o tour precisa comecar pela tela de login"
+
+    def test_o_contador_e_do_passeio_inteiro(self):
+        """REGRESSAO: a fase de login terminava em "3 de 3".
+
+        O passeio tem duas telas e um numero so. Contado por fase, o login
+        fechava como se fosse o fim e a configuracao recomecava do 1 — e o
+        usuario via "3 de 3" num passo que ainda tinha onze pela frente.
+        """
+        src = _read_static("tour.js")
+        assert "PASSOS_LOGIN.length + PASSOS_CONFIG.length" in src, \
+            "o total voltou a ser o tamanho de uma fase so"
+        assert "deslocamento() + indice + 1" in src, \
+            "o passo atual precisa somar a fase anterior"
+
+    def test_passo_que_encadeia_nao_oferece_fechar(self):
+        """REGRESSAO: o ultimo passo do login dizia "Fechar".
+
+        Fim da lista nao e fim do passeio quando o passo tem `vai`: ali o
+        tour muda de tela. Oferecer "Fechar" encerrava na metade.
+        """
+        src = _read_static("tour.js")
+        assert "indice === passos.length - 1 && !passo.vai" in src, \
+            "o fim do passeio voltou a ser so o fim da lista"
+
+    def test_o_que_o_tour_esconde_tem_regra_de_display(self):
+        """REGRESSAO: `hidden` nao escondia a topbar em /demo.
+
+        `[hidden]{display:none}` do navegador perde para o `display:flex` da
+        classe — o mesmo motivo que ja obrigou `.modal-bg[hidden]` e
+        `.rodape .atualizacao[hidden]` no index.html.
+        """
+        src = _read_static("tour.js")
+        assert ".docs[hidden]" in src and ".user-btn[hidden]" in src, \
+            "sem a regra, o botao de conta e o link do tour ficam visiveis em /demo"
+
+    def test_troca_de_idioma_e_ouvida_na_bolha(self):
+        """REGRESSAO: o balao redesenhava no idioma antigo.
+
+        `setLang()` roda no listener do proprio `<select>`. Em captura, o
+        tour corria antes dele e reescrevia o balao com a tabela anterior.
+        """
+        src = _read_static("tour.js")
+        assert "document.addEventListener('change', aoTrocarIdioma);" in src, \
+            "o listener de idioma voltou para a fase de captura"
+
+    def test_o_destaque_abraca_o_tooltip_do_alvo(self):
+        """REGRESSAO: o balao cobria a lista de variaveis que explicava.
+
+        O tooltip e maior que o botao `{ }` e cresce para fora dele. Sem
+        soma-lo ao retangulo do passo, o balao escolhia um lado que passava
+        por cima justamente do que o passo mandava olhar.
+        """
+        src = _read_static("tour.js")
+        assert 'querySelector(\'[role="tooltip"]\')' in src, \
+            "o retangulo do passo voltou a ignorar o tooltip aberto"
+        corpo = re.search(r"function retanguloDeReferencia.*?\n  \}", src, re.S).group(0)
+        codigo = re.sub(r"//.*", "", corpo)
+        assert "getComputedStyle" not in codigo, \
+            ("o tooltip abre por transicao e ainda esta `hidden` na hora da "
+             "conta — a area e que vale, nao o estilo computado")
+
+    def test_o_link_do_painel_abre_em_outra_aba_com_seguranca(self):
+        """O painel fica aberto atras: o passeio nao rouba a aba de trabalho."""
+        html = _read_static("index.html")
+        m = re.search(r'<a class="docs tour"[^>]*>', html, re.S)
+        assert m, "link do tour nao encontrado na topbar"
+        tag = m.group(0)
+        assert 'target="_blank"' in tag, tag
+        assert "noopener" in tag, tag
+
+
 class TestApiDefaults:
     """/api/defaults alimenta a Web UI com os padroes do backend."""
 
@@ -4092,6 +4514,190 @@ class TestReavaliacaoPeriodica:
         assert not m_get.called
 
 
+
+
+# ── Troca de modo em runtime ───────────────────────────────────────────
+
+class TestTrocaDeModoEmRuntime:
+    """Trocar o Polling pela Web UI tem de trocar o modo sem restart.
+
+    Os dois sentidos estavam quebrados em producao:
+
+    - `polling -> webhook`: o laco de polling via o 0, logava "entrando em
+      modo webhook" e dava `return` **sem subir a reavaliacao**. Nao sobrava
+      laco nenhum: so o `/api/trigger`, que nem existe se o webhook nao
+      estiver configurado no qBittorrent.
+    - `webhook -> polling`: quem detectaria a volta era o laco de polling,
+      que ja tinha terminado no start. So com restart do container.
+
+    O segundo caso tem duas entradas: o laco de reavaliacao percebe sozinho
+    quando esta vivo, e o POST da Web UI cobre o caso em que nao ha laco
+    nenhum (reavaliacao desligada).
+    """
+
+    CICLO = {"total": 0, "pendentes": 0, "removidos": 0, "analisados": 0,
+             "restantes": 0, "fora_do_historico": 0}
+
+    def _config(self, check, reevaluate=300):
+        cfg = g.load_config()
+        cfg["guardian"]["check_interval_seconds"] = check
+        cfg["guardian"]["reevaluate_interval_seconds"] = reevaluate
+        g.save_config(cfg)
+
+    @pytest.fixture(autouse=True)
+    def _modo_limpo(self):
+        """Cada teste comeca sem modo definido e nao vaza para o proximo."""
+        g._definir_modo(None)
+        yield
+        g._definir_modo(None)
+        g._parar_reevaluate.clear()
+
+    def test_polling_para_webhook_sobe_a_reavaliacao(self, tmp_config):
+        """REGRESSAO: o laco morria e nada mais olhava a fila."""
+        self._config(300)
+
+        def poe_webhook(_s):
+            cfg = g.load_config()
+            cfg["guardian"]["check_interval_seconds"] = 0
+            g.save_config(cfg)
+
+        with mock.patch.object(g, "qbit_login"), \
+             mock.patch.object(g, "write_heartbeat"), \
+             mock.patch.object(g, "executar_ciclo", return_value=self.CICLO), \
+             mock.patch.object(g.time, "sleep", side_effect=poe_webhook), \
+             mock.patch.object(g, "_start_reevaluate_loop") as subiu:
+            g.guardian_loop()
+
+        assert subiu.called, \
+            "sem a reavaliacao, o modo webhook fica so com o /api/trigger"
+        assert g.modo_em_execucao() == "webhook"
+
+    def test_webhook_para_polling_pelo_proprio_laco(self, tmp_config):
+        """O laco de reavaliacao devolve o bastao quando o Polling volta."""
+        self._config(0, reevaluate=300)
+        g._definir_modo("webhook")
+
+        def poe_polling(_timeout):
+            cfg = g.load_config()
+            cfg["guardian"]["check_interval_seconds"] = 300
+            g.save_config(cfg)
+            return False
+
+        with mock.patch.object(g, "start_guardian") as subiu, \
+             mock.patch.object(g._parar_reevaluate, "wait", side_effect=poe_polling), \
+             mock.patch.object(g, "executar_ciclo", return_value=self.CICLO), \
+             mock.patch.object(g, "write_heartbeat"):
+            g._reevaluate_loop()
+
+        assert subiu.called, "o polling precisa voltar sem restart"
+        assert g.modo_em_execucao() == "polling"
+
+    def test_webhook_sem_reavaliacao_volta_pelo_salvar_da_tela(self, tmp_config):
+        """O caso sem laco nenhum: `reevaluate_interval_seconds = 0`.
+
+        Aqui ninguem esta vivo para reler a config — o religamento so pode
+        vir do evento de salvar.
+        """
+        self._config(0, reevaluate=0)
+        g._definir_modo("webhook")
+        self._config(300, reevaluate=0)
+
+        with mock.patch.object(g, "start_guardian") as subiu:
+            assert g.aplicar_modo_da_config() == "polling"
+        assert subiu.called
+        assert g.modo_em_execucao() == "polling"
+
+    def test_salvar_sem_trocar_de_modo_nao_sobe_laco(self, tmp_config):
+        """Salvar outra coisa qualquer nao pode duplicar o laco em execucao."""
+        self._config(300)
+        g._definir_modo("polling")
+        with mock.patch.object(g, "start_guardian") as subiu:
+            assert g.aplicar_modo_da_config() is None
+        assert not subiu.called
+
+    def test_sem_laco_nenhum_o_salvar_nao_inventa_um(self, tmp_config):
+        """Antes de o guardian subir (`modo None`), salvar nao dispara nada.
+
+        Quem sobe o primeiro laco e o `start_guardian()` do entrypoint.
+        """
+        self._config(300)
+        with mock.patch.object(g, "start_guardian") as subiu:
+            assert g.aplicar_modo_da_config() is None
+        assert not subiu.called
+
+    def test_duas_threads_na_mesma_troca_sobem_um_laco_so(self, tmp_config):
+        """A thread atrasada acorda com a troca feita e nao pode duplicar.
+
+        Sem a guarda, o ciclo passaria a rodar em dobro contra o mesmo
+        qBittorrent — duas remocoes concorrentes do mesmo torrent.
+        """
+        g._definir_modo("webhook")
+        subidas = []
+
+        primeira = g._passar_bastao("webhook", "polling", lambda: subidas.append(1))
+        segunda = g._passar_bastao("webhook", "polling", lambda: subidas.append(1))
+
+        assert primeira is True
+        assert segunda is False, "a segunda troca nao era desta thread"
+        assert len(subidas) == 1
+
+    def test_reavaliacao_segue_viva_quando_a_troca_nao_e_dela(self, tmp_config):
+        """`_passar_bastao` False nao pode encerrar o laco por engano.
+
+        Com o modo em `polling` (outra thread ja assumiu), o laco de
+        reavaliacao que ainda estiver de pe segue o fluxo normal em vez de
+        dar `return` no meio.
+        """
+        self._config(300, reevaluate=300)
+        g._definir_modo("polling")
+
+        with mock.patch.object(g, "start_guardian") as subiu, \
+             mock.patch.object(g._parar_reevaluate, "wait", return_value=True), \
+             mock.patch.object(g, "executar_ciclo", return_value=self.CICLO):
+            g._reevaluate_loop()
+
+        assert not subiu.called, "nao era a vez desta thread trocar o modo"
+
+    def test_o_sinal_de_parada_nao_fica_preso_para_o_proximo_laco(self, tmp_config):
+        """`aplicar_modo_da_config` levanta o Event; quem assume, limpa.
+
+        Sem o `clear()` na entrada, o proximo modo webhook encerraria na
+        primeira espera, com o flag que sobrou da troca anterior.
+        """
+        self._config(0, reevaluate=0)
+        g._parar_reevaluate.set()
+
+        with mock.patch.object(g, "start_guardian"):
+            g._reevaluate_loop()   # sai pelo intervalo 0, mas limpa antes
+
+        assert not g._parar_reevaluate.is_set(), "flag preso derruba o proximo laco"
+
+
+class TestCheckIntervalNormalizado:
+    """`"0"` entre aspas tambem e modo webhook, como no healthcheck.
+
+    O healthcheck normalizava (`_as_int`) enquanto o laco comparava o valor
+    cru — e `"0" == 0` e False. Os dois discordavam sobre o modo de um config
+    editado a mao.
+    """
+
+    @pytest.mark.parametrize("valor,esperado", [
+        (0, 0), ("0", 0), (300, 300), ("300", 300),
+        (-5, 0), (None, 300), ("nao-numero", 300), (3.7, 3),
+    ])
+    def test_leitura(self, valor, esperado):
+        assert g._check_interval({"guardian": {"check_interval_seconds": valor}}) == esperado
+
+    def test_ausente_cai_no_default(self):
+        assert g._check_interval({"guardian": {}}) == 300
+        assert g._check_interval({}) == 300
+
+    def test_mesma_regra_do_reevaluate(self):
+        """As duas leituras tem de se comportar igual — sao o mesmo contrato."""
+        for valor in (0, "0", 300, "300", -5, "nao-numero", None):
+            cfg_c = {"guardian": {"check_interval_seconds": valor}}
+            cfg_r = {"guardian": {"reevaluate_interval_seconds": valor}}
+            assert g._check_interval(cfg_c) == g._reevaluate_interval(cfg_r), valor
 
 
 # ── Corpo do guardian_loop ─────────────────────────────────────────────

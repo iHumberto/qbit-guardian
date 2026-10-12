@@ -610,13 +610,14 @@ class TestCredenciaisForaDoConfig:
 class TestArquivosEstaticosAutenticados:
     """`/index.html` nao pode ser publico enquanto `/` pede senha.
 
-    `i18n.js` e `favicon.svg` sao a excecao deliberada: a tela de login os
-    carrega antes de existir sessao. Sao strings de interface e um icone —
-    nenhum dado de configuracao.
+    `i18n.js`, `favicon.svg` e `tour.js` sao a excecao deliberada: a tela de
+    login os carrega antes de existir sessao. Sao strings de interface, um
+    icone e o roteiro do passeio guiado — nenhum dado de configuracao.
     """
 
     PROTEGIDOS = ["/index.html", "/"]
-    PUBLICOS = ["/i18n.js", "/favicon.svg", "/login.html", "/login"]
+    PUBLICOS = ["/i18n.js", "/favicon.svg", "/login.html", "/login",
+                "/tour.js", "/demo", "/api/demo-config"]
 
     @pytest.mark.parametrize("rota", PROTEGIDOS)
     def test_sem_credencial_recusa(self, rota, client, auth_config):
@@ -627,10 +628,12 @@ class TestArquivosEstaticosAutenticados:
         assert client.get(rota).status_code == 200
 
     def test_a_lista_publica_nao_cresce_sem_querer(self, client, auth_config):
-        """Allowlist explicita: so o que a tela de login precisa."""
-        assert w.ARQUIVOS_PUBLICOS == {"login.html", "i18n.js", "favicon.svg"}
+        """Allowlist explicita: so o que a tela de login e o tour precisam."""
+        assert w.ARQUIVOS_PUBLICOS == {"login.html", "i18n.js", "favicon.svg",
+                                       "tour.js"}
 
-    @pytest.mark.parametrize("rota", PROTEGIDOS + ["/i18n.js", "/favicon.svg"])
+    @pytest.mark.parametrize("rota", PROTEGIDOS + ["/i18n.js", "/favicon.svg",
+                                                   "/tour.js"])
     def test_com_credencial_serve(self, rota, client, auth_config):
         assert client.get(rota, headers=_basic("admin", SENHA)).status_code == 200
 
@@ -647,6 +650,86 @@ class TestArquivosEstaticosAutenticados:
     def test_path_traversal_nao_escapa_de_static(self, alvo, client, auth_config):
         r = client.get(alvo, headers=_basic("admin", SENHA))
         assert r.status_code == 404, f"{alvo} devolveu {r.status_code}"
+
+
+class TestModoDemonstracao:
+    """`/demo` e publico de proposito — e nao pode saber nada do config real.
+
+    O tour guiado comeca na tela de login, onde ninguem tem sessao ainda, e
+    termina na home de configuracao: sem uma versao publica dessa home o
+    passeio pararia na metade. A troca e segura porque a tela servida em
+    `/demo` e inerte: o markup nao carrega valor nenhum, e os dados vem de
+    `/api/demo-config`, que monta uma instalacao nova na memoria.
+    """
+
+    # Valores reconheciveis: se qualquer um vazar para a resposta publica, e
+    # porque a rota leu o config em vez de inventar um.
+    SEGREDOS = {
+        "qbit": {"url": "http://nao-pode-vazar.lan:8080",
+                 "api_key": "CHAVE-QBIT-SECRETA"},
+        "sonarr": {"url": "http://sonarr-secreto.lan", "api_key": "CHAVE-SONARR"},
+        "radarr": {"url": "http://radarr-secreto.lan", "api_key": "CHAVE-RADARR"},
+        "notifications": {"apprise_url": "tgram://TOKEN-SECRETO/42"},
+    }
+
+    @pytest.fixture
+    def config_com_segredos(self, auth_config):
+        cfg = g.load_config()
+        for secao, valores in self.SEGREDOS.items():
+            cfg.setdefault(secao, {}).update(valores)
+        g.save_config(cfg)
+        return auth_config
+
+    def test_demo_config_nao_le_o_config_do_disco(self, client, config_com_segredos):
+        corpo = client.get("/api/demo-config").get_data(as_text=True)
+        for valores in self.SEGREDOS.values():
+            for valor in valores.values():
+                assert valor not in corpo, f"{valor!r} vazou para /api/demo-config"
+
+    def test_demo_config_nao_traz_credencial(self, client, config_com_segredos):
+        dados = client.get("/api/demo-config").get_json()
+        assert "webui" not in dados["config"], \
+            "em demonstracao ninguem tem conta — webui nao deve aparecer"
+        assert "password" not in client.get("/api/demo-config").get_data(as_text=True)
+
+    def test_demo_config_e_a_instalacao_nova(self, client, config_com_segredos):
+        """Os valores sao os defaults do codigo, nao uma segunda copia."""
+        dados = client.get("/api/demo-config").get_json()
+        esperado = g.config_default()
+        esperado.pop("webui")
+        assert dados["config"] == esperado
+        assert dados["defaults"]["notifications"] == g.DEFAULT_NOTIFICATIONS
+        assert dados["defaults"]["notification_variables"] == g.NOTIFICATION_VARIABLES
+
+    def test_a_pagina_demo_nao_carrega_valor_nenhum(self, client, config_com_segredos):
+        """O HTML e o mesmo do painel — e o painel nao traz dado no markup."""
+        corpo = client.get("/demo").get_data(as_text=True)
+        for valores in self.SEGREDOS.values():
+            for valor in valores.values():
+                assert valor not in corpo, f"{valor!r} vazou para /demo"
+
+    def test_demo_nao_abre_caminho_de_escrita(self, client, config_com_segredos):
+        """A tela publica nao vira porta: salvar continua exigindo sessao."""
+        for rota in ("/api/config", "/api/credentials"):
+            r = client.post(rota, json={}, headers={"Origin": "http://localhost"})
+            assert r.status_code == 401, f"{rota} devolveu {r.status_code}"
+
+    def test_demo_config_nao_aceita_escrita(self, client, config_com_segredos):
+        r = client.post("/api/demo-config", json={},
+                        headers={"Origin": "http://localhost"})
+        assert r.status_code == 405
+
+    def test_tour_suspende_o_redirecionamento_do_login(self, client, auth_config):
+        """Com sessao valida, `/login` manda para o painel — menos no tour.
+
+        O link do passeio nasce dentro do painel, com o usuario ja logado: sem
+        esta excecao ele cairia de volta na home sem ver o primeiro passo.
+        """
+        client.post("/api/login", json={"user": "admin", "password": SENHA})
+        assert client.get("/login").status_code == 302
+        r = client.get("/login?tour=1")
+        assert r.status_code == 200
+        assert "form-login" in r.get_data(as_text=True)
 
 
 class TestComparacaoDeCredenciais:

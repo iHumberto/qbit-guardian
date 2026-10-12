@@ -98,7 +98,15 @@ A página de configuração é dividida em três colunas:
 - **Coluna do meio**: todas as configurações do Guardian — intervalo de verificação, extensões de arquivo, prioridades e regras de remoção de stalled/sem seeds.
 - **Coluna direita**: notificações via Apprise.
 
-No cabeçalho ficam o ícone **Docs** — passe o mouse para a dica, clique para abrir a documentação do projeto no seu idioma — e o seletor de idioma.
+No cabeçalho ficam o ícone **Tour** — abre o passeio guiado numa nova aba —, o ícone **Docs** — passe o mouse para a dica, clique para abrir a documentação do projeto no seu idioma — e o seletor de idioma.
+
+### Tour guiado
+
+O ícone **Tour** abre, em outra aba, um passeio de 14 passos que começa na tela de login e termina na configuração. Cada passo destaca um campo e explica o que vai nele; avançar preenche o campo com um exemplo e pula para o próximo.
+
+Ele roda em cima das telas de verdade, e não num protótipo à parte — por isso acompanha a interface a cada versão. O idioma é o mesmo que estiver selecionado no painel: um link só, pt-BR ou en-US conforme o seletor.
+
+A segunda metade acontece em `/demo`, uma cópia pública e inerte da tela de configuração: ela mostra os valores de uma instalação nova, **nada do que se digita ali é salvo**, e nenhuma requisição de escrita chega ao servidor. Uma faixa no topo avisa disso o tempo todo. Quem fecha o tour continua na tela, livre para mexer nos campos e ver como ela se comporta.
 
 Abaixo de 1200 px as três colunas se empilham na vertical, para a página continuar usável em tablets e celulares sem espremer os rótulos mais longos.
 
@@ -213,7 +221,7 @@ Todas as opções ficam no arquivo `config.json` e podem ser editadas pela Web U
 | **sonarr**       | `url`, `api_key` — opcional, deixe em branco para desativar                                          |
 | **radarr**       | `url`, `api_key` — opcional, deixe em branco para desativar                                          |
 | **guardian**     | `check_interval_seconds` (0 = modo webhook), `reevaluate_interval_seconds` (de quanto em quanto tempo stalled/sem seeds é reavaliado — é o único trabalho periódico que sobra no modo webhook; 0 desliga), `retry_interval_seconds`, listas de extensões, regras de stalled/sem seeds/lentidão (`remove_slow` + `slow_speed`/`slow_speed_unit` em KiB/MiB/GiB/TiB por segundo e `slow_time`/`slow_unit`), prioridades |
-| **notifications** | `apprise_url` — URL compatível com Apprise (veja [documentação do Apprise](https://github.com/caronc/apprise)) |
+| **notifications** | `apprise_url` — **endpoint HTTP do seu servidor Apprise** (`http://host:8000/notify/chave`). Não é a URL de serviço (`tgram://`, `discord://`): essa vai na configuração do servidor Apprise |
 | **webui**        | `user`, `password`, `secret_key` — provisionados no primeiro startup. A senha fica como hash PBKDF2; a `secret_key` assina o cookie de sessão |
 
 ### Mensagens de notificação
@@ -325,7 +333,9 @@ A Web UI expõe estes endpoints:
 | Método   | Endpoint             | Auth        | Descrição                                                        |
 |----------|----------------------|-------------|------------------------------------------------------------------|
 | `GET`    | `/api/health`        | Público     | Healthcheck — retorna `{"status": "ok"}`                         |
-| `GET`    | `/login`             | Público     | Tela de login (redireciona para `/` se já há sessão)             |
+| `GET`    | `/login`             | Público     | Tela de login (redireciona para `/` se já há sessão, exceto com `?tour=1`) |
+| `GET`    | `/demo`              | Público     | Tela de configuração em modo demonstração, para o tour guiado    |
+| `GET`    | `/api/demo-config`   | Público     | Valores de uma instalação nova. Não lê o `config.json`           |
 | `POST`   | `/api/login`         | Público     | Troca usuário e senha por cookie de sessão. `429` após 5 erros   |
 | `POST`   | `/api/logout`        | Público     | Encerra a sessão                                                 |
 | `GET`    | `/api/config`        | Obrigatória | Lê a configuração atual. **Não** devolve `webui.password`        |

@@ -91,6 +91,13 @@
   .erro:empty { display:none; }
 
   .dica { font-size:var(--fs-help); line-height:1.3; }
+
+  /* Chamada do tour: abaixo da dica e no mesmo tamanho dela — e oferta, nao
+     instrucao, e nao disputa com o botao de entrar. */
+  .tour-chamada { font-size:var(--fs-help); line-height:1.3; color:var(--text);
+                  text-decoration:underline; text-underline-offset:2px;
+                  margin-bottom:4px; width:fit-content; }
+  .tour-chamada:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 </style>
 </head>
 <body>
@@ -114,9 +121,14 @@
   <p class="erro" id="erro" role="alert"></p>
   <button type="submit" class="btn-login" id="btn-login" data-i18n="btn_login">Entrar</button>
   <p class="dica" data-i18n="login_hint">Primeiro acesso? A senha foi gerada no startup e aparece em <code>docker logs qbit-guardian</code>.</p>
+  <!-- O passeio guiado comeca aqui mesmo, nesta tela: quem nunca entrou e
+       justamente quem nao sabe onde esta a senha inicial. -->
+  <a class="tour-chamada" id="tour-link" href="/login?tour=1"
+     data-i18n="tour_login_link">Primeira vez? Veja o passeio guiado</a>
 </form>
 
 <script src="/i18n.js"></script>
+<script src="/tour.js"></script>
 <script>
 const form = document.getElementById('form-login');
 const botao = document.getElementById('btn-login');

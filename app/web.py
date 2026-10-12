@@ -53,7 +53,12 @@ SAL_SESSAO = "qbit-guardian-sessao"
 # Arquivos de static/ servidos SEM autenticacao, porque a tela de login
 # precisa deles antes de existir sessao. Sao strings de interface e um icone —
 # nenhum dado de configuracao. `index.html` deliberadamente fica de fora.
-ARQUIVOS_PUBLICOS = {"login.html", "i18n.js", "favicon.svg"}
+#
+# `tour.js` entrou pelo mesmo motivo: quem mais precisa do tour guiado e
+# exatamente quem ainda nao logou — nao sabe que a senha inicial esta no
+# `docker logs`. Ele nao le configuracao: as telas que mostra sao servidas
+# pela rota `/demo`, com valores de uma instalacao nova.
+ARQUIVOS_PUBLICOS = {"login.html", "i18n.js", "favicon.svg", "tour.js"}
 
 # Freio de forca bruta na tela de login: com formulario (em vez do popup do
 # navegador) um script consegue tentar milhares de senhas sem atrito.
@@ -310,7 +315,10 @@ def pagina_login():
     Quem ja tem sessao valida nao precisa dela — vai direto para o painel,
     senao o usuario ficaria olhando um formulario que nao precisa preencher.
     """
-    if _is_auth_enabled() and _sessao_valida():
+    # `?tour=1` suspende o atalho: o tour guiado comeca na tela de login, e
+    # quem o abre a partir do painel ja tem sessao — sem isto o link cairia
+    # de volta na home sem nunca mostrar o primeiro passo.
+    if _is_auth_enabled() and _sessao_valida() and not request.args.get("tour"):
         return redirect("/")
     return send_from_directory(STATIC_DIR, "login.html")
 
@@ -393,6 +401,11 @@ def api_save_config():
         current = _read_config()
         merged = deep_merge(current, data)
         _write_config(merged)
+        # Trocar o Polling entre 0 e um valor positivo troca o MODO do
+        # guardian, e um dos sentidos nao tinha quem percebesse: em webhook
+        # com a reavaliacao desligada nao ha laco rodando para reler a config.
+        # Salvar pela tela e o evento certo para religar.
+        guardian.aplicar_modo_da_config()
         return jsonify({"status": "ok"})
     except HTTPException:
         # Corpo acima do limite vira 413 pelo errorhandler, nao 400 generico:
@@ -510,6 +523,42 @@ def api_trigger():
                        "sem_metadados": r["restantes"]})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/demo")
+def pagina_demo():
+    """Painel em modo demonstracao. Publico, e inerte por construcao.
+
+    Serve o MESMO `index.html` do painel real — uma copia do markup so para o
+    tour sairia de sincronia na primeira mudanca de layout. O que muda e o
+    caminho: `tour.js` ve `/demo`, troca `window.fetch` por um stub e nenhuma
+    chamada chega a API real. Os valores exibidos vem de `/api/demo-config`,
+    que inventa uma instalacao nova em vez de ler o disco.
+    """
+    return send_from_directory(STATIC_DIR, "index.html")
+
+
+@app.route("/api/demo-config")
+def api_demo_config():
+    """Instalacao nova ficticia, para o tour guiado. Publica.
+
+    Nao toca o `config.json`: `guardian.config_default()` monta a estrutura na
+    memoria, entao a rota nao tem como vazar URL, API Key ou credencial de
+    ninguem. `defaults` acompanha porque a tela do painel pede os dois no
+    mesmo carregamento, e os templates de notificacao sao os mesmos que
+    `/api/defaults` serve a quem esta autenticado.
+    """
+    cfg = guardian.config_default()
+    # A senha nunca existiu aqui, mas o painel tambem nao deve achar que ha
+    # um usuario configurado: em demonstracao ninguem tem conta.
+    cfg.pop("webui", None)
+    return jsonify({
+        "config": cfg,
+        "defaults": {
+            "notifications": guardian.DEFAULT_NOTIFICATIONS,
+            "notification_variables": guardian.NOTIFICATION_VARIABLES,
+        },
+    })
 
 
 @app.route("/<path:arquivo>")
