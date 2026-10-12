@@ -278,6 +278,10 @@ Há espaço para evolução futura. Se tem interesse, fique de olho nas releases
 
 ### Docker
 
+O jeito mais rápido é olhar o **rodapé do painel**: ele mostra a versão instalada, e `v2.12.0 disponível` ao lado quando existe uma release mais nova.
+
+Pela linha de comando:
+
 ```bash
 docker inspect qbit-guardian --format '{{.Config.Image}}'
 ```
@@ -304,8 +308,11 @@ As únicas conexões de rede que ele faz são:
 - Com o **qBittorrent** (na sua rede local) — para gerenciar os torrents.
 - Com o **Sonarr/Radarr** (na sua rede local) — se você tiver integração ativada.
 - Com o serviço de notificação configurado via **Apprise** — só se você configurar uma URL.
+- Com a **API pública do GitHub** (`api.github.com`), a cada 6 horas — é a checagem de versão nova que alimenta o aviso no rodapé.
 
-Nenhum dado sobre seus torrents, sua biblioteca ou sua configuração sai do seu servidor. A própria Web UI não carrega nada de fora: fontes, traduções e ícones vêm todos da aplicação, então o painel abre mesmo sem internet.
+Nenhum dado sobre seus torrents, sua biblioteca ou sua configuração sai do seu servidor. A checagem de versão **pede** a lista de tags públicas do repositório e compara localmente: ela não envia a versão instalada, nem a configuração, nem identificador nenhum. Sem internet, falha em silêncio e o aviso simplesmente não aparece.
+
+A própria Web UI não carrega nada de fora: fontes, traduções e ícones vêm todos da aplicação, então o painel abre mesmo sem internet.
 
 ---
 
@@ -323,6 +330,8 @@ A imagem é multi-arquitetura, então o `docker compose pull` baixa a versão AR
 
 - **Docker:** `docker compose pull qbit-guardian && docker compose up -d qbit-guardian`
 - **Manual:** `git pull` dentro da pasta do projeto e reinicie.
+
+O painel avisa quando há versão nova: o rodapé mostra `vX.Y.Z disponível`, com link para as notas daquela release. A checagem roda sozinha a cada 6 horas e também quando você carrega a página, então não é preciso reiniciar nada para o aviso aparecer.
 
 > 💡 Se você usa **Watchtower** ou similar, a atualização acontece automática. Nesse caso, fique atento às notas de versão: a 2.2.0, por exemplo, exigiu um `chown` na pasta `config`.
 

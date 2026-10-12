@@ -278,6 +278,10 @@ There is room for future evolution. If you're interested, watch the releases or 
 
 ### Docker
 
+The quickest way is the **panel footer**: it shows the installed version, plus `v2.12.0 available` next to it when a newer release exists.
+
+From the command line:
+
 ```bash
 docker inspect qbit-guardian --format '{{.Config.Image}}'
 ```
@@ -304,8 +308,11 @@ The only network connections it makes are:
 - To **qBittorrent** (on your local network) — to manage torrents.
 - To **Sonarr/Radarr** (on your local network) — if you enabled the integration.
 - To the notification service configured via **Apprise** — only if you set a URL.
+- To the **public GitHub API** (`api.github.com`), every 6 hours — the new-version check behind the footer notice.
 
-No data about your torrents, your library or your configuration leaves your server. The Web UI itself loads nothing from outside: fonts, translations and icons all ship with the application, so the panel opens even without internet.
+No data about your torrents, your library or your configuration leaves your server. The version check **asks** for the repository's public tag list and compares locally: it does not send the installed version, the configuration, or any identifier. With no internet it fails silently and the notice simply does not appear.
+
+The Web UI itself loads nothing from outside: fonts, translations and icons all ship with the application, so the panel opens even without internet.
 
 ---
 
@@ -323,6 +330,8 @@ The image is multi-architecture, so `docker compose pull` fetches the ARM build 
 
 - **Docker:** `docker compose pull qbit-guardian && docker compose up -d qbit-guardian`
 - **Manual:** `git pull` inside the project folder and restart.
+
+The panel tells you when a new version is out: the footer shows `vX.Y.Z available`, linking to that release's notes. The check runs on its own every 6 hours and also when you load the page, so nothing needs restarting for the notice to show up.
 
 > 💡 If you use **Watchtower** or similar, updates happen automatically. In that case, keep an eye on the release notes: 2.2.0, for instance, required a `chown` on the `config` folder.
 

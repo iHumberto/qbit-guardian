@@ -5,6 +5,14 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Nao lancado]
+
+Mudancas que nao entram na imagem — ficam aqui ate a proxima release que mexer em codigo.
+
+### Corrigido
+- **O FAQ listava as conexoes de rede sem a API do GitHub.** A pergunta *"manda dados para a internet?"* enumerava qBittorrent, Sonarr/Radarr e Apprise, e a checagem de versao nao estava la — desde a v2.5.0, e agora tambem a cada 6h sem ninguem abrir o painel. A resposta sobre privacidade continua valendo e ficou precisa: a consulta **pede** a lista de tags publicas e compara localmente, sem enviar versao instalada, configuracao nem identificador.
+- **O FAQ nao citava o rodape** em *"como sei qual versao estou usando?"*, que e a forma mais rapida — ensinava so `docker inspect` e `git log`. E *"o programa atualiza sozinho?"* agora explica o aviso de versao nova e as duas janelas de checagem.
+
 ## [2.11.0] — 2026-10-12
 
 O aviso de versao nova deixa de depender de restart do container.
