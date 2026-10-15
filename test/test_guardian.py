@@ -7042,15 +7042,22 @@ class TestWorkflowPages:
         texto = _workflow("pages.yml")
         assert "cancel-in-progress: false" in texto
 
-    def test_o_workflow_liga_o_pages_sozinho(self):
-        """REGRESSAO: a primeira execucao falhou em `Configure Pages`.
+    def test_o_passo_manual_esta_registrado_no_workflow(self):
+        """`enablement: true` foi tentado e nao funciona com o GITHUB_TOKEN.
 
-        Sem `enablement`, a acao exige que alguem tenha ligado o Pages a mao
-        em Settings — e ate la o link publicado nos READMEs e 404.
+        Sem a razao escrita ao lado, a proxima pessoa (ou eu, daqui a tres
+        meses) tenta de novo o parametro que a mensagem de erro do GitHub
+        sugere e perde a mesma meia hora.
         """
         texto = _workflow("pages.yml")
-        assert "enablement: true" in texto, \
-            "a publicacao volta a depender de um passo manual"
+        # Linha de verdade, nao mencao em comentario — o comentario fala do
+        # parametro justamente para explicar por que ele nao esta la.
+        efetivas = [l.strip() for l in texto.splitlines()
+                    if not l.strip().startswith("#")]
+        assert not any(l.startswith("enablement:") for l in efetivas), \
+            "o parametro nao cria o site: Resource not accessible by integration"
+        assert "Settings > Pages" in texto, \
+            "o workflow nao diz onde o Pages e habilitado"
 
 
 class TestWorkflowBuild:

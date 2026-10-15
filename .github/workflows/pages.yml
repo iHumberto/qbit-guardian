@@ -53,15 +53,14 @@ jobs:
         with:
           python-version: '3.12'
 
-      # `enablement: true` liga o Pages na primeira execucao, em vez de
-      # exigir um passo manual em Settings > Pages. Sem isto a acao falha com
-      # "Get Pages site failed ... verify that the repository has Pages
-      # enabled", que foi exatamente o que aconteceu no primeiro push. O
-      # token do workflow ja tem `pages: write`, declarado acima.
+      # O Pages precisa estar HABILITADO no repositorio (Settings > Pages,
+      # source "GitHub Actions") antes da primeira execucao. Isto nao da para
+      # automatizar daqui: `enablement: true` foi tentado e o `GITHUB_TOKEN`,
+      # mesmo com `pages: write`, nao cria o site — "Create Pages site failed:
+      # Resource not accessible by integration". Criar o site e acao de
+      # administracao do repositorio, fora do alcance do token do workflow.
       - name: Configure Pages
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Build bundle
         run: python scripts/build_pages.py _site
