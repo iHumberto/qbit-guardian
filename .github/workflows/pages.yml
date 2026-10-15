@@ -1,0 +1,76 @@
+name: pages
+
+# Publica a demonstracao publica do tour no GitHub Pages.
+#
+# O bundle e GERADO por scripts/build_pages.py a partir de static/ e do
+# modulo app.guardian — nunca commitado. O tour roda em cima das telas reais
+# justamente para nao envelhecer junto com o layout; uma copia estatica
+# mantida a mao devolveria esse problema pela porta dos fundos.
+#
+# O filtro de paths cobre tudo que entra no bundle. Sub-disparar aqui nao
+# custa imagem publicada (como no docker-build) — custa demonstracao velha,
+# que e justamente o defeito que este projeto ja teve no README.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'static/**'
+      - 'app/**'
+      - 'scripts/build_pages.py'
+      - '.github/workflows/pages.yml'
+      - '.github/workflows/test.yml'
+  # Para republicar sem precisar de um commit.
+  workflow_dispatch:
+
+# Permissoes do deploy do Pages: o token escreve so no Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Uma publicacao por vez. `cancel-in-progress: false` porque uma publicacao
+# pela metade deixaria o site sem parte dos arquivos.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  # Mesmo gate do docker-build: a demonstracao nao sobe com a suite vermelha.
+  # Entre os testes estao os que conferem que o bundle bate com a fonte
+  # (TestBundleDaDemonstracao).
+  test:
+    uses: ./.github/workflows/test.yml
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build bundle
+        run: python scripts/build_pages.py _site
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

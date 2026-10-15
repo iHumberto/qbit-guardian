@@ -27,7 +27,7 @@ Ele roda como um container Docker leve (ou como um processo Python) com uma inte
 | Interface Web | Flask 3.x                           |
 | Cliente HTTP  | requests 2.x                        |
 | Notificações  | Apprise (Telegram, Discord, Slack e mais de 100 serviços) |
-| Testes        | pytest 8.x (982 testes: 853 funcionais + 129 segurança) |
+| Testes        | pytest 8.x (1031 testes: 902 funcionais + 129 segurança) |
 | Licença       | GNU GPL v3                          |
 
 ## Funcionalidades
@@ -103,6 +103,8 @@ A página de configuração é dividida em três colunas:
 No cabeçalho ficam o ícone **Tour** — abre o passeio guiado numa nova aba —, o ícone **Docs** — passe o mouse para a dica, clique para abrir a documentação do projeto no seu idioma — e o seletor de idioma.
 
 ### Tour guiado
+
+> 🎬 **[Faça o tour sem instalar nada](https://ihumberto.github.io/qbit-guardian/)** — os mesmos 24 passos, nas mesmas telas, publicados a partir deste repositório. Nada é salvo e não há servidor por trás.
 
 O ícone **Tour** abre, em outra aba, um passeio de 24 passos que começa na tela de login e termina na configuração. Cada passo destaca um campo e explica o que vai nele; avançar preenche o campo com um exemplo e pula para o próximo.
 
@@ -482,7 +484,7 @@ Deixe os campos `sonarr.url` e `radarr.url` em branco. O guardian funciona perfe
 # Instalar dependências (runtime + ferramentas de teste)
 pip install -r requirements-dev.txt
 
-# Rodar todos os testes (982: 853 funcionais + 129 de segurança)
+# Rodar todos os testes (1031: 902 funcionais + 129 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais

@@ -11,8 +11,20 @@
  *   /demo?tour=1   → a home de configuracao, servida em modo demonstracao
  *
  * Em `/demo` o `window.fetch` e trocado por um stub: nenhuma chamada chega a
- * API real, e os valores da tela vem de `/api/demo-config`, que inventa uma
+ * API real, e os valores da tela vem de `api/demo-config`, que inventa uma
  * instalacao nova em vez de ler o config do disco.
+ *
+ * O mesmo arquivo serve dois hosts, e por isso nao assume raiz:
+ *
+ *   Flask        /login            /demo            (o app de verdade)
+ *   GitHub Pages /<repo>/login.html /<repo>/demo.html (a demonstracao publica)
+ *
+ * Dai o `MODO_DEMO` casar por SUFIXO do caminho em vez de igualdade: sob
+ * subpath, `location.pathname === '/demo'` e falso, o stub nao instalaria e a
+ * tela publica tentaria falar com uma API que nao existe — falhando calada,
+ * que e o pior jeito de falhar. `DEMO_ESTATICO` e a flag que o gerador do
+ * bundle injeta antes deste script (ver `scripts/build_pages.py`): num host
+ * sem backend nenhuma escrita deve sair do navegador, nem na tela de login.
  *
  * Zero dependencia, como o i18n.js. Depende so de `t()` e de `getLang()`.
  */
@@ -20,8 +32,15 @@
 (function () {
   'use strict';
 
-  var MODO_DEMO = location.pathname === '/demo';
+  // `/demo`, `/demo/` e `/demo.html` — as tres formas que os dois hosts geram.
+  var MODO_DEMO = /\/demo(\.html)?\/?$/.test(location.pathname);
   var PEDIU_TOUR = new URLSearchParams(location.search).get('tour') === '1';
+
+  // Injetada pelo gerador do bundle estatico; ausente no app servido pelo Flask.
+  var DEMO_ESTATICO = window.QBIT_DEMO_ESTATICO === true;
+
+  // No host estatico o arquivo tem extensao; no Flask, a rota nao tem.
+  var PAGINA_CONFIG = (DEMO_ESTATICO ? 'demo.html' : 'demo') + '?tour=1';
 
   // ── Passos ────────────────────────────────────────────────────────────
   //
@@ -38,7 +57,7 @@
     { alvo: '#login_user', chave: 'tour_login_user', preenche: 'admin' },
     { alvo: '#login_password', chave: 'tour_login_senha',
       comando: 'docker logs qbit-guardian', preenche: '••••••••••••' },
-    { alvo: '#btn-login', chave: 'tour_login_entrar', vai: '/demo?tour=1' }
+    { alvo: '#btn-login', chave: 'tour_login_entrar', vai: PAGINA_CONFIG }
   ];
 
   // A ordem segue a leitura da tela: coluna da esquerda, card do Guardian de
@@ -75,7 +94,10 @@
   // chama /api/config logo no final do <body>, e um stub tardio nao pegaria
   // essa primeira chamada.
 
-  if (MODO_DEMO) instalarStubDeRede();
+  // No host estatico o stub vale nas DUAS telas: a de login tambem nao tem
+  // backend para onde mandar o POST, e sem o stub ela mostraria um erro de
+  // rede cru para quem clicasse em "Entrar" durante a demonstracao.
+  if (MODO_DEMO || DEMO_ESTATICO) instalarStubDeRede();
 
   function instalarStubDeRede() {
     var fetchReal = window.fetch.bind(window);
@@ -84,8 +106,19 @@
     function dadosDemo() {
       // Uma chamada so, reaproveitada: o painel pede config e defaults em
       // paralelo, e a rota devolve os dois no mesmo corpo.
-      if (!promessa) promessa = fetchReal('/api/demo-config').then(function (r) { return r.json(); });
+      if (!promessa) promessa = fetchReal('api/demo-config').then(function (r) { return r.json(); });
       return promessa;
+    }
+
+    // Compara o CAMINHO, nao o texto da URL: a chamada pode vir relativa
+    // (`api/config`) ou absoluta, e sob subpath o caminho ganha o prefixo do
+    // repositorio. `indexOf(...) === 0`, que era o teste aqui, dava falso
+    // para os dois casos e deixava a chamada escapar para a rede.
+    function rotaE(url, rota) {
+      var caminho;
+      try { caminho = new URL(url, location.href).pathname; }
+      catch (e) { caminho = String(url); }
+      return caminho === rota || caminho.slice(-rota.length) === rota;
     }
 
     function resposta(corpo, status) {
@@ -104,15 +137,18 @@
       if (metodo !== 'GET') {
         return Promise.resolve(resposta({ error: t('demo_sem_escrita') }, 403));
       }
-      if (url.indexOf('/api/config') === 0) {
+      if (rotaE(url, '/api/config')) {
         return dadosDemo().then(function (d) { return resposta(d.config); });
       }
-      if (url.indexOf('/api/defaults') === 0) {
+      if (rotaE(url, '/api/defaults')) {
         return dadosDemo().then(function (d) { return resposta(d.defaults); });
       }
-      // O resto segue para a rede. Na pratica sobra `/api/version`, que e
-      // publico e nao revela nada: o rodape mostra a versao real, que e util
-      // de ver ate numa demonstracao.
+      // O resto segue para a rede. Na pratica sobra `api/version`, que no app
+      // de verdade exige sessao — de proposito, para nao anunciar a versao
+      // exata de uma instalacao a quem nao esta logado. Em `/demo` ela volta
+      // 401, o `loadVersion()` engole e o rodape fica vazio; no bundle
+      // estatico ela e um arquivo, porque ali nao ha instalacao de ninguem
+      // para expor — so a demonstracao, cuja versao ja esta no CHANGELOG.
       return fetchReal(recurso, opcoes);
     };
   }

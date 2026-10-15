@@ -3078,8 +3078,12 @@ class TestTourGuiado:
     def test_a_fase_de_login_termina_na_tela_de_demonstracao(self):
         """Sem o `vai`, o tour pararia no botao de entrar."""
         src = _read_static("tour.js")
-        assert "vai: '/demo?tour=1'" in src, \
+        assert "vai: PAGINA_CONFIG" in src, \
             "a fase de login nao encadeia na home de demonstracao"
+        # O destino e computado porque os dois hosts escrevem o caminho
+        # diferente — `/demo` no Flask, `demo.html` no bundle do Pages.
+        assert "'demo.html' : 'demo'" in src, \
+            "PAGINA_CONFIG deixou de cobrir os dois hosts"
 
     def test_nenhuma_chave_do_tour_ficou_orfa(self):
         """Chave sem uso volta para a tela no proximo copiar e colar."""
@@ -3111,7 +3115,7 @@ class TestTourGuiado:
         src = _read_static("tour.js")
         assert "if (metodo !== 'GET')" in src, \
             "o stub de rede deixou de barrar metodo de escrita"
-        assert "/api/demo-config" in src, \
+        assert "'api/demo-config'" in src, \
             "a tela de demonstracao precisa ler os valores da rota publica"
 
     def test_tour_js_carrega_antes_do_script_do_painel(self):
@@ -3122,7 +3126,7 @@ class TestTourGuiado:
         demonstracao abriria com 401 — ou, pior, com dado de verdade.
         """
         html = _read_static("index.html")
-        assert html.index('src="/tour.js"') < html.index("const API = '/api/config'")
+        assert html.index('src="tour.js"') < html.index("const API = 'api/config'")
 
     @pytest.mark.parametrize("arquivo", ["index.html", "login.html"])
     def test_as_duas_telas_oferecem_o_tour(self, arquivo):
@@ -3496,7 +3500,8 @@ class TestWebUIRodape:
 
     def test_rodape_busca_a_versao_na_api(self):
         html = _read_static("index.html")
-        assert "'/api/version'" in html, "o HTML nao consome /api/version"
+        assert "const VERSION_API = 'api/version';" in html, \
+            "o HTML nao consome api/version"
         assert "loadVersion()" in html, "loadVersion nunca e chamada"
 
     def test_versao_nao_esta_escrita_no_html(self):
@@ -3677,7 +3682,7 @@ class TestWebUINotifications:
             primeira_linha = spec["template"].split("\n")[0]
             assert primeira_linha not in html, \
                 f"template de {ev} duplicado no HTML: {primeira_linha!r}"
-        assert "/api/defaults" in html
+        assert "const DEFAULTS_API = 'api/defaults';" in html
 
     def test_payload_nao_envia_title(self):
         """`title` fica so no config.json: o deep_merge preserva o que esta la."""
@@ -5749,6 +5754,196 @@ class TestReadmeContagemDoTour:
                 f"{arquivo}: diz {n} passos, tour.js tem {esperado}"
 
 
+# ── Bundle estatico da demonstracao (GitHub Pages) ─────────────────────
+
+import importlib.util as _ilu
+
+_spec = _ilu.spec_from_file_location(
+    "build_pages", os.path.join(REPO_ROOT, "scripts", "build_pages.py"))
+build_pages = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(build_pages)
+
+
+@pytest.fixture(scope="module")
+def bundle(tmp_path_factory):
+    """Gera o bundle uma vez e devolve a pasta."""
+    destino = str(tmp_path_factory.mktemp("site"))
+    return build_pages.construir(destino)
+
+
+def _bundle_ler(bundle, caminho):
+    with open(os.path.join(bundle, caminho), encoding="utf-8") as f:
+        return f.read()
+
+
+class TestBundleDaDemonstracao:
+    """A demonstracao publica nao pode virar uma copia que envelhece.
+
+    O tour roda em cima das telas reais — e e isso que o faz acompanhar a
+    interface a cada versao. Um `index.html` editado a mao para o Pages
+    reintroduziria o desvio que ele existe para evitar, so que fora da
+    varredura dos outros testes. Dai o bundle ser gerado, e estes testes
+    conferirem que o gerado bate com a fonte.
+    """
+
+    ARQUIVOS = [".nojekyll", "index.html", "login.html", "demo.html",
+                "i18n.js", "tour.js", "favicon.svg",
+                os.path.join("api", "demo-config"),
+                os.path.join("api", "version")]
+
+    @pytest.mark.parametrize("nome", ARQUIVOS)
+    def test_bundle_tem_o_arquivo(self, bundle, nome):
+        assert os.path.isfile(os.path.join(bundle, nome)), f"faltando: {nome}"
+
+    def test_demo_config_e_o_mesmo_corpo_da_rota(self, bundle):
+        """A unica fonte de dado da tela publica tem que bater com a rota.
+
+        Se divergir, a demonstracao mostra uma instalacao que o app nunca
+        produz — e ninguem percebe, porque as duas telas abrem iguais.
+        """
+        with app.test_client() as c:
+            da_rota = c.get("/api/demo-config").get_json()
+        do_bundle = json.loads(_bundle_ler(bundle, os.path.join("api", "demo-config")))
+        assert do_bundle == da_rota
+
+    def test_demo_config_nao_leva_bloco_de_credenciais(self, bundle):
+        """Mesma garantia da rota: em demonstracao ninguem tem conta."""
+        do_bundle = json.loads(_bundle_ler(bundle, os.path.join("api", "demo-config")))
+        assert "webui" not in do_bundle["config"]
+
+    def test_versao_do_bundle_e_a_do_codigo(self, bundle):
+        do_bundle = json.loads(_bundle_ler(bundle, os.path.join("api", "version")))
+        assert do_bundle == {"version": APP_VERSION}
+
+    def test_as_telas_sao_copia_fiel_da_fonte(self, bundle):
+        """So as duas substituicoes declaradas separam o bundle de `static/`."""
+        for origem, no_bundle in (("login.html", "login.html"),
+                                  ("index.html", "demo.html")):
+            esperado = build_pages.preparar_pagina(_read_static(origem))
+            assert _bundle_ler(bundle, no_bundle) == esperado, \
+                f"{no_bundle} divergiu da transformacao declarada"
+
+    @pytest.mark.parametrize("nome", ["login.html", "demo.html"])
+    def test_flag_do_modo_estatico_vem_antes_do_tour(self, bundle, nome):
+        """Depois do `tour.js` a flag nao existiria na hora de instalar o stub."""
+        html = _bundle_ler(bundle, nome)
+        assert "window.QBIT_DEMO_ESTATICO = true" in html, f"{nome} sem a flag"
+        assert html.index("QBIT_DEMO_ESTATICO") < html.index('src="tour.js"'), \
+            f"{nome}: a flag caiu depois do tour.js"
+
+    @pytest.mark.parametrize("nome", ["login.html", "demo.html", "index.html"])
+    def test_nenhum_link_do_bundle_assume_raiz(self, bundle, nome):
+        """Sob `/<repo>/`, `/i18n.js` e 404 — e o tour abre sem traducao."""
+        html = _bundle_ler(bundle, nome)
+        absolutos = re.findall(r'(?:src|href)="(/[^"]*)"', html)
+        assert absolutos == [], f"{nome} aponta para a raiz: {absolutos}"
+
+    def test_o_tour_do_bundle_aponta_para_o_arquivo(self, bundle):
+        """No Pages nao ha rota `/login` — ha o arquivo."""
+        for nome in ("login.html", "demo.html"):
+            assert 'href="login.html?tour=1"' in _bundle_ler(bundle, nome), nome
+
+    def test_a_porta_de_entrada_leva_ao_primeiro_passo(self, bundle):
+        """Quem abre a raiz do Pages tem que cair no comeco do passeio."""
+        assert "login.html?tour=1" in _bundle_ler(bundle, "index.html")
+
+    def test_gerador_estoura_se_a_ancora_sumir(self):
+        """Falhar no build e melhor que publicar tela que fala com API morta."""
+        with pytest.raises(SystemExit):
+            build_pages.preparar_pagina("<html><body>sem o script do tour</body></html>")
+
+
+class TestTelasServemOsDoisHosts:
+    """As telas nao podem assumir que estao na raiz do dominio.
+
+    O app Flask serve `/login` e `/demo`; o Pages serve
+    `/<repo>/login.html` e `/<repo>/demo.html`. Caminho relativo resolve
+    certo nos dois; caminho absoluto so no primeiro.
+    """
+
+    @pytest.mark.parametrize("arquivo", ["index.html", "login.html"])
+    def test_assets_locais_sao_relativos(self, arquivo):
+        html = _read_static(arquivo)
+        locais = [u for u in re.findall(r'(?:src|href)="(/[^"]*)"', html)
+                  if not u.startswith("//")]
+        # `/login?tour=1` e rota do app, e o gerador a troca pelo arquivo.
+        assert locais == ["/login?tour=1"], \
+            f"{arquivo}: asset preso na raiz: {locais}"
+
+    @pytest.mark.parametrize("arquivo", ["index.html", "login.html"])
+    def test_chamadas_de_api_sao_relativas(self, arquivo):
+        html = _read_static(arquivo)
+        assert "'/api/" not in html, \
+            f"{arquivo}: chamada de API presa na raiz do dominio"
+
+    @pytest.mark.parametrize("caminho", ["/demo", "/demo/", "/demo.html",
+                                         "/qbit-guardian/demo.html"])
+    def test_o_modo_demo_reconhece_as_formas_dos_dois_hosts(self, caminho):
+        """O regex do `tour.js`, aplicado aos caminhos que os hosts geram."""
+        src = _read_static("tour.js")
+        m = re.search(r"var MODO_DEMO = /(.+?)/\.test", src)
+        assert m, "o teste do MODO_DEMO mudou de forma"
+        padrao = m.group(1).replace("\\/", "/")
+        assert re.search(padrao, caminho), \
+            f"MODO_DEMO nao reconhece {caminho}"
+
+    @pytest.mark.parametrize("caminho", ["/login", "/login.html", "/", "/demos"])
+    def test_o_modo_demo_nao_pega_o_que_nao_e_demo(self, caminho):
+        src = _read_static("tour.js")
+        padrao = re.search(r"var MODO_DEMO = /(.+?)/\.test", src).group(1)
+        padrao = padrao.replace("\\/", "/")
+        assert not re.search(padrao, caminho), \
+            f"MODO_DEMO pegou {caminho}, que nao e a tela de demonstracao"
+
+
+# ── Link da demonstracao publicada ─────────────────────────────────────
+
+class TestLinkDaDemonstracao:
+    """O endereco da demonstracao aparece em quatro arquivos.
+
+    E o mesmo formato de erro que ja aconteceu com a contagem de testes:
+    atualizar uma mencao e esquecer as outras. Aqui o teste nao aceita
+    qualquer URL — ele DERIVA o endereco do Pages a partir do repositorio
+    que os proprios documentos citam, entao mudar de dono ou de nome de
+    repositorio quebra aqui antes de quebrar o link de quem leu.
+    """
+
+    ARQUIVOS = ["README.md", "README.pt-BR.md",
+                os.path.join("docs", "en-US", "getting-started.md"),
+                os.path.join("docs", "pt-BR", "primeiros-passos.md")]
+
+    @staticmethod
+    def _texto(arquivo):
+        with open(os.path.join(REPO_ROOT, arquivo), encoding="utf-8") as f:
+            return f.read()
+
+    def _esperada(self):
+        """`github.com/<dono>/<repo>` → `https://<dono>.github.io/<repo>/`."""
+        m = re.search(r"github\.com/([\w.-]+)/([\w.-]+)", self._texto("README.md"))
+        assert m, "README sem o repositorio do GitHub"
+        dono, repo = m.group(1), m.group(2)
+        return f"https://{dono.lower()}.github.io/{repo}/"
+
+    @pytest.mark.parametrize("arquivo", ARQUIVOS)
+    def test_o_arquivo_oferece_a_demonstracao(self, arquivo):
+        assert "github.io" in self._texto(arquivo), \
+            f"{arquivo} nao oferece a demonstracao publicada"
+
+    @pytest.mark.parametrize("arquivo", ARQUIVOS)
+    def test_o_endereco_bate_com_o_repositorio(self, arquivo):
+        esperada = self._esperada()
+        achadas = set(re.findall(r"https://[\w.-]+\.github\.io/[\w.-]*/?",
+                                 self._texto(arquivo)))
+        assert achadas, f"{arquivo}: nenhuma URL do Pages"
+        assert achadas == {esperada}, \
+            f"{arquivo}: esperava {esperada}, achei {sorted(achadas)}"
+
+    def test_a_demonstracao_e_a_que_o_workflow_publica(self):
+        """Sem o workflow, o link dos documentos aponta para o nada."""
+        assert os.path.isfile(os.path.join(WORKFLOWS_DIR, "pages.yml")), \
+            "os documentos linkam uma demonstracao que ninguem publica"
+
+
 # ── Modulo de credenciais (app/auth.py) ────────────────────────────────
 
 import app.auth as a
@@ -6090,7 +6285,7 @@ class TestWebUIConta:
     def test_envia_para_o_endpoint_proprio_em_json(self):
         """Nunca por /api/config: la o `webui` e descartado de proposito."""
         html = self.html
-        assert "const CRED_API = '/api/credentials';" in html
+        assert "const CRED_API = 'api/credentials';" in html
         envio = re.search(r"credForm\.addEventListener\('submit'.*?\n\}\);", html, re.S).group(0)
         assert "'Content-Type': 'application/json'" in envio
         assert "CRED_API" in envio
@@ -6354,7 +6549,7 @@ class TestWebUILogin:
 
     def test_envia_para_api_login_em_json(self):
         envio = re.search(r"form\.addEventListener\('submit'.*?\n\}\);", self.html, re.S).group(0)
-        assert "'/api/login'" in envio
+        assert "'api/login'" in envio
         assert "'Content-Type': 'application/json'" in envio
 
     def test_redireciona_para_o_painel_no_sucesso(self):
@@ -6391,7 +6586,7 @@ class TestWebUILogin:
     def test_tem_seletor_de_idioma(self):
         html = self.html
         assert 'id="lang-bar"' in html
-        assert '<script src="/i18n.js">' in html
+        assert '<script src="i18n.js">' in html
         assert "initI18N()" in html
 
     def test_nao_carrega_nada_de_fora(self):
@@ -6445,7 +6640,7 @@ class TestWebUISair:
     def test_chama_api_logout_e_vai_para_o_login(self):
         trecho = re.search(r"cred-logout'\)\.addEventListener.*?\n\}\);",
                            self.html, re.S).group(0)
-        assert "'/api/logout'" in trecho
+        assert "'api/logout'" in trecho
         assert "method: 'POST'" in trecho
         assert "location.href = '/login'" in trecho
 
@@ -6803,6 +6998,49 @@ WORKFLOWS_DIR = os.path.join(REPO_ROOT, ".github", "workflows")
 def _workflow(nome):
     with open(os.path.join(WORKFLOWS_DIR, nome), encoding="utf-8") as f:
         return f.read()
+
+
+class TestWorkflowPages:
+    """A demonstracao publicada nao pode ficar atras do codigo.
+
+    Aqui o risco e o inverso do docker-build: sub-disparar nao publica
+    imagem a toa, deixa a demonstracao velha — o mesmo defeito que o README
+    teve por quatro releases.
+    """
+
+    @staticmethod
+    def _paths_do_pages():
+        texto = _workflow("pages.yml")
+        bloco = re.search(r"(?m)^    paths:\n((?:      - .*\n)+)", texto)
+        assert bloco, "pages.yml sem filtro de paths"
+        return [l.strip().lstrip("- ").strip("'\"") for l in bloco.group(1).splitlines()]
+
+    @pytest.mark.parametrize("fonte", ["static/**", "app/**",
+                                       "scripts/build_pages.py",
+                                       ".github/workflows/pages.yml"])
+    def test_tudo_que_entra_no_bundle_dispara_publicacao(self, fonte):
+        """`build_pages.py` le `static/` e importa `app.guardian`/`app.version`."""
+        assert fonte in self._paths_do_pages()
+
+    def test_publicacao_passa_pela_suite(self):
+        """Entre os testes estao os que conferem o bundle contra a fonte."""
+        texto = _workflow("pages.yml")
+        assert "uses: ./.github/workflows/test.yml" in texto, \
+            "a demonstracao subiria com a suite vermelha"
+        assert re.search(r"(?m)^  build:\n    needs: test", texto), \
+            "o build do bundle nao espera a suite"
+
+    def test_tem_permissao_de_publicar_e_so(self):
+        texto = _workflow("pages.yml")
+        bloco = re.search(r"(?m)^permissions:\n((?:  .*\n)+)", texto).group(1)
+        assert "pages: write" in bloco and "id-token: write" in bloco
+        assert "contents: read" in bloco, \
+            "o workflow da demonstracao nao precisa escrever no repositorio"
+
+    def test_uma_publicacao_por_vez_sem_cancelar_pela_metade(self):
+        """Cancelar no meio deixa o site sem parte dos arquivos."""
+        texto = _workflow("pages.yml")
+        assert "cancel-in-progress: false" in texto
 
 
 class TestWorkflowBuild:

@@ -94,6 +94,8 @@ docker logs qbit-guardian
 
 ---
 
+> 🎬 **Want to see the panel before installing?** The guided tour is published at <https://ihumberto.github.io/qbit-guardian/> — the same screens, with nothing saved and no server behind them.
+
 ## Option 2 — Manual install (no Docker)
 
 Use this if you don't use Docker or prefer running directly on the system.

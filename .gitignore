@@ -12,3 +12,7 @@ config/
 # Cobertura de testes
 .coverage
 htmlcov/
+
+# Bundle da demonstracao publica — gerado por scripts/build_pages.py,
+# nunca commitado: o que vai para o Pages o CI monta a cada push.
+_site/

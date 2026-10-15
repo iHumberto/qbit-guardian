@@ -5,11 +5,18 @@ Todas as mudancas notaveis deste projeto serao documentadas neste arquivo.
 O formato e baseado no [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 e o projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Nao lancado]
+## [2.12.0] — 2026-10-15
 
-Mudancas que nao entram na imagem — ficam aqui ate a proxima release que mexer em codigo.
+A demonstracao do tour deixa de exigir instalacao: o passeio inteiro roda numa
+pagina publica, servida pelo GitHub Pages a partir deste repositorio.
+
+As correcoes de documentacao abaixo estavam em `[Nao lancado]` e entram nesta
+release, que e a proxima a mexer em codigo.
 
 ### Adicionado
+- **Demonstracao publica do tour** em <https://ihumberto.github.io/qbit-guardian/>, linkada dos dois READMEs e dos dois guias de primeiros passos. Sao os mesmos 24 passos, nas MESMAS telas: o bundle e gerado por `scripts/build_pages.py` a partir de `static/` e do modulo `app.guardian`, nunca escrito a mao. Uma copia estatica mantida a parte envelheceria a cada mudanca de layout — exatamente o que o tour existe para evitar.
+- **`scripts/build_pages.py`** monta o bundle: copia as telas, injeta a flag do modo estatico e pre-renderiza os dois unicos GETs que a demonstracao precisava do servidor — `api/demo-config` (o mesmo corpo da rota, importando `config_default()`) e `api/version` (lido de `app/version.py`). Estoura no build se a ancora do `<script>` do tour sumir de `static/`, em vez de publicar uma tela que falaria com uma API inexistente.
+- **`.github/workflows/pages.yml`** publica a cada push que toque `static/`, `app/` ou o gerador, com a suite como gate — e entre os testes estao os que conferem o bundle contra a fonte (`TestBundleDaDemonstracao`).
 - **Badges de release e de tag** no topo dos dois READMEs, apontando para a ultima release e para a lista de tags.
 - **Testes de paridade para os dois READMEs** (`TestReadmeNaoRepeteErroJaCorrigidoNosDocs`, `TestReadmeContagemDoTour`), que e o que impede a reincidencia: estendem aos arquivos da raiz as regras que ja valiam para `docs/` (`forgejo.home.arpa`, arquivo citado que nao existe, entrypoint `python -m app.main`) e amarram o numero de passos do texto a contagem real em `static/tour.js`. A varredura da escala de prioridade (`test_nenhum_texto_anuncia_escala_continua`) ganhou um irmao para os arquivos da raiz, pelo mesmo motivo. A lista `DOCS_DA_RAIZ` inclui o `CONTEXT.md`; o CHANGELOG fica fora de proposito, porque ele **cita** os erros corrigidos para registrar a correcao.
 
@@ -22,6 +29,10 @@ Mudancas que nao entram na imagem — ficam aqui ate a proxima release que mexer
 - **Contagem de testes dos READMEs** estava em 716 (598 + 118); a suite tem 982 (853 funcionais + 129 de seguranca).
 - **O `CONTEXT.md` anunciava a prioridade de arquivo como "valor de 0 a 7".** A escala do `filePrio` nao e continua — o qBittorrent aceita so `-1`, `0`, `1`, `6` e `7`, e qualquer outro valor devolve HTTP 400 deixando o arquivo sem priorizacao. Ha teste de regressao contra essa frase desde a v2.0.x (`test_nenhum_texto_anuncia_escala_continua`), mas parametrizado por `index.html` e `i18n.js`: o glossario da raiz nunca entrou na lista e carregava a string exata que o teste proibia.
 - **O `CONTEXT.md` descrevia o modo webhook com um gatilho so.** O verbete e o dialogo de exemplo afirmavam que, sem o hook configurado no qBittorrent, "nenhum torrent novo sera analisado" — falso desde a v2.7.1, quando o `_reevaluate_loop` passou a rodar em modo webhook a cada `reevaluate_interval_seconds`, drenando a fila de pendentes e reavaliando stalled. Sem o hook o torrent novo nao e analisado **na hora**; entra no proximo ciclo.
+- **O modo demonstracao parava de existir fora da raiz do dominio.** `MODO_DEMO` era `location.pathname === '/demo'` — igualdade exata. Sob subpath (`/<repo>/demo.html`, que e como o Pages serve) daria falso, o stub de rede nao instalaria e a tela publica tentaria falar com a API real, **falhando calada**. Agora casa por sufixo, e cobre as tres formas que os dois hosts geram.
+- **O stub de rede casava a rota com `indexOf(...) === 0`**, que so acerta URL absoluta da raiz: chamada relativa ou com prefixo de repositorio escapava para a rede. Passou a comparar o `pathname`.
+- **O comentario do `tour.js` dizia que `/api/version` e publica.** Nao e: a rota exige sessao de proposito, para nao anunciar a versao exata de uma instalacao a quem nao esta logado. Em `/demo` ela volta 401 e o rodape fica vazio — comportamento correto, descricao errada.
+- **As telas assumiam estar na raiz do dominio.** `/i18n.js`, `/tour.js`, `/favicon.svg` e as chamadas de API eram absolutas — 404 sob qualquer prefixo. Viraram relativas, o que resolve igual nos dois hosts e e mais correto mesmo no app servido pelo Flask.
 
 ## [2.11.0] — 2026-10-12
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>qbit-guardian</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <style>
   /* ── Tokens ──────────────────────────────────────────────────────────
      Valores medidos no prototipo Penpot. Referencia durável no vault:
@@ -707,15 +707,15 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="/i18n.js"></script>
+<script src="i18n.js"></script>
 <!-- Antes do script da pagina de proposito: em /demo o tour troca o
      `window.fetch` por um stub, e o painel chama /api/config logo abaixo. -->
-<script src="/tour.js"></script>
+<script src="tour.js"></script>
 <script>
-const API = '/api/config';
-const VERSION_API = '/api/version';
+const API = 'api/config';
+const VERSION_API = 'api/version';
 const RELEASES_URL = 'https://github.com/iHumberto/qbit-guardian/releases';
-const DEFAULTS_API = '/api/defaults';
+const DEFAULTS_API = 'api/defaults';
 
 // Titulos/templates padrao e variaveis por evento, servidos pelo backend.
 // Nao duplicamos as strings aqui: a tela tem que mostrar exatamente o texto
@@ -971,7 +971,7 @@ function toast(msg, type) {
 }
 
 // ── Modal de credenciais ──────────────────────────────────────────────
-const CRED_API = '/api/credentials';
+const CRED_API = 'api/credentials';
 const credModal = document.getElementById('cred-modal');
 const credForm = document.getElementById('cred-form');
 let focoAnterior = null;
@@ -999,7 +999,7 @@ document.addEventListener('keydown', e => {
 
 document.getElementById('cred-logout').addEventListener('click', async () => {
   try {
-    await fetch('/api/logout', { method: 'POST' });
+    await fetch('api/logout', { method: 'POST' });
   } catch (err) { /* sair local vale mesmo se a rede falhar */ }
   location.href = '/login';
 });
