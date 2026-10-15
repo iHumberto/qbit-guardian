@@ -27,7 +27,7 @@ Ele roda como um container Docker leve (ou como um processo Python) com uma inte
 | Interface Web | Flask 3.x                           |
 | Cliente HTTP  | requests 2.x                        |
 | Notificações  | Apprise (Telegram, Discord, Slack e mais de 100 serviços) |
-| Testes        | pytest 8.x (716 testes: 598 funcionais + 118 segurança) |
+| Testes        | pytest 8.x (982 testes: 853 funcionais + 129 segurança) |
 | Licença       | GNU GPL v3                          |
 
 ## Funcionalidades
@@ -104,25 +104,29 @@ No cabeçalho ficam o ícone **Tour** — abre o passeio guiado numa nova aba �
 
 ### Tour guiado
 
-O ícone **Tour** abre, em outra aba, um passeio de 14 passos que começa na tela de login e termina na configuração. Cada passo destaca um campo e explica o que vai nele; avançar preenche o campo com um exemplo e pula para o próximo.
+O ícone **Tour** abre, em outra aba, um passeio de 24 passos que começa na tela de login e termina na configuração. Cada passo destaca um campo e explica o que vai nele; avançar preenche o campo com um exemplo e pula para o próximo.
 
 Ele roda em cima das telas de verdade, e não num protótipo à parte — por isso acompanha a interface a cada versão. O idioma é o mesmo que estiver selecionado no painel: um link só, pt-BR ou en-US conforme o seletor.
 
-A segunda metade acontece em `/demo`, uma cópia pública e inerte da tela de configuração: ela mostra os valores de uma instalação nova, **nada do que se digita ali é salvo**, e nenhuma requisição de escrita chega ao servidor. Uma faixa no topo avisa disso o tempo todo. Quem fecha o tour continua na tela, livre para mexer nos campos e ver como ela se comporta.
+Do quarto passo em diante ele roda em `/demo`, uma cópia pública e inerte da tela de configuração: ela mostra os valores de uma instalação nova, **nada do que se digita ali é salvo**, e nenhuma requisição de escrita chega ao servidor. Uma faixa no topo avisa disso o tempo todo. Quem fecha o tour continua na tela, livre para mexer nos campos e ver como ela se comporta.
 
 Abaixo de 1200 px as três colunas se empilham na vertical, para a página continuar usável em tablets e celulares sem espremer os rótulos mais longos.
 
 ## Instalação Manual (sem Docker)
 
 ```bash
-git clone https://forgejo.home.arpa/Humberto/qbit-guardian.git
+git clone https://github.com/iHumberto/qbit-guardian.git
 cd qbit-guardian
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp config.json.example config.json   # edite com suas credenciais
-python app/app.py
+python -m app.main
 ```
+
+Use `python -m app.main`, com o `-m`: `python app/main.py` falha com
+`ModuleNotFoundError: No module named 'app'`. Não é preciso criar nenhum
+arquivo de configuração antes — o `config.json` é gerado na raiz do projeto na
+primeira execução.
 
 O processo roda em primeiro plano. Pressione `Ctrl+C` para parar.
 
@@ -427,7 +431,7 @@ docker compose up -d
 **Instalação manual:** Defina a variável antes de iniciar:
 
 ```bash
-LOG_LEVEL=DEBUG python app/app.py
+LOG_LEVEL=DEBUG python -m app.main
 ```
 
 > 💡 **O que é nível de log?** Pense como um controle de volume para os logs. No mínimo (`ERROR`) você só escuta quando algo dá errado. No máximo (`DEBUG`) você escuta cada detalhe — útil quando algo não está funcionando e você precisa investigar.
@@ -478,7 +482,7 @@ Deixe os campos `sonarr.url` e `radarr.url` em branco. O guardian funciona perfe
 # Instalar dependências (runtime + ferramentas de teste)
 pip install -r requirements-dev.txt
 
-# Rodar todos os testes (716: 598 funcionais + 118 de segurança)
+# Rodar todos os testes (982: 853 funcionais + 129 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais

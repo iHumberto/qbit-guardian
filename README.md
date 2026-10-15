@@ -27,7 +27,7 @@ It runs as a lightweight Docker container (or a Python process) with a built-in 
 | Web UI      | Flask 3.x                           |
 | HTTP client | requests 2.x                        |
 | Notifications | Apprise (Telegram, Discord, Slack, and 100+ services) |
-| Testing     | pytest 8.x (716 tests: 598 functional + 118 security) |
+| Testing     | pytest 8.x (982 tests: 853 functional + 129 security) |
 | License     | GNU GPL v3                          |
 
 ## Features
@@ -104,25 +104,29 @@ The header carries a **Tour** icon — opens the guided walkthrough in a new tab
 
 ### Guided tour
 
-The **Tour** icon opens, in another tab, a 14-step walkthrough that starts at the login screen and ends at the configuration. Each step highlights one field and explains what goes in it; moving on fills that field with an example and jumps to the next one.
+The **Tour** icon opens, in another tab, a 24-step walkthrough that starts at the login screen and ends at the configuration. Each step highlights one field and explains what goes in it; moving on fills that field with an example and jumps to the next one.
 
 It runs on top of the real screens rather than on a separate prototype, so it follows the interface from release to release. The language is whichever one the panel is set to: a single link, pt-BR or en-US according to the selector.
 
-The second half happens at `/demo`, a public and inert copy of the configuration screen: it shows the values of a fresh install, **nothing typed there is saved**, and no write request reaches the server. A banner at the top says so the whole time. Closing the tour leaves you on that screen, free to play with the fields and see how it behaves.
+From the fourth step on it runs at `/demo`, a public and inert copy of the configuration screen: it shows the values of a fresh install, **nothing typed there is saved**, and no write request reaches the server. A banner at the top says so the whole time. Closing the tour leaves you on that screen, free to play with the fields and see how it behaves.
 
 Below 1200 px the three columns stack vertically, so the page stays usable on tablets and phones without squeezing the longer labels.
 
 ## Manual Installation (without Docker)
 
 ```bash
-git clone https://forgejo.home.arpa/Humberto/qbit-guardian.git
+git clone https://github.com/iHumberto/qbit-guardian.git
 cd qbit-guardian
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp config.json.example config.json   # edit with your credentials
-python app/app.py
+python -m app.main
 ```
+
+Use `python -m app.main`, with the `-m`: `python app/main.py` fails with
+`ModuleNotFoundError: No module named 'app'`. No configuration file has to be
+created beforehand — `config.json` is generated at the project root on the
+first run.
 
 The process runs in the foreground. Press `Ctrl+C` to stop.
 
@@ -427,7 +431,7 @@ docker compose up -d
 **Manual install:** Set the variable before starting:
 
 ```bash
-LOG_LEVEL=DEBUG python app/app.py
+LOG_LEVEL=DEBUG python -m app.main
 ```
 
 > 💡 **What is a log level?** Think of it as a volume knob for your logs. Turn it down (`ERROR`) and you only hear about problems. Turn it up (`DEBUG`) and you hear every detail — useful when something isn't working and you need to investigate.
@@ -478,7 +482,7 @@ Leave the `sonarr.url` and `radarr.url` fields empty. The guardian works fine wi
 # Install dependencies (runtime + test tooling)
 pip install -r requirements-dev.txt
 
-# Run all tests (716: 598 functional + 118 security)
+# Run all tests (982: 853 functional + 129 security)
 python -m pytest test/ -v
 
 # Functional tests only

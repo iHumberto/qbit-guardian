@@ -2143,12 +2143,25 @@ class TestWebUIPriorityScale:
             assert int(selected.group(1)) == guardian_cfg[field_id], \
                 f"{field_id}: UI default {selected.group(1)} != config"
 
+    # A escala errada chegou ao `CONTEXT.md` justamente porque esta varredura
+    # nasceu olhando so para `static/`: o glossario dizia "Valor de 0 a 7",
+    # a string que o teste ja proibia, num arquivo fora da lista.
+    PROIBIDOS = ("(0\u20137)", "(0-7)", "0 a 7",
+                 "7 = m\u00e1xima, 0", "7 = maximum, 0")
+
     @pytest.mark.parametrize("fonte", ["index.html", "i18n.js"])
     def test_nenhum_texto_anuncia_escala_continua(self, fonte):
         """REGRESSAO: o rotulo dizia "(0–7)", sugerindo que 2-5 valem."""
         texto = _read_static(fonte)
-        for proibido in ("(0\u20137)", "(0-7)", "0 a 7",
-                         "7 = m\u00e1xima, 0", "7 = maximum, 0"):
+        for proibido in self.PROIBIDOS:
+            assert proibido not in texto, \
+                f"{fonte} ainda anuncia a escala antiga: {proibido!r}"
+
+    @pytest.mark.parametrize("fonte", ["CONTEXT.md", "README.md", "README.pt-BR.md"])
+    def test_nenhum_arquivo_da_raiz_anuncia_escala_continua(self, fonte):
+        with open(os.path.join(REPO_ROOT, fonte), encoding="utf-8") as f:
+            texto = f.read()
+        for proibido in self.PROIBIDOS:
             assert proibido not in texto, \
                 f"{fonte} ainda anuncia a escala antiga: {proibido!r}"
 
@@ -5653,6 +5666,87 @@ class TestReadmeContagemDeTestes:
 
     def test_os_dois_idiomas_concordam(self):
         assert self._mencoes("README.md")[0] == self._mencoes("README.pt-BR.md")[0]
+
+
+# ── Afirmacoes dos READMEs sobre a instalacao e o tour ─────────────────
+
+# Todo arquivo markdown da raiz afirma coisas sobre o projeto, e nenhum deles
+# estava em `TODOS_OS_DOCS`. O CHANGELOG fica de fora de proposito: ele e
+# historico, e CITA os erros corrigidos para registrar que foram corrigidos.
+DOCS_DA_RAIZ = ["README.md", "README.pt-BR.md", "CONTEXT.md"]
+
+
+class TestReadmeNaoRepeteErroJaCorrigidoNosDocs:
+    """Os arquivos da raiz ficaram fora de `TODOS_OS_DOCS` e por isso nao
+    foram varridos quando `docs/` perdeu o `forgejo.home.arpa`, o
+    `config.json.example` e o `python app/app.py` (v2.3.1). O bloco de
+    instalacao manual dos dois READMEs seguiu com as tres coisas por quatro
+    releases. Estes testes estendem as mesmas regras aos arquivos da raiz.
+    """
+
+    @pytest.mark.parametrize("arquivo", DOCS_DA_RAIZ)
+    def test_repositorio_citado_e_alcancavel_de_fora(self, arquivo):
+        """`forgejo.home.arpa` so existe na rede do mantenedor."""
+        with open(os.path.join(REPO_ROOT, arquivo), encoding="utf-8") as f:
+            assert "forgejo.home.arpa" not in f.read()
+
+    @pytest.mark.parametrize("arquivo", DOCS_DA_RAIZ)
+    @pytest.mark.parametrize("inexistente", ["app/app.py", "config.json.example"])
+    def test_nao_cita_arquivo_inexistente(self, arquivo, inexistente):
+        with open(os.path.join(REPO_ROOT, arquivo), encoding="utf-8") as f:
+            texto = f.read()
+        if inexistente not in texto:
+            return
+        assert os.path.exists(os.path.join(REPO_ROOT, inexistente)), \
+            f"{arquivo} cita {inexistente}, que nao existe"
+
+    @pytest.mark.parametrize("arquivo", ["README.md", "README.pt-BR.md"])
+    def test_entrypoint_manual_e_o_que_funciona(self, arquivo):
+        """`python app/main.py` levanta ModuleNotFoundError.
+
+        So os READMEs: o `CONTEXT.md` e glossario de dominio, nao ensina a
+        instalar — exigir o comando dele seria exigir conteudo que nao e dele.
+        """
+        with open(os.path.join(REPO_ROOT, arquivo), encoding="utf-8") as f:
+            assert "python -m app.main" in f.read(), arquivo
+
+
+class TestReadmeContagemDoTour:
+    """O numero de passos no texto tem que bater com `static/tour.js`.
+
+    Os READMEs nasceram afirmando 14 passos quando o tour sempre teve 24 — o
+    contador da propria tela soma `PASSOS_LOGIN + PASSOS_CONFIG`, e nada
+    ligava a prosa ao codigo.
+    """
+
+    # Cada passo e um objeto com uma `chave` de traducao; contar as chaves
+    # dentro de cada array nao depende de o objeto caber em uma linha.
+    @staticmethod
+    def _passos_do_codigo():
+        with open(os.path.join(STATIC_DIR, "tour.js"), encoding="utf-8") as f:
+            codigo = f.read()
+        total = 0
+        for nome in ("PASSOS_LOGIN", "PASSOS_CONFIG"):
+            inicio = codigo.index("var %s = [" % nome)
+            fim = codigo.index("];", inicio)
+            trecho = codigo[inicio:fim]
+            assert "chave:" in trecho, nome
+            total += trecho.count("chave:")
+        return total
+
+    PADROES = {"README.md": r"(\d+)-step walkthrough",
+               "README.pt-BR.md": r"passeio de (\d+) passos"}
+
+    @pytest.mark.parametrize("arquivo", ["README.md", "README.pt-BR.md"])
+    def test_contagem_bate_com_o_tour(self, arquivo):
+        with open(os.path.join(REPO_ROOT, arquivo), encoding="utf-8") as f:
+            texto = f.read()
+        achados = re.findall(self.PADROES[arquivo], texto)
+        assert achados, f"{arquivo}: nenhuma mencao a contagem de passos"
+        esperado = self._passos_do_codigo()
+        for n in achados:
+            assert int(n) == esperado, \
+                f"{arquivo}: diz {n} passos, tour.js tem {esperado}"
 
 
 # ── Modulo de credenciais (app/auth.py) ────────────────────────────────

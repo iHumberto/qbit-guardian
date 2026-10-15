@@ -33,15 +33,15 @@ Arquivo com extensão associada a malware ou execução de código (`.exe`, `.sc
 _Evitar_: malware, vírus, executável
 
 **Prioridade (priority)**:
-Valor de 0 a 7 no qBittorrent que controla a ordem e urgência de download dos arquivos de um torrent. 7 = máxima prioridade, 0 = não baixar.
-_Evitar_: peso, ranking
+Valor que o guardian envia no `filePrio` para controlar a ordem e urgência de download dos arquivos de um torrent. A escala **não é contínua**: o qBittorrent aceita apenas `-1` (sem prioridade), `0` (não baixar), `1` (normal), `6` (alta) e `7` (máxima) — `VALID_FILE_PRIORITIES` em `guardian.py`. Qualquer outro valor devolve HTTP 400 e o arquivo fica sem priorização nenhuma.
+_Evitar_: peso, ranking, e qualquer forma de anunciar a escala como faixa contínua (sugere que 2–5 valem)
 
 **Polling**:
 Modo de operação onde o guardian consulta a API do qBittorrent a cada N segundos (`check_interval_seconds > 0`).
 _Evitar_: loop, verificação periódica
 
 **Webhook**:
-Modo de operação onde o qBittorrent notifica o guardian via HTTP POST (`/api/trigger`) quando um torrent é adicionado. Configurado com `check_interval_seconds = 0`.
+Modo de operação onde o qBittorrent notifica o guardian via HTTP POST (`/api/trigger`) quando um torrent é adicionado. Configurado com `check_interval_seconds = 0`. O `/api/trigger` **não é o único gatilho do modo**: desde a v2.7.1 um laço de reavaliação roda a cada `reevaluate_interval_seconds` (`0` desliga), drenando a fila de pendentes e reavaliando stalled.
 _Evitar_: callback, notificação, hook
 
 **Sonarr**:
@@ -84,7 +84,7 @@ _Evitar_: senha, token, chave, secret
 > **Domain expert:** "O guardian tenta blocklist em AMBOS. Se o torrent está na queue do Radarr, bloqueia lá. Se está na queue do Sonarr, bloqueia lá. Se não está em nenhum, tenta match por nome. A única diferença é que no Sonarr ele valida data de lançamento do episódio antes de disparar re-search."
 
 > **Dev:** "O que acontece se `check_interval_seconds = 0` mas eu não configurar o webhook no qBit?"
-> **Domain expert:** "O guardian fica em modo **Webhook** — ele NÃO faz polling. Só processa torrents quando recebe um POST no `/api/trigger`. Se o webhook não estiver configurado no qBit, nenhum torrent novo será analisado."
+> **Domain expert:** "O guardian fica em modo **Webhook** — ele NÃO faz o ciclo de polling. Mas não fica inerte: o laço de reavaliação roda a cada `reevaluate_interval_seconds` e drena a fila de pendentes junto com a reavaliação de stalled. Sem o hook configurado, torrent novo não é analisado **na hora** — entra no próximo ciclo de reavaliação. Quem zera `reevaluate_interval_seconds` desliga esse laço, e aí sim o `/api/trigger` é o único gatilho."
 
 ## Ambiguidades sinalizadas
 
