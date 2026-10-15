@@ -7042,6 +7042,16 @@ class TestWorkflowPages:
         texto = _workflow("pages.yml")
         assert "cancel-in-progress: false" in texto
 
+    def test_o_workflow_liga_o_pages_sozinho(self):
+        """REGRESSAO: a primeira execucao falhou em `Configure Pages`.
+
+        Sem `enablement`, a acao exige que alguem tenha ligado o Pages a mao
+        em Settings — e ate la o link publicado nos READMEs e 404.
+        """
+        texto = _workflow("pages.yml")
+        assert "enablement: true" in texto, \
+            "a publicacao volta a depender de um passo manual"
+
 
 class TestWorkflowBuild:
     """O build so roda quando o conteudo da imagem muda.

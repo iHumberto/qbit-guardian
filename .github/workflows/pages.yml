@@ -53,8 +53,15 @@ jobs:
         with:
           python-version: '3.12'
 
+      # `enablement: true` liga o Pages na primeira execucao, em vez de
+      # exigir um passo manual em Settings > Pages. Sem isto a acao falha com
+      # "Get Pages site failed ... verify that the repository has Pages
+      # enabled", que foi exatamente o que aconteceu no primeiro push. O
+      # token do workflow ja tem `pages: write`, declarado acima.
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Build bundle
         run: python scripts/build_pages.py _site
