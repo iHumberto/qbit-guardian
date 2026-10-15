@@ -27,7 +27,7 @@ Ele roda como um container Docker leve (ou como um processo Python) com uma inte
 | Interface Web | Flask 3.x                           |
 | Cliente HTTP  | requests 2.x                        |
 | Notificações  | Apprise (Telegram, Discord, Slack e mais de 100 serviços) |
-| Testes        | pytest 8.x (1032 testes: 903 funcionais + 129 segurança) |
+| Testes        | pytest 8.x (1033 testes: 904 funcionais + 129 segurança) |
 | Licença       | GNU GPL v3                          |
 
 ## Funcionalidades
@@ -484,7 +484,7 @@ Deixe os campos `sonarr.url` e `radarr.url` em branco. O guardian funciona perfe
 # Instalar dependências (runtime + ferramentas de teste)
 pip install -r requirements-dev.txt
 
-# Rodar todos os testes (1032: 903 funcionais + 129 de segurança)
+# Rodar todos os testes (1033: 904 funcionais + 129 de segurança)
 python -m pytest test/ -v
 
 # Apenas testes funcionais

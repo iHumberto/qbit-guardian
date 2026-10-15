@@ -62,6 +62,13 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      # O gerador importa `app.guardian` para montar o `api/demo-config` a
+      # partir da fonte de verdade — e o `guardian.py` importa `requests`.
+      # Sem este passo o build morre com ModuleNotFoundError. So as
+      # dependencias de runtime: o bundle nao roda teste.
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
       - name: Build bundle
         run: python scripts/build_pages.py _site
 

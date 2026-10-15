@@ -7042,6 +7042,21 @@ class TestWorkflowPages:
         texto = _workflow("pages.yml")
         assert "cancel-in-progress: false" in texto
 
+    def test_o_build_instala_o_que_o_gerador_importa(self):
+        """REGRESSAO: `ModuleNotFoundError: No module named 'requests'`.
+
+        O job tinha `setup-python` e ia direto para o gerador — que importa
+        `app.guardian` justamente para nao duplicar o `config_default()`, e
+        o `guardian.py` importa `requests`. Passou no meu venv e morreu no
+        runner limpo.
+        """
+        texto = _workflow("pages.yml")
+        assert "pip install -r requirements.txt" in texto, \
+            "o gerador importa app.guardian e precisa das dependencias"
+        assert texto.index("pip install -r requirements.txt") \
+            < texto.index("build_pages.py _site"), \
+            "a instalacao tem que vir antes do gerador"
+
     def test_o_passo_manual_esta_registrado_no_workflow(self):
         """`enablement: true` foi tentado e nao funciona com o GITHUB_TOKEN.
 
